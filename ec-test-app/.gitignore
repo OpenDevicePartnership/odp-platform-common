@@ -1,0 +1,12 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/.vs
+/exe/.vs/ectest_app
+/kmdf/.vs/ectest_kmdf
+/exe/ARM64
+/lib/ARM64
+/lib/eclib/ARM64
+/kmdf/ARM64
+/rust/target
