@@ -1,3 +1,0 @@
-[submodule "dep/wil"]
-	path = dep/wil
-	url = https://github.com/microsoft/wil

@@ -1,0 +1,3 @@
+[submodule "ec-test-app/dep/wil"]
+	path = ec-test-app/dep/wil
+	url = https://github.com/microsoft/wil
