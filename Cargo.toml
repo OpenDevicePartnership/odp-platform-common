@@ -1,19 +1,20 @@
-[package]
-name = "embedded-rust-template"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = ["ec-test-lib", "ec-test-tui"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
 license = "MIT"
-repository = "https://github.com/OpenDevicePartnership/embedded-rust-template"
-rust-version = "1.85"
+repository = "https://github.com/OpenDevicePartnership/odp-platform-common"
+rust-version = "1.88"
 
-[dependencies]
-# dependencies for all targets
-
-[target.'cfg(target_os = "none")'.dependencies]
-# dependencies for no-std targets
-
-[lints.clippy]
+[workspace.lints.clippy]
 suspicious = "forbid"
 correctness = "forbid"
 perf = "forbid"
 style = "forbid"
+
+[workspace.dependencies]
+time-alarm-service-messages = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0" }
+battery-service-messages = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0" }
+embedded-mcu-hal = { git = "https://github.com/OpenDevicePartnership/embedded-mcu" }

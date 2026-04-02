@@ -13,7 +13,7 @@ use time_alarm_service_messages::{
 };
 
 use crate::app::Module;
-use crate::{RtcSource, Source};
+use ec_test_lib::RtcSource;
 
 const LABEL_COLOR: Color = tailwind::SLATE.c200;
 const DATA_NOT_YET_RETRIEVED_MSG: &str = "Data not yet retrieved";
@@ -30,9 +30,9 @@ mod rtc_timer {
 
     impl RtcTimer {
         pub fn update(&mut self, source: &impl RtcSource) {
-            self.value = source.get_timer_value(self.timer_id);
-            self.wake_policy = source.get_expired_timer_wake_policy(self.timer_id);
-            self.timer_status = source.get_wake_status(self.timer_id);
+            self.value = source.get_timer_value(self.timer_id).map_err(Into::into);
+            self.wake_policy = source.get_expired_timer_wake_policy(self.timer_id).map_err(Into::into);
+            self.timer_status = source.get_wake_status(self.timer_id).map_err(Into::into);
         }
 
         pub fn new(timer_id: AcpiTimerId) -> Self {
@@ -93,7 +93,7 @@ mod rtc_timer {
 
 use rtc_timer::RtcTimer;
 
-pub struct Rtc<S: Source> {
+pub struct Rtc<S: RtcSource> {
     source: S,
     timers: [RtcTimer; 2],
 
@@ -101,7 +101,7 @@ pub struct Rtc<S: Source> {
     timestamp: Result<AcpiTimestamp>,
 }
 
-impl<S: Source> Module for Rtc<S> {
+impl<S: RtcSource> Module for Rtc<S> {
     fn title(&self) -> &'static str {
         "RTC Information"
     }
@@ -109,9 +109,9 @@ impl<S: Source> Module for Rtc<S> {
     fn update(&mut self) {
         // Capabilities should be static, so don't try to update after a successful fetch
         if self.capabilities.is_err() {
-            self.capabilities = self.source.get_capabilities();
+            self.capabilities = self.source.get_capabilities().map_err(Into::into);
         }
-        self.timestamp = self.source.get_real_time();
+        self.timestamp = self.source.get_real_time().map_err(Into::into);
         for timer in &mut self.timers {
             timer.update(&self.source);
         }
@@ -237,7 +237,7 @@ fn format_time_zone(tz: AcpiTimeZone) -> String {
     }
 }
 
-impl<S: Source> Rtc<S> {
+impl<S: RtcSource> Rtc<S> {
     pub fn new(source: S) -> Self {
         let mut result = Self {
             source,

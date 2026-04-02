@@ -1,6 +1,5 @@
-use crate::{RtcSource, Source, Threshold, common};
+use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, common};
 use battery_service_messages::{AcpiBatteryRequest, AcpiBatteryResponse, BixFixedStrings, BstReturn, Btp};
-use color_eyre::{Result, eyre::eyre};
 use embedded_services::relay::{MessageSerializationError, SerializableMessage};
 use serialport::SerialPort;
 use std::{
@@ -12,6 +11,43 @@ use time_alarm_service_messages::{
     AcpiTimeAlarmRequest, AcpiTimeAlarmResponse, AcpiTimerId, AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds,
     TimeAlarmDeviceCapabilities, TimerStatus,
 };
+
+/// Errors produced by serial data source operations.
+#[derive(Debug)]
+pub enum Error {
+    /// Serial port I/O error (read, write, flush, clear)
+    Io(String),
+    /// Serial protocol framing error (invalid MCTP packet length, buffer overflow, etc.)
+    Protocol(String),
+    /// Message serialization or deserialization error
+    Serialization(String),
+    /// Response had an unexpected format
+    UnexpectedResponse,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(msg) => write!(f, "serial I/O error: {msg}"),
+            Self::Protocol(msg) => write!(f, "serial protocol error: {msg}"),
+            Self::Serialization(msg) => write!(f, "serialization error: {msg}"),
+            Self::UnexpectedResponse => write!(f, "unexpected response"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl crate::Error for Error {
+    fn kind(&self) -> crate::ErrorKind {
+        match self {
+            Self::Io(_) => crate::ErrorKind::Io,
+            Self::Protocol(_) => crate::ErrorKind::Protocol,
+            Self::Serialization(_) => crate::ErrorKind::Serialization,
+            Self::UnexpectedResponse => crate::ErrorKind::UnexpectedResponse,
+        }
+    }
+}
 
 // If it took longer than a second to receive a response, something is definitely wrong
 const READ_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -108,12 +144,12 @@ impl Serial {
         &self,
         dst: Destination,
         request: REQ,
-    ) -> Result<RESP> {
+    ) -> Result<RESP, Error> {
         let mut buffer = [0u8; BUFFER_SZ];
 
         // Serialize command into buffer
         let request_sz = append_cmd(&mut buffer, request, request.discriminant())
-            .map_err(|e| eyre!("Serialization error: {e:?}"))?;
+            .map_err(|e| Error::Serialization(format!("{e:?}")))?;
 
         // NOTE: The `mctp-rs` crate does not appear to support serializing requests and deserializing
         // responses (only the opposite), so we have to do manual serialization until that is changed.
@@ -127,10 +163,10 @@ impl Serial {
         // We first clear the input buffer in case there's anything left over if we had to bail out
         // early on previous call due to error
         port.clear(serialport::ClearBuffer::Input)
-            .map_err(|e| eyre!("Serial error: {e:?}"))?;
+            .map_err(|e| Error::Io(format!("{e:?}")))?;
         port.write_all(&buffer[..HEADER_SZ + request_sz])
-            .map_err(|e| eyre!("Serial error: {e:?}"))?;
-        port.flush().map_err(|e| eyre!("Serial error: {e:?}"))?;
+            .map_err(|e| Error::Io(format!("{e:?}")))?;
+        port.flush().map_err(|e| Error::Io(format!("{e:?}")))?;
 
         // Read response packets
         let mut response_buf = [0u8; BUFFER_SZ];
@@ -140,20 +176,19 @@ impl Serial {
             // Wait for SMBUS header from response packet
             let mut buffer = [0u8; BUFFER_SZ];
             port.read_exact(&mut buffer[..SMBUS_HEADER_SZ])
-                .map_err(|e| eyre!("Serial error: {e:?}"))?;
+                .map_err(|e| Error::Io(format!("{e:?}")))?;
 
             // Get the length of the response and do a sanity check on it
             let len = buffer[SMBUS_LEN_IDX] as usize;
             if !(MCTP_HEADER_SZ..=MCTP_MAX_PACKET_LEN).contains(&len) {
-                return Err(eyre!("Serial error: Invalid MCTP packet length {len}"));
+                return Err(Error::Protocol(format!("Invalid MCTP packet length {len}")));
             }
 
             // Then read rest of packet
             let packet_slice = buffer
                 .get_mut(SMBUS_HEADER_SZ..SMBUS_HEADER_SZ + len)
-                .ok_or_else(|| eyre!("Serial error: Response does not fit in buffer"))?;
-            port.read_exact(packet_slice)
-                .map_err(|e| eyre!("Serial error: {e:?}"))?;
+                .ok_or_else(|| Error::Protocol("Response does not fit in buffer".into()))?;
+            port.read_exact(packet_slice).map_err(|e| Error::Io(format!("{e:?}")))?;
 
             let flags = buffer[MCTP_FLAGS_IDX];
 
@@ -181,10 +216,10 @@ impl Serial {
             }
         }
 
-        RESP::deserialize(cmd_code, &response_buf).map_err(|e| eyre!("Deserialization error: {e:?}"))
+        RESP::deserialize(cmd_code, &response_buf).map_err(|e| Error::Serialization(format!("deserialization: {e:?}")))
     }
 
-    fn thermal_get_var(&self, guid: uuid::Uuid) -> Result<f64> {
+    fn thermal_get_var(&self, guid: uuid::Uuid) -> Result<f64, Error> {
         let request = ThermalRequest::ThermalGetVarRequest {
             instance_id: SENSOR_INSTANCE,
             len: THERMAL_VAR_LEN,
@@ -195,11 +230,11 @@ impl Serial {
         if let ThermalResponse::ThermalGetVarResponse { val } = response {
             Ok(val as f64)
         } else {
-            Err(eyre!("GET_VAR received wrong response"))
+            Err(Error::UnexpectedResponse)
         }
     }
 
-    fn thermal_set_var(&self, guid: uuid::Uuid, raw: u32) -> Result<()> {
+    fn thermal_set_var(&self, guid: uuid::Uuid, raw: u32) -> Result<(), Error> {
         let request = ThermalRequest::ThermalSetVarRequest {
             instance_id: SENSOR_INSTANCE,
             len: THERMAL_VAR_LEN,
@@ -211,13 +246,17 @@ impl Serial {
         if let ThermalResponse::ThermalSetVarResponse = response {
             Ok(())
         } else {
-            Err(eyre!("SET_VAR received wrong response"))
+            Err(Error::UnexpectedResponse)
         }
     }
 }
 
-impl Source for Serial {
-    fn get_temperature(&self) -> Result<f64> {
+impl ErrorType for Serial {
+    type Error = Error;
+}
+
+impl ThermalSource for Serial {
+    fn get_temperature(&self) -> Result<f64, Self::Error> {
         let request = ThermalRequest::ThermalGetTmpRequest {
             instance_id: SENSOR_INSTANCE,
         };
@@ -226,23 +265,23 @@ impl Source for Serial {
         if let ThermalResponse::ThermalGetTmpResponse { temperature } = response {
             Ok(common::dk_to_c(temperature))
         } else {
-            Err(eyre!("GET_TMP received wrong response"))
+            Err(Error::UnexpectedResponse)
         }
     }
 
-    fn get_rpm(&self) -> Result<f64> {
+    fn get_rpm(&self) -> Result<f64, Self::Error> {
         self.thermal_get_var(common::guid::FAN_CURRENT_RPM)
     }
 
-    fn get_min_rpm(&self) -> Result<f64> {
+    fn get_min_rpm(&self) -> Result<f64, Self::Error> {
         self.thermal_get_var(common::guid::FAN_MIN_RPM)
     }
 
-    fn get_max_rpm(&self) -> Result<f64> {
+    fn get_max_rpm(&self) -> Result<f64, Self::Error> {
         self.thermal_get_var(common::guid::FAN_MAX_RPM)
     }
 
-    fn get_threshold(&self, threshold: Threshold) -> Result<f64> {
+    fn get_threshold(&self, threshold: Threshold) -> Result<f64, Self::Error> {
         let raw = match threshold {
             Threshold::On => self.thermal_get_var(common::guid::FAN_ON_TEMP),
             Threshold::Ramping => self.thermal_get_var(common::guid::FAN_RAMP_TEMP),
@@ -251,11 +290,13 @@ impl Source for Serial {
         Ok(common::dk_to_c(raw as u32))
     }
 
-    fn set_rpm(&self, rpm: f64) -> Result<()> {
+    fn set_rpm(&self, rpm: f64) -> Result<(), Self::Error> {
         self.thermal_set_var(common::guid::FAN_CURRENT_RPM, rpm as u32)
     }
+}
 
-    fn get_bst(&self) -> Result<BstReturn> {
+impl BatterySource for Serial {
+    fn get_bst(&self) -> Result<BstReturn, Self::Error> {
         let request = AcpiBatteryRequest::BatteryGetBstRequest {
             battery_id: BATTERY_INSTANCE,
         };
@@ -264,11 +305,11 @@ impl Source for Serial {
         if let AcpiBatteryResponse::BatteryGetBstResponse { bst } = response {
             Ok(bst)
         } else {
-            Err(eyre!("GET_BST received wrong response"))
+            Err(Error::UnexpectedResponse)
         }
     }
 
-    fn get_bix(&self) -> Result<BixFixedStrings> {
+    fn get_bix(&self) -> Result<BixFixedStrings, Self::Error> {
         let request = AcpiBatteryRequest::BatteryGetBixRequest {
             battery_id: BATTERY_INSTANCE,
         };
@@ -277,11 +318,11 @@ impl Source for Serial {
         if let AcpiBatteryResponse::BatteryGetBixResponse { bix } = response {
             Ok(bix)
         } else {
-            Err(eyre!("GET_BIX received wrong response"))
+            Err(Error::UnexpectedResponse)
         }
     }
 
-    fn set_btp(&self, trip_point: u32) -> Result<()> {
+    fn set_btp(&self, trip_point: u32) -> Result<(), Self::Error> {
         let request = AcpiBatteryRequest::BatterySetBtpRequest {
             battery_id: BATTERY_INSTANCE,
             btp: Btp { trip_point },
@@ -291,64 +332,64 @@ impl Source for Serial {
         if matches!(response, AcpiBatteryResponse::BatterySetBtpResponse {}) {
             Ok(())
         } else {
-            Err(eyre!("SET_BTP received wrong response"))
+            Err(Error::UnexpectedResponse)
         }
     }
 }
 
 impl RtcSource for Serial {
-    fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities> {
+    fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities, Self::Error> {
         let request = AcpiTimeAlarmRequest::GetCapabilities;
         let response = self.send(Destination::TimeAlarm, request)?;
 
         if let AcpiTimeAlarmResponse::Capabilities(capabilities) = response {
             Ok(capabilities)
         } else {
-            Err(eyre!("GET_CAPABILITIES received wrong response"))
+            Err(Error::UnexpectedResponse)
         }
     }
 
-    fn get_real_time(&self) -> Result<AcpiTimestamp> {
+    fn get_real_time(&self) -> Result<AcpiTimestamp, Self::Error> {
         let request = AcpiTimeAlarmRequest::GetRealTime;
         let response = self.send(Destination::TimeAlarm, request)?;
 
         if let AcpiTimeAlarmResponse::RealTime(timestamp) = response {
             Ok(timestamp)
         } else {
-            Err(eyre!("GET_REAL_TIME received wrong response"))
+            Err(Error::UnexpectedResponse)
         }
     }
 
-    fn get_wake_status(&self, timer_id: AcpiTimerId) -> Result<TimerStatus> {
+    fn get_wake_status(&self, timer_id: AcpiTimerId) -> Result<TimerStatus, Self::Error> {
         let request = AcpiTimeAlarmRequest::GetWakeStatus(timer_id);
         let response = self.send(Destination::TimeAlarm, request)?;
 
         if let AcpiTimeAlarmResponse::TimerStatus(status) = response {
             Ok(status)
         } else {
-            Err(eyre!("GET_WAKE_STATUS received wrong response"))
+            Err(Error::UnexpectedResponse)
         }
     }
 
-    fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy> {
+    fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy, Self::Error> {
         let request = AcpiTimeAlarmRequest::GetExpiredTimerPolicy(timer_id);
         let response = self.send(Destination::TimeAlarm, request)?;
 
         if let AcpiTimeAlarmResponse::WakePolicy(policy) = response {
             Ok(policy)
         } else {
-            Err(eyre!("GET_TIP received wrong response"))
+            Err(Error::UnexpectedResponse)
         }
     }
 
-    fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds> {
+    fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds, Self::Error> {
         let request = AcpiTimeAlarmRequest::GetTimerValue(timer_id);
         let response = self.send(Destination::TimeAlarm, request)?;
 
         if let AcpiTimeAlarmResponse::TimerSeconds(seconds) = response {
             Ok(seconds)
         } else {
-            Err(eyre!("GET_TIV received wrong response"))
+            Err(Error::UnexpectedResponse)
         }
     }
 }

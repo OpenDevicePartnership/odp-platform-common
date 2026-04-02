@@ -1,16 +1,29 @@
-use color_eyre::Result;
-use ec_demo::app::App;
+const _: () = {
+    let count = cfg!(feature = "mock") as u8 + cfg!(feature = "acpi") as u8 + cfg!(feature = "serial") as u8;
+    assert!(
+        count == 1,
+        "Exactly one of the following features must be enabled: `mock`, `acpi`, or `serial`."
+    );
+};
 
-fn main() -> Result<()> {
+mod app;
+mod battery;
+mod common;
+mod rtc;
+mod thermal;
+mod ucsi;
+mod widgets;
+
+fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
     let terminal = ratatui::init();
 
     #[cfg(feature = "mock")]
-    let source = ec_demo::mock::Mock::default();
+    let source = ec_test_lib::mock::Mock::default();
 
     #[cfg(feature = "acpi")]
-    let source = ec_demo::acpi::Acpi::default();
+    let source = ec_test_lib::acpi::Acpi::default();
 
     #[cfg(feature = "serial")]
     let source = {
@@ -31,8 +44,8 @@ fn main() -> Result<()> {
             .parse::<u32>()
             .expect("Serial baud rate must be a u32");
 
-        ec_demo::serial::Serial::new(path.as_str(), baud, flow_control)
+        ec_test_lib::serial::Serial::new(path.as_str(), baud, flow_control)
     };
 
-    App::new(source).run(terminal)
+    app::App::new(source).run(terminal)
 }
