@@ -1,8 +1,9 @@
-use crate::{RtcSource, Source, Threshold, common};
+use crate::{common, RtcSource, Source, Threshold};
 use battery_service_messages::{
-    BatteryState, BixFixedStrings, BstReturn, bat_swap_try_from_u32, bat_tech_try_from_u32, power_unit_try_from_u32,
+    bat_swap_try_from_u32, bat_tech_try_from_u32, power_unit_try_from_u32, BatteryState, BixFixedStrings, BstReturn,
 };
-use color_eyre::{Result, eyre::eyre};
+use color_eyre::{eyre::eyre, Result};
+use scopeguard::defer;
 use std::ffi;
 use time_alarm_service_messages::{
     AcpiTimerId, AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
@@ -16,70 +17,94 @@ use windows::Win32::System::IO::*;
 
 // GUID defined in the KMDF INX file for ectest.sys
 // {5362ad97-ddfe-429d-9305-31c0ad27880a}
-const GUID_DEVCLASS_ECTEST: GUID = GUID::from_values(0x5362ad97, 0xddfe, 0x429d, [0x93, 0x05, 0x31, 0xc0, 0xad, 0x27, 0x88, 0x0a]);
+const GUID_DEVCLASS_ECTEST: GUID = GUID::from_values(
+    0x5362ad97,
+    0xddfe,
+    0x429d,
+    [0x93, 0x05, 0x31, 0xc0, 0xad, 0x27, 0x88, 0x0a],
+);
 const IOCTL_ACPI_EVAL_METHOD_EX: u32 = 0x0032C010; // CTL_CODE(FILE_DEVICE_ACPI, 4, METHOD_BUFFERED, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
 
 fn get_device_path() -> Result<String, AcpiParseError> {
-    let device_info_set = unsafe { SetupDiGetClassDevsW(
-        Some(&GUID_DEVCLASS_ECTEST),
-        PCWSTR::null(),
-        HWND::default(),
-        DIGCF_PRESENT,
-    ) }.map_err(|e| AcpiParseError::EvaluationFailed(e.code().0 as i32))?;
-    
+    let device_info_set = unsafe {
+        SetupDiGetClassDevsW(
+            Some(&GUID_DEVCLASS_ECTEST),
+            PCWSTR::null(),
+            HWND::default(),
+            DIGCF_PRESENT,
+        )
+    }
+    .map_err(|e| AcpiParseError::EvaluationFailed(e.code().0 as i32))?;
+
+    // Ensure the device info list is always cleaned up when we exit this function.
+    defer! {
+        let _ = unsafe { SetupDiDestroyDeviceInfoList(device_info_set) };
+    }
+
     let mut device_info_data = SP_DEVINFO_DATA {
         cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as u32,
         ..Default::default()
     };
-    
+
     let mut device_index = 0;
     loop {
         if unsafe { SetupDiEnumDeviceInfo(device_info_set, device_index, &mut device_info_data) }.is_err() {
             break;
         }
-        
+
         let mut property_buffer = [0u16; 128];
         let mut required_size = 0u32;
         let mut property_type = DEVPROPTYPE(0);
-        
-        let success = unsafe { SetupDiGetDevicePropertyW(
-            device_info_set,
-            &device_info_data,
-            &DEVPKEY_Device_InstanceId,
-            &mut property_type as *mut DEVPROPTYPE,
-            Some(std::slice::from_raw_parts_mut(property_buffer.as_mut_ptr() as *mut u8, property_buffer.len() * 2) ),
-            Some(&mut required_size),
-            (property_buffer.len() * 2) as u32,
-        ) };
-        
+
+        let success = unsafe {
+            SetupDiGetDevicePropertyW(
+                device_info_set,
+                &device_info_data,
+                &DEVPKEY_Device_InstanceId,
+                &mut property_type as *mut DEVPROPTYPE,
+                Some(std::slice::from_raw_parts_mut(
+                    property_buffer.as_mut_ptr() as *mut u8,
+                    property_buffer.len() * 2,
+                )),
+                Some(&mut required_size),
+                (property_buffer.len() * 2) as u32,
+            )
+        };
+
         if success.is_ok() && required_size > 0 {
-            let instance_id = String::from_utf16_lossy(&property_buffer[..(required_size as usize / 2).saturating_sub(1)]);
+            let instance_id =
+                String::from_utf16_lossy(&property_buffer[..(required_size as usize / 2).saturating_sub(1)]);
             if instance_id.contains("ETST0001") {
                 let mut pdo_name_buffer = [0u16; 128];
                 let mut pdo_required_size = 0u32;
                 let mut pdo_property_type = DEVPROPTYPE(0);
-                let success = unsafe { SetupDiGetDevicePropertyW(
-                    device_info_set,
-                    &device_info_data,
-                    &DEVPKEY_Device_PDOName,
-                    &mut pdo_property_type as *mut DEVPROPTYPE,
-                    Some( std::slice::from_raw_parts_mut(pdo_name_buffer.as_mut_ptr() as *mut u8, pdo_name_buffer.len() * 2)),
-                    Some(&mut pdo_required_size),
-                    (pdo_name_buffer.len() * 2) as u32,
-                ) };
-                
+                let success = unsafe {
+                    SetupDiGetDevicePropertyW(
+                        device_info_set,
+                        &device_info_data,
+                        &DEVPKEY_Device_PDOName,
+                        &mut pdo_property_type as *mut DEVPROPTYPE,
+                        Some(std::slice::from_raw_parts_mut(
+                            pdo_name_buffer.as_mut_ptr() as *mut u8,
+                            pdo_name_buffer.len() * 2,
+                        )),
+                        Some(&mut pdo_required_size),
+                        (pdo_name_buffer.len() * 2) as u32,
+                    )
+                };
+
                 if success.is_ok() && pdo_required_size > 0 {
-                    let pdo_name = String::from_utf16_lossy(&pdo_name_buffer[..(pdo_required_size as usize / 2).saturating_sub(1)]);
+                    let pdo_name = String::from_utf16_lossy(
+                        &pdo_name_buffer[..(pdo_required_size as usize / 2).saturating_sub(1)],
+                    );
                     let path = format!("\\\\.\\GLOBALROOT{}", pdo_name);
-                    unsafe { let _ = SetupDiDestroyDeviceInfoList(device_info_set); };
                     return Ok(path);
                 }
             }
         }
         device_index += 1;
     }
-    
-    unsafe { let _ = SetupDiDestroyDeviceInfoList(device_info_set); };
+
     Err(AcpiParseError::EvaluationFailed(-1)) // Device not found
 }
 
@@ -324,35 +349,43 @@ impl Acpi {
 
         // Open device
         let device_path_wide: Vec<u16> = device_path.encode_utf16().chain(std::iter::once(0)).collect();
-        let h_device = unsafe { windows::Win32::Storage::FileSystem::CreateFileW(
-            PCWSTR::from_raw(device_path_wide.as_ptr()),
-            windows::Win32::Storage::FileSystem::FILE_GENERIC_READ.0 | windows::Win32::Storage::FileSystem::FILE_GENERIC_WRITE.0,
-            windows::Win32::Storage::FileSystem::FILE_SHARE_READ | windows::Win32::Storage::FileSystem::FILE_SHARE_WRITE,
-            None,
-            windows::Win32::Storage::FileSystem::OPEN_EXISTING,
-            windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL,
-            windows::Win32::Foundation::INVALID_HANDLE_VALUE,
-        ) }.map_err(|e| AcpiParseError::EvaluationFailed(e.code().0 as i32))?;
+        let h_device = unsafe {
+            windows::Win32::Storage::FileSystem::CreateFileW(
+                PCWSTR::from_raw(device_path_wide.as_ptr()),
+                windows::Win32::Storage::FileSystem::FILE_GENERIC_READ.0
+                    | windows::Win32::Storage::FileSystem::FILE_GENERIC_WRITE.0,
+                windows::Win32::Storage::FileSystem::FILE_SHARE_READ
+                    | windows::Win32::Storage::FileSystem::FILE_SHARE_WRITE,
+                None,
+                windows::Win32::Storage::FileSystem::OPEN_EXISTING,
+                windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL,
+                windows::Win32::Foundation::INVALID_HANDLE_VALUE,
+            )
+        }
+        .map_err(|e| AcpiParseError::EvaluationFailed(e.code().0 as i32))?;
 
         if h_device.is_invalid() {
             return Err(AcpiParseError::EvaluationFailed(-2));
         }
 
+        defer! {
+            let _ = unsafe { CloseHandle(h_device) };
+        }
+
         // Call DeviceIoControl
         let mut bytes_returned = 0u32;
-        let success = unsafe { DeviceIoControl(
-            h_device,
-            IOCTL_ACPI_EVAL_METHOD_EX,
-            Some(in_buf.as_ptr() as *const std::ffi::c_void),
-            in_buf.len() as u32,
-            Some(out_buf.as_mut_ptr() as *mut std::ffi::c_void),
-            out_buf_len as u32,
-            Some(&mut bytes_returned),
-            None,
-        ) };
-
-        // Close handle
-        let _ = unsafe { CloseHandle(h_device) };
+        let success = unsafe {
+            DeviceIoControl(
+                h_device,
+                IOCTL_ACPI_EVAL_METHOD_EX,
+                Some(in_buf.as_ptr() as *const std::ffi::c_void),
+                in_buf.len() as u32,
+                Some(out_buf.as_mut_ptr() as *mut std::ffi::c_void),
+                out_buf_len as u32,
+                Some(&mut bytes_returned),
+                None,
+            )
+        };
 
         match success {
             Ok(_) => {

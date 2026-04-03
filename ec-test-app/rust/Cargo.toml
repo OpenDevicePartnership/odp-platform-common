@@ -22,6 +22,7 @@ time-alarm-service-messages = { git = "https://github.com/OpenDevicePartnership/
 embedded-mcu-hal = { git = "https://github.com/OpenDevicePartnership/embedded-mcu" }
 thermal-service-messages = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0" }
 battery-service-messages = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0" }
+scopeguard = "1.2"
 
 # Serial feature specific
 serialport = { version = "4.8.1", optional = true }
