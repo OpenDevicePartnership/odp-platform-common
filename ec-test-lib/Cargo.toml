@@ -1,0 +1,46 @@
+[package]
+name = "ec-test-lib"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Library crate providing EC data source traits and transport implementations"
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+uuid = { version = "1.17.0", default-features = false }
+time-alarm-service-messages.workspace = true
+battery-service-messages.workspace = true
+
+# Mock feature specific
+embedded-mcu-hal = { workspace = true, optional = true }
+
+# ACPI feature specific
+num_enum = { version = "0.7.5", default-features = false, optional = true }
+windows = { version = "0.58", features = [
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Devices_Properties",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_Foundation",
+    "Win32_System_SystemServices",
+    "Win32_Security",
+], optional = true }
+scopeguard = { version = "1.2", optional = true }
+
+# Serial feature specific
+serialport = { version = "4.8.1", optional = true }
+embedded-services = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0", optional = true }
+thermal-service-messages = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0", optional = true }
+
+[features]
+mock = ["dep:embedded-mcu-hal"]
+acpi = ["dep:num_enum", "dep:windows", "dep:scopeguard"]
+serial = [
+    "dep:serialport",
+    "dep:embedded-services",
+    "dep:thermal-service-messages",
+]
+
+[lints]
+workspace = true

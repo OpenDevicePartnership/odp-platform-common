@@ -1,8 +1,7 @@
-use crate::{RtcSource, Source, Threshold, common};
+use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, common};
 use battery_service_messages::{
     BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit,
 };
-use color_eyre::{Result, eyre::eyre};
 use embedded_mcu_hal::time::{Datetime, Month, UncheckedDatetime};
 use std::sync::{
     Mutex, OnceLock,
@@ -13,6 +12,31 @@ use time_alarm_service_messages::{
     AcpiDaylightSavingsTimeStatus, AcpiTimeZone, AcpiTimeZoneOffset, AcpiTimerId, AcpiTimestamp,
     AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
 };
+
+/// Errors produced by mock data source operations.
+#[derive(Debug)]
+pub enum Error {
+    /// Data validation failed (invalid enum discriminant, malformed field, etc.)
+    InvalidData,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidData => write!(f, "Invalid data"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl crate::Error for Error {
+    fn kind(&self) -> crate::ErrorKind {
+        match self {
+            Self::InvalidData => crate::ErrorKind::InvalidData,
+        }
+    }
+}
 
 static SET_RPM: AtomicI64 = AtomicI64::new(-1);
 static SAMPLE: OnceLock<Mutex<(i64, i64)>> = OnceLock::new();
@@ -28,8 +52,12 @@ impl Mock {
     }
 }
 
-impl Source for Mock {
-    fn get_temperature(&self) -> Result<f64> {
+impl ErrorType for Mock {
+    type Error = Error;
+}
+
+impl ThermalSource for Mock {
+    fn get_temperature(&self) -> Result<f64, Self::Error> {
         let mut sample = SAMPLE.get_or_init(|| Mutex::new((2732, 1))).lock().unwrap();
 
         sample.0 += 10 * sample.1;
@@ -40,7 +68,7 @@ impl Source for Mock {
         Ok(common::dk_to_c(sample.0 as u32))
     }
 
-    fn get_rpm(&self) -> Result<f64> {
+    fn get_rpm(&self) -> Result<f64, Self::Error> {
         use std::f64::consts::PI;
         use std::sync::{Mutex, OnceLock};
 
@@ -67,15 +95,15 @@ impl Source for Mock {
         }
     }
 
-    fn get_min_rpm(&self) -> Result<f64> {
+    fn get_min_rpm(&self) -> Result<f64, Self::Error> {
         Ok(0.0)
     }
 
-    fn get_max_rpm(&self) -> Result<f64> {
+    fn get_max_rpm(&self) -> Result<f64, Self::Error> {
         Ok(6000.0)
     }
 
-    fn get_threshold(&self, threshold: Threshold) -> Result<f64> {
+    fn get_threshold(&self, threshold: Threshold) -> Result<f64, Self::Error> {
         match threshold {
             Threshold::On => Ok(28.0),
             Threshold::Ramping => Ok(40.0),
@@ -83,12 +111,14 @@ impl Source for Mock {
         }
     }
 
-    fn set_rpm(&self, rpm: f64) -> Result<()> {
+    fn set_rpm(&self, rpm: f64) -> Result<(), Self::Error> {
         SET_RPM.store(rpm as i64, Ordering::Relaxed);
         Ok(())
     }
+}
 
-    fn get_bst(&self) -> Result<BstReturn> {
+impl BatterySource for Mock {
+    fn get_bst(&self) -> Result<BstReturn, Self::Error> {
         static STATE: AtomicU32 = AtomicU32::new(2);
         const MAX_CAPACITY: u32 = 10000;
         static CAPACITY: AtomicU32 = AtomicU32::new(0);
@@ -114,14 +144,14 @@ impl Source for Mock {
         CAPACITY.store(new_capacity.clamp(0, MAX_CAPACITY), Ordering::Relaxed);
 
         Ok(BstReturn {
-            battery_state: BatteryState::from_bits(state).ok_or(eyre!("Invalid BatteryState"))?,
+            battery_state: BatteryState::from_bits(state).ok_or(Error::InvalidData)?,
             battery_present_rate: 3839,
             battery_remaining_capacity: capacity,
             battery_present_voltage: 12569,
         })
     }
 
-    fn get_bix(&self) -> Result<BixFixedStrings> {
+    fn get_bix(&self) -> Result<BixFixedStrings, Self::Error> {
         Ok(BixFixedStrings {
             revision: 1,
             power_unit: PowerUnit::MilliWatts,
@@ -147,7 +177,7 @@ impl Source for Mock {
         })
     }
 
-    fn set_btp(&self, _trippoint: u32) -> Result<()> {
+    fn set_btp(&self, _trippoint: u32) -> Result<(), Self::Error> {
         // Do nothing for mock
         Ok(())
     }
@@ -208,23 +238,23 @@ impl Default for MockRtc {
 }
 
 impl RtcSource for Mock {
-    fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities> {
+    fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities, Self::Error> {
         Ok(TimeAlarmDeviceCapabilities(0xF7))
     }
 
-    fn get_real_time(&self) -> Result<AcpiTimestamp> {
+    fn get_real_time(&self) -> Result<AcpiTimestamp, Self::Error> {
         Ok(self.rtc.time)
     }
 
-    fn get_wake_status(&self, timer_id: AcpiTimerId) -> Result<TimerStatus> {
+    fn get_wake_status(&self, timer_id: AcpiTimerId) -> Result<TimerStatus, Self::Error> {
         Ok(self.rtc.get_timer(timer_id).timer_status)
     }
 
-    fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy> {
+    fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy, Self::Error> {
         Ok(self.rtc.get_timer(timer_id).wake_policy)
     }
 
-    fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds> {
+    fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds, Self::Error> {
         Ok(self.rtc.get_timer(timer_id).value)
     }
 }

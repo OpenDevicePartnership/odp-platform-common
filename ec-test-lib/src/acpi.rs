@@ -1,19 +1,17 @@
-use crate::{common, RtcSource, Source, Threshold};
+use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, common};
 use battery_service_messages::{
-    bat_swap_try_from_u32, bat_tech_try_from_u32, power_unit_try_from_u32, BatteryState, BixFixedStrings, BstReturn,
+    BatteryState, BixFixedStrings, BstReturn, bat_swap_try_from_u32, bat_tech_try_from_u32, power_unit_try_from_u32,
 };
-use color_eyre::{eyre::eyre, Result};
 use scopeguard::defer;
-use std::ffi;
 use time_alarm_service_messages::{
     AcpiTimerId, AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
 };
-use windows::core::{GUID, PCWSTR};
 use windows::Win32::Devices::DeviceAndDriverInstallation::*;
 use windows::Win32::Devices::Properties::DEVPROPTYPE;
 use windows::Win32::Devices::Properties::*;
 use windows::Win32::Foundation::*;
 use windows::Win32::System::IO::*;
+use windows::core::{GUID, PCWSTR};
 
 // GUID defined in the KMDF INX file for ectest.sys
 // {5362ad97-ddfe-429d-9305-31c0ad27880a}
@@ -34,7 +32,7 @@ fn get_device_path() -> Result<String, AcpiParseError> {
             DIGCF_PRESENT,
         )
     }
-    .map_err(|e| AcpiParseError::EvaluationFailed(e.code().0 as i32))?;
+    .map_err(|e| AcpiParseError::EvaluationFailed(e.code().0))?;
 
     // Ensure the device info list is always cleaned up when we exit this function.
     defer! {
@@ -108,9 +106,9 @@ fn get_device_path() -> Result<String, AcpiParseError> {
     Err(AcpiParseError::EvaluationFailed(-1)) // Device not found
 }
 
+/// ACPI argument types - these correspond to the ACPI_METHOD_ARGUMENT_* defines in apiioct.h from the Windows SDK
 #[derive(num_enum::IntoPrimitive, num_enum::TryFromPrimitive, Debug, Copy, Clone)]
 #[repr(u16)]
-/// ACPI argument types - these correspond to the ACPI_METHOD_ARGUMENT_* defines in apiioct.h from the Windows SDK
 enum AcpiArgumentType {
     Integer = 0x0,
     String = 0x1,
@@ -119,15 +117,69 @@ enum AcpiArgumentType {
     PackageEx = 0x4,
 }
 
-mod guid {
-    pub const _SENSOR_CRT_TEMP: uuid::Uuid = uuid::uuid!("218246e7-baf6-45f1-aa13-07e4845256b8");
-    pub const _SENSOR_PROCHOT_TEMP: uuid::Uuid = uuid::uuid!("22dc52d2-fd0b-47ab-95b8-26552f9831a5");
-    pub const _FAN_ON_TEMP: uuid::Uuid = uuid::uuid!("ba17b567-c368-48d5-bc6f-a312a41583c1");
-    pub const _FAN_RAMP_TEMP: uuid::Uuid = uuid::uuid!("3a62688c-d95b-4d2d-bacc-90d7a5816bcd");
-    pub const _FAN_MAX_TEMP: uuid::Uuid = uuid::uuid!("dcb758b1-f0fd-4ec7-b2c0-ef1e2a547b76");
-    pub const _FAN_MIN_RPM: uuid::Uuid = uuid::uuid!("db261c77-934b-45e2-9742-256c62badb7a");
-    pub const _FAN_MAX_RPM: uuid::Uuid = uuid::uuid!("5cf839df-8be7-42b9-9ac5-3403ca2c8a6a");
-    pub const _FAN_CURRENT_RPM: uuid::Uuid = uuid::uuid!("adf95492-0776-4ffc-84f3-b6c8b5269683");
+/// Errors that can occur when parsing ACPI buffers.
+#[derive(Debug)]
+pub enum AcpiParseError {
+    /// The buffer was too short to contain the expected data
+    InsufficientLength,
+    /// The buffer contained invalid or unrecognized data
+    InvalidFormat,
+    /// The ACPI evaluation FFI call returned a non-zero error code
+    EvaluationFailed(i32),
+}
+
+impl std::error::Error for AcpiParseError {}
+impl std::fmt::Display for AcpiParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+/// Errors produced by ACPI data source operations.
+#[derive(Debug)]
+pub enum Error {
+    /// ACPI buffer parsing failed
+    Parse(AcpiParseError),
+    /// Response had an unexpected format (wrong argument count, wrong type, etc.)
+    UnexpectedResponse,
+    /// ACPI method returned an argument of unexpected type
+    UnexpectedArgumentType(u16),
+    /// ACPI operation returned nonzero status
+    OperationFailed,
+    /// Data validation failed (invalid enum discriminant, malformed field, etc.)
+    InvalidData,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Parse(e) => write!(f, "ACPI parse error: {e}"),
+            Self::UnexpectedResponse => write!(f, "Unexpected response"),
+            Self::UnexpectedArgumentType(t) => write!(f, "Unexpected argument type: {t}"),
+            Self::OperationFailed => write!(f, "Operation failed"),
+            Self::InvalidData => write!(f, "Invalid data"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl crate::Error for Error {
+    fn kind(&self) -> crate::ErrorKind {
+        match self {
+            Self::Parse(_) => crate::ErrorKind::Other,
+            Self::UnexpectedResponse => crate::ErrorKind::UnexpectedResponse,
+            Self::UnexpectedArgumentType(_) => crate::ErrorKind::UnexpectedResponse,
+            Self::OperationFailed => crate::ErrorKind::Other,
+            Self::InvalidData => crate::ErrorKind::InvalidData,
+        }
+    }
+}
+
+impl From<AcpiParseError> for Error {
+    fn from(e: AcpiParseError) -> Self {
+        Self::Parse(e)
+    }
 }
 
 // A user-friendly ACPI input method containing a name and optional arguments
@@ -138,13 +190,20 @@ struct AcpiMethodInput<'a, 'b> {
 
 /// A user-friendly ACPI method argument
 #[derive(Debug, Copy, Clone)]
-pub enum AcpiMethodArgument {
+pub(crate) enum AcpiMethodArgument {
     /// Arbitrary u32 integer (DWORD)
     Int(u32),
-    /// Arbitrary string
-    Str(&'static str),
     /// GUID in mixed-endian format
     Guid(uuid::Bytes),
+}
+
+#[repr(C)]
+#[derive(Debug, Default)]
+pub(crate) struct AcpiMethodArgumentV1 {
+    pub type_: u16,
+    pub data_length: u16,
+    pub data_32: u32,
+    pub data: Vec<u8>,
 }
 
 // Convert a user-friendly ACPI method argument to format expected by driver
@@ -158,15 +217,6 @@ impl TryFrom<AcpiMethodArgument> for AcpiMethodArgumentV1 {
                 data_32: 0,
                 data: g.to_vec(),
             },
-            AcpiMethodArgument::Str(s) => {
-                let cstr = ffi::CString::new(s).map_err(|_| AcpiParseError::InvalidFormat)?;
-                Self {
-                    type_: 1,
-                    data_length: cstr.count_bytes() as u16 + 1,
-                    data_32: 0,
-                    data: cstr.as_bytes_with_nul().to_vec(),
-                }
-            }
             AcpiMethodArgument::Int(i) => Self {
                 type_: 0,
                 data_length: 4,
@@ -179,7 +229,7 @@ impl TryFrom<AcpiMethodArgument> for AcpiMethodArgumentV1 {
 
 #[repr(C)]
 #[derive(Debug)]
-pub struct AcpiEvalInputBufferComplexV1Ex {
+pub(crate) struct AcpiEvalInputBufferComplexV1Ex {
     pub signature: u32,
     pub methodname: [u8; 256],
     pub size: u32,
@@ -189,37 +239,14 @@ pub struct AcpiEvalInputBufferComplexV1Ex {
 
 #[repr(C)]
 #[derive(Debug, Default)]
-pub struct AcpiEvalOutputBufferV1 {
+pub(crate) struct AcpiEvalOutputBufferV1 {
     pub signature: u32,
     pub length: u32,
     pub count: u32,
     pub arguments: Vec<AcpiMethodArgumentV1>,
 }
 
-#[repr(C)]
-#[derive(Debug, Default)]
-pub struct AcpiMethodArgumentV1 {
-    pub type_: u16,
-    pub data_length: u16,
-    pub data_32: u32,
-    pub data: Vec<u8>,
-}
-
-#[derive(Debug)]
-pub enum AcpiParseError {
-    InsufficientLength,
-    InvalidFormat,
-    EvaluationFailed(i32),
-}
-
-pub const ACPI_EVAL_INPUT_BUFFER_COMPLEX_SIGNATURE_EX: u32 = u32::from_le_bytes(*b"AeiF");
-
-impl std::error::Error for AcpiParseError {}
-impl std::fmt::Display for AcpiParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
+pub(crate) const ACPI_EVAL_INPUT_BUFFER_COMPLEX_SIGNATURE_EX: u32 = u32::from_le_bytes(*b"AeiF");
 
 // Convert a user-friendly ACPI input method to format expected by driver
 impl TryFrom<AcpiMethodInput<'_, '_>> for AcpiEvalInputBufferComplexV1Ex {
@@ -326,7 +353,7 @@ impl Acpi {
         Default::default()
     }
 
-    pub fn evaluate(name: &str, args: Option<&[AcpiMethodArgument]>) -> Result<AcpiEvalOutputBufferV1, AcpiParseError> {
+    fn evaluate(name: &str, args: Option<&[AcpiMethodArgument]>) -> Result<AcpiEvalOutputBufferV1, AcpiParseError> {
         // Maximum number of arguments allowed is 7 as per spec
         if let Some(args) = args
             && args.len() > 7
@@ -362,7 +389,7 @@ impl Acpi {
                 windows::Win32::Foundation::INVALID_HANDLE_VALUE,
             )
         }
-        .map_err(|e| AcpiParseError::EvaluationFailed(e.code().0 as i32))?;
+        .map_err(|e| AcpiParseError::EvaluationFailed(e.code().0))?;
 
         if h_device.is_invalid() {
             return Err(AcpiParseError::EvaluationFailed(-2));
@@ -393,47 +420,39 @@ impl Acpi {
                 out_buf.truncate(bytes_returned as usize);
                 AcpiEvalOutputBufferV1::try_from(out_buf)
             }
-            Err(e) => Err(AcpiParseError::EvaluationFailed(e.code().0 as i32)),
+            Err(e) => Err(AcpiParseError::EvaluationFailed(e.code().0)),
         }
     }
 
     /// Evaluates the provided method with the provided arguments and returns its single u32 result.
     /// Errors if the result is not a single u32.
-    pub fn evaluate_u32(name: &str, args: Option<&[AcpiMethodArgument]>) -> Result<u32> {
+    fn evaluate_u32(name: &str, args: Option<&[AcpiMethodArgument]>) -> Result<u32, Error> {
         let output = Acpi::evaluate(name, args)?;
 
         if output.count != 1 {
-            Err(eyre!(
-                "{} returned unexpected number of arguments: {}",
-                name,
-                output.count
-            ))
+            Err(Error::UnexpectedResponse)
         } else if output.arguments[0].type_ != AcpiArgumentType::Integer as u16 {
-            Err(eyre!(
-                "{} returned argument of unexpected type: {}",
-                name,
-                output.arguments[0].type_
-            ))
+            Err(Error::UnexpectedArgumentType(output.arguments[0].type_))
         } else {
             Ok(output.arguments[0].data_32)
         }
     }
 }
 
-fn acpi_get_var(guid: uuid::Uuid) -> Result<f64> {
+fn acpi_get_var(guid: uuid::Uuid) -> Result<f64, Error> {
     let args = [AcpiMethodArgument::Int(1), AcpiMethodArgument::Guid(guid.to_bytes_le())];
     let output = Acpi::evaluate("\\_SB.ECT0.TGVR", Some(&args))?;
 
     if output.count != 2 {
-        Err(eyre!("GET_VAR({guid}) unrecognized output"))
+        Err(Error::UnexpectedResponse)
     } else if output.arguments[0].data_32 != 0 {
-        Err(eyre!("GET_VAR({guid}) unknown failure"))
+        Err(Error::OperationFailed)
     } else {
         Ok(f64::from(output.arguments[1].data_32))
     }
 }
 
-fn acpi_set_var(guid: uuid::Uuid, value: f64) -> Result<()> {
+fn acpi_set_var(guid: uuid::Uuid, value: f64) -> Result<(), Error> {
     let value = value as u32;
 
     let args = [
@@ -444,37 +463,41 @@ fn acpi_set_var(guid: uuid::Uuid, value: f64) -> Result<()> {
     let output = Acpi::evaluate("\\_SB.ECT0.TSVR", Some(&args))?;
 
     if output.count != 1 {
-        Err(eyre!("SET_VAR({guid}, {value}) unrecognized output"))
+        Err(Error::UnexpectedResponse)
     } else if output.arguments[0].data_32 != 0 {
-        Err(eyre!("SET_VAR({guid}, {value}) unknown failure"))
+        Err(Error::OperationFailed)
     } else {
         Ok(())
     }
 }
 
-impl Source for Acpi {
-    fn get_temperature(&self) -> Result<f64> {
+impl ErrorType for Acpi {
+    type Error = Error;
+}
+
+impl ThermalSource for Acpi {
+    fn get_temperature(&self) -> Result<f64, Self::Error> {
         let output = Acpi::evaluate("\\_SB.ECT0.RTMP", None)?;
         if output.count != 1 {
-            Err(eyre!("GET_TMP unrecognized output"))
+            Err(Error::UnexpectedResponse)
         } else {
             Ok(common::dk_to_c(output.arguments[0].data_32))
         }
     }
 
-    fn get_rpm(&self) -> Result<f64> {
+    fn get_rpm(&self) -> Result<f64, Self::Error> {
         acpi_get_var(common::guid::FAN_CURRENT_RPM)
     }
 
-    fn get_min_rpm(&self) -> Result<f64> {
+    fn get_min_rpm(&self) -> Result<f64, Self::Error> {
         acpi_get_var(common::guid::FAN_MIN_RPM)
     }
 
-    fn get_max_rpm(&self) -> Result<f64> {
+    fn get_max_rpm(&self) -> Result<f64, Self::Error> {
         acpi_get_var(common::guid::FAN_MAX_RPM)
     }
 
-    fn get_threshold(&self, threshold: Threshold) -> Result<f64> {
+    fn get_threshold(&self, threshold: Threshold) -> Result<f64, Self::Error> {
         match threshold {
             Threshold::On => Ok(common::dk_to_c(acpi_get_var(common::guid::FAN_ON_TEMP)? as u32)),
             Threshold::Ramping => Ok(common::dk_to_c(acpi_get_var(common::guid::FAN_RAMP_TEMP)? as u32)),
@@ -482,20 +505,21 @@ impl Source for Acpi {
         }
     }
 
-    fn set_rpm(&self, rpm: f64) -> Result<()> {
+    fn set_rpm(&self, rpm: f64) -> Result<(), Self::Error> {
         acpi_set_var(common::guid::FAN_CURRENT_RPM, rpm)
     }
+}
 
-    fn get_bst(&self) -> Result<BstReturn> {
+impl BatterySource for Acpi {
+    fn get_bst(&self) -> Result<BstReturn, Self::Error> {
         let data = Acpi::evaluate("\\_SB.ECT0.TBST", None)?;
 
         // We are expecting 4 32-bit values
         if data.count != 4 {
-            Err(eyre!("GET_BST unrecognized output"))
+            Err(Error::UnexpectedResponse)
         } else {
             Ok(BstReturn {
-                battery_state: BatteryState::from_bits(data.arguments[0].data_32)
-                    .ok_or(eyre!("Invalid BatteryState"))?,
+                battery_state: BatteryState::from_bits(data.arguments[0].data_32).ok_or(Error::InvalidData)?,
                 battery_present_rate: data.arguments[1].data_32,
                 battery_remaining_capacity: data.arguments[2].data_32,
                 battery_present_voltage: data.arguments[3].data_32,
@@ -503,20 +527,18 @@ impl Source for Acpi {
         }
     }
 
-    fn get_bix(&self) -> Result<BixFixedStrings> {
+    fn get_bix(&self) -> Result<BixFixedStrings, Self::Error> {
         let data = Acpi::evaluate("\\_SB.ECT0.TBIX", None)?;
         // We are expecting 21 arguments
         if data.count != 21 {
-            Err(eyre!("GET_BIX unrecognized output"))
+            Err(Error::UnexpectedResponse)
         } else {
             Ok(BixFixedStrings {
                 revision: data.arguments[0].data_32,
-                power_unit: power_unit_try_from_u32(data.arguments[1].data_32)
-                    .map_err(|_| eyre!("Invalid PowerUnit"))?,
+                power_unit: power_unit_try_from_u32(data.arguments[1].data_32).map_err(|_| Error::InvalidData)?,
                 design_capacity: data.arguments[2].data_32,
                 last_full_charge_capacity: data.arguments[3].data_32,
-                battery_technology: bat_tech_try_from_u32(data.arguments[4].data_32)
-                    .map_err(|_| eyre!("Invalid BatteryTechnology"))?,
+                battery_technology: bat_tech_try_from_u32(data.arguments[4].data_32).map_err(|_| Error::InvalidData)?,
                 design_voltage: data.arguments[5].data_32,
                 design_cap_of_warning: data.arguments[6].data_32,
                 design_cap_of_low: data.arguments[7].data_32,
@@ -532,29 +554,29 @@ impl Source for Acpi {
                     .data
                     .clone()
                     .try_into()
-                    .map_err(|_| eyre!("Invalid model number"))?,
+                    .map_err(|_| Error::InvalidData)?,
                 serial_number: data.arguments[17]
                     .data
                     .clone()
                     .try_into()
-                    .map_err(|_| eyre!("Invalid serial number"))?,
+                    .map_err(|_| Error::InvalidData)?,
                 battery_type: data.arguments[18]
                     .data
                     .clone()
                     .try_into()
-                    .map_err(|_| eyre!("Invalid battery type"))?,
+                    .map_err(|_| Error::InvalidData)?,
                 oem_info: data.arguments[19]
                     .data
                     .clone()
                     .try_into()
-                    .map_err(|_| eyre!("Invalid OEM info"))?,
+                    .map_err(|_| Error::InvalidData)?,
                 battery_swapping_capability: bat_swap_try_from_u32(data.arguments[20].data_32)
-                    .map_err(|_| eyre!("Invalid BatterySwapCapability"))?,
+                    .map_err(|_| Error::InvalidData)?,
             })
         }
     }
 
-    fn set_btp(&self, trippoint: u32) -> Result<()> {
+    fn set_btp(&self, trippoint: u32) -> Result<(), Self::Error> {
         // No return value is expected according to ACPI spec
         let _ = Acpi::evaluate("\\_SB.ECT0.TBTP", Some(&[AcpiMethodArgument::Int(trippoint)]))?;
         Ok(())
@@ -562,48 +584,42 @@ impl Source for Acpi {
 }
 
 impl RtcSource for Acpi {
-    fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities> {
+    fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities, Self::Error> {
         Ok(TimeAlarmDeviceCapabilities(Acpi::evaluate_u32(
             "\\_SB.ECT0._GCP",
             None,
         )?))
     }
 
-    fn get_real_time(&self) -> Result<AcpiTimestamp> {
+    fn get_real_time(&self) -> Result<AcpiTimestamp, Self::Error> {
         let result = Acpi::evaluate("\\_SB.ECT0._GRT", None)?;
         if result.count != 1 {
-            return Err(eyre!("GET_REAL_TIME unrecognized output - got result {:?}", result));
+            return Err(Error::UnexpectedResponse);
         }
 
         let result = &result.arguments[0];
         if result.type_ != AcpiArgumentType::Buffer as u16 {
-            return Err(eyre!("GET_REAL_TIME invalid output type {}", result.type_));
+            return Err(Error::UnexpectedResponse);
         }
 
-        AcpiTimestamp::try_from_bytes(result.data.as_slice()).map_err(|e| {
-            eyre!(
-                "GET_REAL_TIME invalid output format: {:?} for bytes {:?}",
-                e,
-                result.data.as_slice()
-            )
-        })
+        AcpiTimestamp::try_from_bytes(result.data.as_slice()).map_err(|_| Error::InvalidData)
     }
 
-    fn get_wake_status(&self, timer_id: AcpiTimerId) -> Result<TimerStatus> {
+    fn get_wake_status(&self, timer_id: AcpiTimerId) -> Result<TimerStatus, Self::Error> {
         Ok(TimerStatus(Acpi::evaluate_u32(
             "\\_SB.ECT0._GWS",
             Some(&[AcpiMethodArgument::Int(timer_id.into())]),
         )?))
     }
 
-    fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy> {
+    fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy, Self::Error> {
         Ok(AlarmExpiredWakePolicy(Acpi::evaluate_u32(
             "\\_SB.ECT0._TIP",
             Some(&[AcpiMethodArgument::Int(timer_id.into())]),
         )?))
     }
 
-    fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds> {
+    fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds, Self::Error> {
         Ok(AlarmTimerSeconds(Acpi::evaluate_u32(
             "\\_SB.ECT0._TIV",
             Some(&[AcpiMethodArgument::Int(timer_id.into())]),

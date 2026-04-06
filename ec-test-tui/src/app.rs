@@ -1,7 +1,8 @@
+use crate::battery::Battery;
 use crate::rtc::Rtc;
 use crate::thermal::Thermal;
 use crate::ucsi::Ucsi;
-use crate::{Source, battery::Battery};
+use ec_test_lib::Source;
 
 use color_eyre::Result;
 

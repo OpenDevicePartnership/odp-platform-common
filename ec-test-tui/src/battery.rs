@@ -1,4 +1,3 @@
-use crate::Source;
 use crate::app::Module;
 use crate::common;
 use crate::widgets::battery;
@@ -6,6 +5,7 @@ use battery_service_messages::{
     BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit,
 };
 use core::ffi::CStr;
+use ec_test_lib::BatterySource;
 
 use ratatui::style::Modifier;
 use ratatui::text::Text;
@@ -94,7 +94,7 @@ impl Default for BatteryTabState {
 }
 
 #[derive(Default)]
-pub struct Battery<S: Source> {
+pub struct Battery<S: BatterySource> {
     bst_data: BstReturn,
     bix_data: BixFixedStrings,
     state: BatteryTabState,
@@ -103,7 +103,7 @@ pub struct Battery<S: Source> {
     source: S,
 }
 
-impl<S: Source> Module for Battery<S> {
+impl<S: BatterySource> Module for Battery<S> {
     fn title(&self) -> &'static str {
         "Battery Information"
     }
@@ -154,7 +154,7 @@ impl<S: Source> Module for Battery<S> {
     }
 }
 
-impl<S: Source> Battery<S> {
+impl<S: BatterySource> Battery<S> {
     pub fn new(source: S) -> Self {
         let mut inst = Self {
             bst_data: Default::default(),

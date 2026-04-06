@@ -1,7 +1,7 @@
 use crate::app::Module;
 use crate::common;
-use crate::{Source, Threshold};
 use color_eyre::Result;
+use ec_test_lib::{ThermalSource, Threshold};
 use ratatui::{
     buffer::Buffer,
     crossterm::event::{Event, KeyCode, KeyEventKind},
@@ -15,12 +15,8 @@ use tui_input::{Input, backend::crossterm::EventHandler};
 const LABEL_COLOR: Color = tailwind::SLATE.c200;
 const MAX_SAMPLES: usize = 60;
 
-fn get_sensor_tmp<S: Source>(source: &S) -> Result<f64> {
-    source.get_temperature()
-}
-
 // Always return mock data for thresholds until sensor GET/SET VAR and GET/SET THRS supported
-fn get_sensor_thresholds<S: Source>(_source: &S) -> Result<SensorThresholds> {
+fn get_sensor_thresholds<S: ThermalSource>(_source: &S) -> Result<SensorThresholds> {
     Ok(SensorThresholds {
         _warn_low: 13.0,
         warn_high: 35.0,
@@ -29,22 +25,14 @@ fn get_sensor_thresholds<S: Source>(_source: &S) -> Result<SensorThresholds> {
     })
 }
 
-fn get_fan_rpm<S: Source>(source: &S) -> Result<f64> {
-    source.get_rpm()
-}
-
-fn set_fan_rpm<S: Source>(source: &S, rpm: f64) -> Result<()> {
-    source.set_rpm(rpm)
-}
-
-fn get_fan_bounds<S: Source>(source: &S) -> Result<FanRpmBounds> {
+fn get_fan_bounds<S: ThermalSource>(source: &S) -> Result<FanRpmBounds> {
     let min = source.get_min_rpm()?;
     let max = source.get_max_rpm()?;
 
     Ok(FanRpmBounds { min, max })
 }
 
-fn get_fan_levels<S: Source>(source: &S) -> Result<FanStateLevels> {
+fn get_fan_levels<S: ThermalSource>(source: &S) -> Result<FanStateLevels> {
     let on = source.get_threshold(Threshold::On)?;
     let ramping = source.get_threshold(Threshold::Ramping)?;
     let max = source.get_threshold(Threshold::Max)?;
@@ -70,8 +58,8 @@ struct SensorState {
 }
 
 impl SensorState {
-    fn update<S: Source>(&mut self, source: &S) {
-        if let Ok(temp) = get_sensor_tmp(source) {
+    fn update<S: ThermalSource>(&mut self, source: &S) {
+        if let Ok(temp) = source.get_temperature() {
             self.skin_temp = temp;
             self.samples.insert(temp);
             self.temp_success = true;
@@ -113,8 +101,8 @@ struct FanState {
 }
 
 impl FanState {
-    fn update<S: Source>(&mut self, source: &S) {
-        if let Ok(rpm) = get_fan_rpm(source) {
+    fn update<S: ThermalSource>(&mut self, source: &S) {
+        if let Ok(rpm) = source.get_rpm() {
             self.rpm = rpm;
             self.samples.insert(rpm as u32);
             self.rpm_success = true;
@@ -138,7 +126,7 @@ impl FanState {
     }
 }
 
-pub struct Thermal<S: Source> {
+pub struct Thermal<S: ThermalSource> {
     rpm_input: Input,
     sensor: SensorState,
     fan: FanState,
@@ -146,7 +134,7 @@ pub struct Thermal<S: Source> {
     source: S,
 }
 
-impl<S: Source> Module for Thermal<S> {
+impl<S: ThermalSource> Module for Thermal<S> {
     fn title(&self) -> &'static str {
         "Thermal Information"
     }
@@ -169,7 +157,7 @@ impl<S: Source> Module for Thermal<S> {
             && key.kind == KeyEventKind::Press
         {
             if let Ok(rpm) = self.rpm_input.value_and_reset().parse() {
-                let _ = set_fan_rpm(&self.source, rpm);
+                let _ = self.source.set_rpm(rpm);
             }
         } else {
             let _ = self.rpm_input.handle_event(evt);
@@ -177,7 +165,7 @@ impl<S: Source> Module for Thermal<S> {
     }
 }
 
-impl<S: Source> Thermal<S> {
+impl<S: ThermalSource> Thermal<S> {
     pub fn new(source: S) -> Self {
         let mut inst = Self {
             rpm_input: Default::default(),

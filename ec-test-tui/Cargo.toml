@@ -1,0 +1,33 @@
+[package]
+name = "ec-test-tui"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "RUST based TUI to demo EC features"
+authors = ["Phil Weber <philweber@microsoft.com>"]
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# TUI dependencies
+crossterm = "0.28.1"
+ratatui = "0.29.0"
+color-eyre = "0.6.3"
+strum = { version = "0.27", default-features = false, features = ["derive"] }
+tui-input = "0.14.0"
+
+# Data type dependencies used by TUI widgets
+time-alarm-service-messages.workspace = true
+embedded-mcu-hal.workspace = true
+battery-service-messages.workspace = true
+
+# EC transport library
+ec-test-lib = { path = "../ec-test-lib" }
+
+[features]
+mock = ["ec-test-lib/mock"]
+acpi = ["ec-test-lib/acpi"]
+serial = ["ec-test-lib/serial"]
+
+[lints]
+workspace = true
