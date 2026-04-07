@@ -36,6 +36,7 @@ jobs:
   
     - name: Invoke cargo-vet
       run: cargo vet --locked
+      working-directory: ec
     
     - name: Save PR number
     # PR number is saved as an artifact so it can be used to determine the PR to comment on by the vet-pr-comment workflow

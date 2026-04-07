@@ -2,5 +2,8 @@
 **/build/
 **/target/
 
+# This is a repository of components, expectation is that lock files will not be committed
+**/Cargo.lock
+
 # ODP relies on Visual Studio Code, so ignoring its cache directory
 .vscode/
