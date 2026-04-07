@@ -7,17 +7,6 @@
   version = "0.1.0"
   edition = "2021"
 
-[[bin]]
-  name = "StandaloneDxeDemo"
-  path = "src/main.rs"
-  test = false
-
-[profile.dev]
-  panic = "abort"
-
-[profile.release]
-  panic = "abort"
-
 [dependencies]
   log = "0.4"
   r-efi = "5.3.0"

@@ -1,18 +1,28 @@
+// Cargo.toml serves a similar role to an EDK II .inf file — it declares the module name, dependencies
+// (equivalent to [Packages] and [LibraryClasses]), and build settings.
+//
 // no_std: Disables Rust's standard library (similar to how UEFI drivers don't link against a C runtime).
+//         This is behind a cfg_attr to allow the test module to use the standard library, which is not
+//         available in the UEFI environment.
 // no_main: Disables the default Rust entry point. The driver uses efi_main as its entry point instead,
-//          matching the UEFI driver model.
-#![no_std]
-#![no_main]
+//          matching the UEFI driver model.  This is behind a cfg_attr to allow the test module to use
+//          the standard library, which is not available in the UEFI environment.
+#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(test), no_main)]
 
 // core::fmt::Write       - Trait that enables formatted string writing (like Sprintf).
-// core::panic::PanicInfo - Carries context about a panic (message, source file, line number).
-//                          Used by the #[panic_handler] below, similar to ASSERT() debug info.
+// core::panic::PanicInfo - Carries context about a panic (message, source file, line number). Used by the
+//                          #[panic_handler] below, similar to ASSERT() debug info.  This is behind a cfg_attr
+//                          to allow the test module to use the standard library, which is not available in the
+//                          UEFI environment.
 // log::{...}             - Rust's logging framework, similar to DebugLib's DEBUG() macro.
 // r_efi                  - Provides UEFI type definitions (Status, SystemTable, etc.) equivalent to the EDK II headers.
 // spin::Mutex            - A spinlock-based mutex. In no_std environments there's no OS thread scheduler,
 //                          so spin locks are used instead of blocking locks.
 // uart_16550             - Crate that provides 16550 UART register access, similar to SerialPortLib.
-use core::{fmt::Write, panic::PanicInfo};
+use core::fmt::Write;
+#[cfg(not(test))]
+use core::panic::PanicInfo;
 use log::{info, Level, LevelFilter, Metadata, Record};
 use r_efi::efi::Status;
 use spin::Mutex;
@@ -84,6 +94,8 @@ static LOGGER: DebugLogger = DebugLogger::new();
 #[no_mangle]
 pub extern "efiapi" fn efi_main(
     _image_handle: *const core::ffi::c_void,
+    // To use Boot Services, Runtime Services, etc., remove the underscore prefix (e.g., `system_table`)
+    // and dereference the pointer: `unsafe { &*system_table }` to access the SystemTable fields.
     _system_table: *const r_efi::system::SystemTable,
 ) -> u64 {
     // Register the global logger. set_logger() returns a Result; .map() applies the closure
@@ -105,7 +117,40 @@ pub extern "efiapi" fn efi_main(
 
 // Required in no_std: Rust needs a panic handler to know what to do on unrecoverable errors
 // (like an assert failure). This infinite loop is equivalent to CpuDeadLoop() in EDK II.
+// Gated behind cfg(not(test)) because the test harness provides its own panic handler.
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     loop {}
+}
+
+// #[cfg(test)] marks this module for compilation only during `cargo test`.
+// It is excluded from the UEFI .efi binary entirely — similar to how EDK II
+// Host-Based Unit Tests are separate from the driver binary.
+//
+// Tests run on your host OS (not on UEFI), so the standard library is available.
+// Run tests with: "cargo test", do NOT use the uefi target for tests.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // #[test] marks a function as a unit test. Cargo's test harness discovers and runs these.
+    // This is equivalent to a UNIT_TEST_CASE in EDK II's UnitTestFrameworkPkg.
+    #[test]
+    fn test_logger_enabled_for_info() {
+        let logger = DebugLogger::new();
+        // Build metadata at Info level to verify our enabled() filter accepts it.
+        let metadata = log::MetadataBuilder::new().level(Level::Info).build();
+        // assert! is similar to UT_ASSERT_TRUE — the test fails if the expression is false.
+        assert!(log::Log::enabled(&logger, &metadata));
+    }
+
+    #[test]
+    fn test_logger_disabled_for_debug() {
+        let logger = DebugLogger::new();
+        // Debug is more verbose than Info, so our filter should reject it.
+        let metadata = log::MetadataBuilder::new().level(Level::Debug).build();
+        // assert! with ! (logical NOT) — equivalent to UT_ASSERT_FALSE.
+        assert!(!log::Log::enabled(&logger, &metadata));
+    }
 }
