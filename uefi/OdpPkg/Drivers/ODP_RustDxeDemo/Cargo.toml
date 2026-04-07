@@ -1,7 +1,5 @@
-# Workspace is typically not defined, but because this tree has a workspace in the root, cargo needs to have an empty [workspace] entry
-# here to indicate the tree workspace should not be used.
-[workspace]
-
+# Cargo.toml serves a similar role to an EDK II .inf file — it declares the module name, dependencies
+# (equivalent to [Packages] and [LibraryClasses]), and build settings.
 [package]
   name = "ODP_RustDxeDemo"
   version = "0.1.0"

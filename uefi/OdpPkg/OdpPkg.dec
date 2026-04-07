@@ -1,7 +1,7 @@
 ## @file
 #  Patina QemuQ35Pkg
 #
-#  Package is a derivitive of the open source OVMF package.
+#  Package contains code provided by the ODP group specifically for use in a UEFI build
 #
 #  Copyright (c) Microsoft Corporation
 #

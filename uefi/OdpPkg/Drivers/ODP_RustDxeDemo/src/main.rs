@@ -1,6 +1,3 @@
-// Cargo.toml serves a similar role to an EDK II .inf file — it declares the module name, dependencies
-// (equivalent to [Packages] and [LibraryClasses]), and build settings.
-//
 // no_std: Disables Rust's standard library (similar to how UEFI drivers don't link against a C runtime).
 //         This is behind a cfg_attr to allow the test module to use the standard library, which is not
 //         available in the UEFI environment.
