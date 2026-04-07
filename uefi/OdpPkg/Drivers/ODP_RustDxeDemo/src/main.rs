@@ -105,7 +105,7 @@ pub extern "efiapi" fn efi_main(
 
     // This log message will be sent to the UART via our DebugLogger implementation. The log level is Info,
     // so it will be printed because our enabled() method returns true for Info and below.
-    info!("Hello Rust UART DXE Demo!");
+    info!("Hello Rust DXE Demo!");
 
     // NOTE:
     // This is where the user would normally install protocols, create events, or perform other driver initialization tasks.

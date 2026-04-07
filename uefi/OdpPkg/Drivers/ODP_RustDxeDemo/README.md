@@ -1,4 +1,4 @@
-# Standalone DXE Demo Driver using Rust
+# ODP DXE Demonstration Driver using Rust
 
 This driver is a demonstration of how to create a driver written only in Rust, compile it as a stand-alone .efi executable, then integrate it into a firmware volume for a UEFI DXE Core to dispatch.
 

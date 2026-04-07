@@ -1,5 +1,5 @@
 ## @file
-# Component information file for the FSP notify phase PEI module.
+# Component information file for the Integrated DXE Demo Rust driver.
 #
 #  Copyright (c) 2016 - 2018, Intel Corporation. All rights reserved.
 #  SPDX-License-Identifier: BSD-2-Clause-Patent
@@ -7,10 +7,10 @@
 
 [Defines]
   INF_VERSION                    = 0x0001001B
-  BASE_NAME                      = RustUartDxeDemo
+  BASE_NAME                      = ODP_RustDxeDemo
   FILE_GUID                      = 56807AE4-B832-45A4-891E-CAB773564B1C
   MODULE_TYPE                    = DXE_DRIVER
-  ENTRY_POINT                    = RustUartDxeDemoEntry
+  ENTRY_POINT                    = efi_main
 
 [Sources]
   Cargo.toml
