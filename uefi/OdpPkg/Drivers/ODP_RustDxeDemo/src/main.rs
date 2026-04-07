@@ -23,8 +23,9 @@
 use core::fmt::Write;
 #[cfg(not(test))]
 use core::panic::PanicInfo;
-use log::{info, Level, LevelFilter, Metadata, Record};
+use log::{error, info, Level, LevelFilter, Metadata, Record};
 use r_efi::efi::Status;
+use r_efi::system;
 use spin::Mutex;
 use uart_16550::SerialPort;
 
@@ -94,9 +95,7 @@ static LOGGER: DebugLogger = DebugLogger::new();
 #[no_mangle]
 pub extern "efiapi" fn efi_main(
     _image_handle: *const core::ffi::c_void,
-    // To use Boot Services, Runtime Services, etc., remove the underscore prefix (e.g., `system_table`)
-    // and dereference the pointer: `unsafe { &*system_table }` to access the SystemTable fields.
-    _system_table: *const r_efi::system::SystemTable,
+    system_table: *const r_efi::system::SystemTable,
 ) -> u64 {
     // Register the global logger. set_logger() returns a Result; .map() applies the closure
     // only on success. The leading underscore discards the Result (logger registration only
@@ -107,8 +106,89 @@ pub extern "efiapi" fn efi_main(
     // so it will be printed because our enabled() method returns true for Info and below.
     info!("Hello Rust DXE Demo!");
 
-    // NOTE:
-    // This is where the user would normally install protocols, create events, or perform other driver initialization tasks.
+    // --- Runtime Services Variable Demo ---
+    // Dereference the SystemTable pointer to access its fields. This is equivalent to
+    // using SystemTable-> in C. `unsafe` is required because the compiler cannot verify
+    // the pointer is valid and must assume the code is correct.
+    let st = unsafe { &*system_table };
+
+    // Get the RuntimeServices pointer from the SystemTable, equivalent to:
+    // EFI_RUNTIME_SERVICES *RT = SystemTable->RuntimeServices;
+    let rt = unsafe { &*st.runtime_services };
+
+    // Define a vendor GUID for our test variable
+    let mut vendor_guid = r_efi::base::Guid::from_fields(
+        0x12345678,
+        0x1234,
+        0x1234,
+        0x12,
+        0x34,
+        &[0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0],
+    );
+
+    // Define the variable name as a UCS-2 (UTF-16LE) null-terminated string.
+    // UEFI uses UCS-2 strings (CHAR16 *), so each ASCII character is stored as a u16.
+    // Equivalent to: CHAR16 *VariableName = L"RustTestVar";
+    let mut var_name: [u16; 12] = [
+        'R' as u16, 'u' as u16, 's' as u16, 't' as u16, 'T' as u16, 'e' as u16, 's' as u16, 't' as u16, 'V' as u16,
+        'a' as u16, 'r' as u16, 0u16,
+    ];
+
+    // The sample data to store.
+    let write_value: u64 = 0x55AA_AA55_55AA_AA55;
+
+    // Call RT->SetVariable() to write the variable to UEFI variable storage.
+    // Equivalent to:
+    //   Status = RT->SetVariable(VariableName, &gTestVarGuid,
+    //                            EFI_VARIABLE_BOOTSERVICE_ACCESS,
+    //                            sizeof(WriteValue), &WriteValue);
+    let status = unsafe {
+        (rt.set_variable)(
+            var_name.as_mut_ptr(),
+            &mut vendor_guid,
+            system::VARIABLE_BOOTSERVICE_ACCESS,
+            core::mem::size_of::<u64>(),
+            &write_value as *const u64 as *mut core::ffi::c_void,
+        )
+    };
+    if status.is_error() {
+        error!("SetVariable failed with status: 0x{:X}", status.as_usize());
+        return status.as_usize() as u64;
+    }
+    info!("SetVariable succeeded — wrote 0x{:08X}", write_value);
+
+    // Now read the variable back using RT->GetVariable() to confirm the value.
+    // Equivalent to:
+    //   UINT64 ReadValue;
+    //   UINTN  DataSize = sizeof(ReadValue);
+    //   UINT32 ReadAttributes;
+    //   Status = RT->GetVariable(VariableName, &gTestVarGuid,
+    //                            &ReadAttributes,
+    //                            &DataSize, &ReadValue);
+    let mut read_value: u64 = 0;
+    let mut data_size: usize = core::mem::size_of::<u64>();
+    let mut read_attributes: u32 = 0;
+    let status = unsafe {
+        (rt.get_variable)(
+            var_name.as_mut_ptr(),
+            &mut vendor_guid,
+            &mut read_attributes,
+            &mut data_size,
+            &mut read_value as *mut u64 as *mut core::ffi::c_void,
+        )
+    };
+    if status.is_error() {
+        error!("GetVariable failed with status: 0x{:X}", status.as_usize());
+        return status.as_usize() as u64;
+    }
+    if write_value != read_value {
+        error!(
+            "Variable verification FAILED: wrote 0x{:08X}, read 0x{:08X}",
+            write_value, read_value
+        );
+        return Status::PROTOCOL_ERROR.as_usize() as u64;
+    }
+    info!("GetVariable succeeded — read  0x{:08X}", read_value);
 
     // Status::SUCCESS is the r-efi equivalent of EFI_SUCCESS. The cast chain converts
     // the EFI_STATUS (usize) to u64 to match the return type.
@@ -128,8 +208,9 @@ fn panic(_info: &PanicInfo) -> ! {
 // It is excluded from the UEFI .efi binary entirely — similar to how EDK II
 // Host-Based Unit Tests are separate from the driver binary.
 //
-// Tests run on your host OS (not on UEFI), so the standard library is available.
-// Run tests with: "cargo test", do NOT use the uefi target for tests.
+// These tests are quick samples that are run on your host OS (not on UEFI),
+// so the standard library is available.  Type "cargo test" without the target
+// to execute these tests.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,8 +220,10 @@ mod tests {
     #[test]
     fn test_logger_enabled_for_info() {
         let logger = DebugLogger::new();
+
         // Build metadata at Info level to verify our enabled() filter accepts it.
         let metadata = log::MetadataBuilder::new().level(Level::Info).build();
+
         // assert! is similar to UT_ASSERT_TRUE — the test fails if the expression is false.
         assert!(log::Log::enabled(&logger, &metadata));
     }
@@ -148,8 +231,10 @@ mod tests {
     #[test]
     fn test_logger_disabled_for_debug() {
         let logger = DebugLogger::new();
+
         // Debug is more verbose than Info, so our filter should reject it.
         let metadata = log::MetadataBuilder::new().level(Level::Debug).build();
+
         // assert! with ! (logical NOT) — equivalent to UT_ASSERT_FALSE.
         assert!(!log::Log::enabled(&logger, &metadata));
     }

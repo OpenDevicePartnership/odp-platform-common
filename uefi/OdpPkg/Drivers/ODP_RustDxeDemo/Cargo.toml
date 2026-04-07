@@ -9,7 +9,7 @@
 
 [dependencies]
   log = "0.4"
-  r-efi = "5.3.0"
+  r-efi = "6.0.0"
   spin = "0.9.8"
   uart_16550 = "0.3.2"
   heapless = "0.9.1"
