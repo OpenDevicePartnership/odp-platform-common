@@ -1,0 +1,26 @@
+# Workspace is typically not defined, but because this tree has a workspace in the root, cargo needs to have an empty [workspace] entry
+# here to indicate the tree workspace should not be used.
+[workspace]
+
+[package]
+  name = "StandaloneDxeDemo"
+  version = "0.1.0"
+  edition = "2021"
+
+[[bin]]
+  name = "StandaloneDxeDemo"
+  path = "src/main.rs"
+  test = false
+
+[profile.dev]
+  panic = "abort"
+
+[profile.release]
+  panic = "abort"
+
+[dependencies]
+  log = "0.4"
+  r-efi = "5.3.0"
+  spin = "0.9.8"
+  uart_16550 = "0.3.2"
+  heapless = "0.9.1"
