@@ -1,5 +1,5 @@
 [workspace]
-members = ["ec-test-lib", "ec-test-tui"]
+members = ["test-lib", "test-tui"]
 resolver = "3"
 
 [workspace.package]
