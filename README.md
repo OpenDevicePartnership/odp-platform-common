@@ -4,7 +4,7 @@
 
 A collection of common tools, components, and documentation provided by [Open Device Partnership](https://opendevicepartnership.github.io/documentation/guide/overview.html) for use within a platform build infrastructure.
 
-This repository is intended to be consumed as a git submodule within a parent platform repository. It has no central build system — each module manages its own build infrastructure and outputs independently.  See one of the platform-specific `odp-platform-*` repositories for an example.
+This repository is intended to be consumed as a git submodule within a parent platform repository. It has no central build system — each module manages its own build infrastructure and outputs independently.  See one of the platform-specific `odp-platform-*` repositories for an example of usage.
 
 ## Folder Structure and Content
 
