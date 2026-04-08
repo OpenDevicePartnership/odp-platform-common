@@ -11,11 +11,12 @@ See [ODP Documentation](https://opendevicepartnership.github.io/documentation/gu
 cargo build --release --features mock
 ```
 
-### With ACPI transport (Windows, requires EWDK + eclib)
-First build eclib from `ec-test-win/lib/` (see [ec-test-win compilation docs](../ec-test-win/README.md#compilation)), then:
+### With ACPI transport (Windows-only)
 ```
-cargo build --release --features acpi --target=aarch64-pc-windows-msvc
+cargo build-win --release --features acpi
 ```
+
+Note: building with `--features acpi` only enables the ACPI transport in the binary. To use it at runtime on Windows, you must also have the `ectest.sys` KMDF driver built/installed and the required ACPI entries/device instance present. See [ec-test-win/README.md](../ec-test-win/README.md) for the Windows driver/setup requirements.
 
 ### With serial transport
 ```

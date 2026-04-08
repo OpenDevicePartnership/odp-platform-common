@@ -1,0 +1,23 @@
+[package]
+name = "ec-test-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "CLI tool for EC feature testing"
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+clap = { version = "4.6.0", features = ["derive"] }
+critical-section.workspace = true
+ec-test-lib = { path = "../ec-test-lib" }
+time-alarm-service-messages.workspace = true
+battery-service-messages.workspace = true
+
+[features]
+mock = ["ec-test-lib/mock"]
+acpi = ["ec-test-lib/acpi"]
+serial = ["ec-test-lib/serial"]
+
+[lints]
+workspace = true

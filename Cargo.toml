@@ -1,5 +1,5 @@
 [workspace]
-members = ["ec-test-lib", "ec-test-tui"]
+members = ["ec-test-cli", "ec-test-lib", "ec-test-tui"]
 resolver = "3"
 
 [workspace.package]
@@ -9,12 +9,21 @@ repository = "https://github.com/OpenDevicePartnership/odp-platform-common"
 rust-version = "1.88"
 
 [workspace.lints.clippy]
-suspicious = "forbid"
-correctness = "forbid"
-perf = "forbid"
-style = "forbid"
+suspicious = "deny"
+correctness = "deny"
+perf = "deny"
+style = "deny"
 
 [workspace.dependencies]
 time-alarm-service-messages = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0" }
 battery-service-messages = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0" }
 embedded-mcu-hal = { git = "https://github.com/OpenDevicePartnership/embedded-mcu" }
+
+# Note: This is needed because the service message crates use `embedded-services` as a transitive dep.
+# `embedded-services` depends on `critical-section` so we need to provide an implementation.
+# We provide the `std` implementation here just to satisfy the dependency, but it is not actually needed.
+# This isn't needed in `release` build since it seems CS stuff is eliminated as dead-code, but needed for `dev`.
+critical-section = { version = "1", features = ["std"] }
+
+[workspace.metadata.cargo-machete]
+ignored = ["critical-section"]
