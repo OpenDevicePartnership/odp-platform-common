@@ -2,13 +2,14 @@
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A collection of common tools, components, and documentation provided by [Open Device Partnership](https://opendevicepartnership.github.io/documentation/guide/overview.html) for use within a platform build infrastructure.
+[![Workflow: cargo-vet](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/cargo-vet.yml/badge.svg)](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/build.yml)
+[![Workflow: check](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/check.yml/badge.svg)](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/check.yml)
 
-This repository is intended to be consumed as a git submodule within a parent platform repository. It has no central build system — each module manages its own build infrastructure and outputs independently.  See one of the platform-specific `odp-platform-*` repositories for an example of usage.
+This repository contains a collection of common tools, components, and documentation provided by [Open Device Partnership](https://opendevicepartnership.github.io/documentation/guide/overview.html) and intended to be consumed as a git submodule within a parent platform repository.  It has no central build system — each module manages its own build infrastructure and outputs independently.  See one of the platform-specific `odp-platform-*` repositories for an example of usage for specific modules.
 
 ## Folder Structure and Content
 
-Top-level directories represent broad segments of a platform such as a firmware stage or hardware target. Each segment directory contains one or more module folders, each with its own component-specific information such as a readme and build infrastructure.
+The top-level directories represent broad segments of a platform such as a firmware stage or hardware target. Each segment directory contains one or more module folders that are intended to be stand-alone items with its own component-specific information such as a readme and build infrastructure.
 
 ```text
 <repo root>
