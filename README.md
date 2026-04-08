@@ -15,9 +15,9 @@ Top-level directories represent broad segments of a platform such as a firmware 
 ├── uefi/               Platform segment — UEFI firmware
 │   └── OdpPkg/             Standard UEFI package containing drivers and libraries for integration into an EDK II firmware build.
 ├── ec/                 Platform segment — Embedded controller firmware
-│   ├── ec-test-lib/        EC transport traits and implementations
-│   ├── ec-test-tui/        Terminal UI for EC feature demonstration
-│   └── ec-test-win/        Windows-native EC driver, library, and CLI
+│   ├── test-lib/           EC transport traits and implementations
+│   ├── test-tui/           Terminal UI for EC feature demonstration
+│   └── test-win/           Windows-native EC driver, library, and CLI
 ├── common/             Cross-platform and cross-segment shared items
 │   └── supply-chain/       Cargo-vet audit configuration for Rust dependencies
 ├── LICENSE             License information covering this repository
