@@ -28,7 +28,7 @@ rustup target add x86_64-unknown-uefi
 To compile, navagate to this driver folder and build the code using the proper target installed above:
 
 ``` bash
-cd ./uefi/OdpPkg/Drivers/StandaloneDxeDemo_ru
+cd ./uefi/OdpPkg/Drivers/ODP_RustDxeDemo
 cargo build --target x86_64-unknown-uefi
 ```
 
@@ -40,8 +40,8 @@ The `.efi` file can be added to the UEFI `.fdf` file without a `.dsc` file entry
 
 ``` text
   FILE DRIVER = 56807AE4-B832-45A4-891E-CAB773564B1C {
-    SECTION DXE_DEPEX = <path-to>/OdpPkg/Drivers/StandaloneDxeDemo_ru/true.depex
-    SECTION PE32 = <path-to>/OdpPkg/Drivers/StandaloneDxeDemo_ru/target/x86_64-unknown-uefi/debug/StandaloneDxeDemo.efi
+    SECTION DXE_DEPEX = <path-to>/OdpPkg/Drivers/ODP_RustDxeDemo/true.depex
+    SECTION PE32 = <path-to>/OdpPkg/Drivers/ODP_RustDxeDemo/target/x86_64-unknown-uefi/debug/StandaloneDxeDemo.efi
     SECTION UI = "StandaloneDxeDemo"
   }
 ```

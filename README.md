@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[![Workflow: cargo-vet](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/cargo-vet.yml/badge.svg)](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/build.yml)
+[![Workflow: cargo-vet](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/cargo-vet.yml/badge.svg)](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/cargo-vet.yml)
 [![Workflow: check](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/check.yml/badge.svg)](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/check.yml)
 
 This repository contains a collection of common tools, components, and documentation provided by [Open Device Partnership](https://opendevicepartnership.github.io/documentation/guide/overview.html) and intended to be consumed as a git submodule within a parent platform repository.
