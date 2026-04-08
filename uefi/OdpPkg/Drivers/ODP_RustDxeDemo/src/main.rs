@@ -96,7 +96,8 @@ pub extern "efiapi" fn efi_main(
 ) -> u64 {
     // Register the global logger. set_logger() returns a Result; .map() applies the closure
     // only on success. The leading underscore discards the Result (logger registration only
-    // fails if a logger was already set).
+    // fails if a logger was already set).  Note that the UART is never initialized in this
+    // driver, we are relying on the platform's debug UART already being set.
     let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(LevelFilter::Info));
 
     // This log message will be sent to the UART via our DebugLogger implementation. The log level is Info,
@@ -152,7 +153,7 @@ pub extern "efiapi" fn efi_main(
         error!("SetVariable failed with status: 0x{:X}", status.as_usize());
         return status.as_usize() as u64;
     }
-    info!("SetVariable succeeded - wrote 0x{:08X}", write_value);
+    info!("SetVariable succeeded - wrote 0x{:016X}", write_value);
 
     // Now read the variable back using RT->GetVariable() to confirm the value.
     // Equivalent to:
@@ -180,12 +181,12 @@ pub extern "efiapi" fn efi_main(
     }
     if write_value != read_value {
         error!(
-            "Variable verification FAILED: wrote 0x{:08X}, read 0x{:08X}",
+            "Variable verification FAILED: wrote 0x{:016X}, read 0x{:016X}",
             write_value, read_value
         );
         return Status::PROTOCOL_ERROR.as_usize() as u64;
     }
-    info!("GetVariable succeeded - read 0x{:08X}", read_value);
+    info!("GetVariable succeeded - read 0x{:016X}", read_value);
 
     // Status::SUCCESS is the r-efi equivalent of EFI_SUCCESS. The cast chain converts
     // the EFI_STATUS (usize) to u64 to match the return type.

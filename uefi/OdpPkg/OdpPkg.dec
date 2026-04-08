@@ -1,5 +1,5 @@
 ## @file
-#  Patina QemuQ35Pkg
+#  OdpPkg.dec
 #
 #  Package contains code provided by the ODP group specifically for use in a UEFI build
 #

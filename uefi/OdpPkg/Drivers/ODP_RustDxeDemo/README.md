@@ -25,7 +25,7 @@ rustup target add x86_64-unknown-uefi
 
 ## Compile
 
-To compile, navagate to this driver folder and build the code using the proper target installed above:
+To compile, navigate to this driver folder and build the code using the proper target installed above:
 
 ``` bash
 cd ./uefi/OdpPkg/Drivers/ODP_RustDxeDemo
