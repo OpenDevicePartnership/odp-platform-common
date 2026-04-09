@@ -6,6 +6,3 @@
 **/Cargo.lock
 # Exception: track the ec workspace lock file (binary crate needs reproducible builds)
 !ec/Cargo.lock
-
-# ODP relies on Visual Studio Code, so ignoring its cache directory
-.vscode/

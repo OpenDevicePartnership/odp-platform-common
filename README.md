@@ -23,6 +23,7 @@ Each segment directory contains one or more module folders that are intended to 
 │   └── test-win/           Windows-native EC driver, library, and CLI
 ├── common/             Cross-platform and cross-segment shared items
 │   └── supply-chain/       Cargo-vet audit configuration for Rust dependencies
+├── .vscode/            Optional VS Code workspace settings (editor, formatter, rust-analyzer config)
 ├── LICENSE             License information covering this repository
 ├── CODE_OF_CONDUCT.md  Community interaction and behavior guidelines
 ├── CONTRIBUTING.md     How to submit issues, pull requests, and contribution licensing terms
