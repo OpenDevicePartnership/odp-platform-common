@@ -157,8 +157,7 @@ jobs:
         with:
           log-level: warn
           command: check
-          arguments: --locked
-          manifest-path: ec/Cargo.toml
+          arguments: --locked --manifest-path ec/Cargo.toml
 
   machete:
     # cargo-machete checks for unused dependencies in Cargo.toml files
