@@ -10,8 +10,8 @@
         "editor.defaultFormatter": "rust-lang.rust-analyzer"
     },
     "rust-analyzer.linkedProjects": [
-        "ec-test-tui/Cargo.toml",
-        "ec-test-lib/Cargo.toml",
-        "ec-test-cli/Cargo.toml"
+        "ec/test-tui/Cargo.toml",
+        "ec/test-lib/Cargo.toml",
+        "ec/test-cli/Cargo.toml"
     ]
 }
