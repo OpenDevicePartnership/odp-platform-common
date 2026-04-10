@@ -1,0 +1,13 @@
+# Cargo.toml serves a similar role to an EDK II .inf file — it declares the module name, dependencies
+# (equivalent to [Packages] and [LibraryClasses]), and build settings.
+[package]
+  name = "ODP_RustDxeDemo"
+  version = "0.1.0"
+  edition = "2021"
+
+[dependencies]
+  log = "0.4"
+  r-efi = "6.0.0"
+  spin = "0.9.8"
+  uart_16550 = "0.3.2"
+  heapless = "0.9.1"

@@ -1,0 +1,27 @@
+## @file
+#  OdpPkg.dec
+#
+#  Package contains code provided by the ODP group specifically for use in a UEFI build
+#
+#  Copyright (c) Microsoft Corporation
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+
+[Defines]
+  DEC_SPECIFICATION              = 0x0001001B
+  PACKAGE_NAME                   = OdpPkg
+  PACKAGE_GUID                   = C3B61931-52AC-461F-A5A8-C4781DB47553
+  PACKAGE_VERSION                = 1.0
+
+[Includes]
+  Include
+
+[LibraryClasses]
+
+[Guids]
+  gOdpPkgTokenSpaceGuid    = { 0x98fa740e, 0xb557, 0x4480, { 0x92, 0x83, 0x5c, 0x19, 0x23, 0xcc, 0x66, 0x46 }}
+
+[Protocols]
+
+[PcdsFixedAtBuild]

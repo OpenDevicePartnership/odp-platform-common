@@ -23,7 +23,7 @@ battery-service-messages.workspace = true
 critical-section.workspace = true
 
 # EC transport library
-ec-test-lib = { path = "../ec-test-lib" }
+ec-test-lib = { path = "../test-lib" }
 
 [features]
 mock = ["ec-test-lib/mock"]

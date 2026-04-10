@@ -35,7 +35,8 @@ jobs:
       run: cargo install --root ${{ runner.tool_cache }}/cargo-vet --version ${{ env.CARGO_VET_VERSION }} cargo-vet
   
     - name: Invoke cargo-vet
-      run: cargo vet --locked
+      run: cargo vet --locked --store-path ../common/supply-chain
+      working-directory: ec
     
     - name: Save PR number
     # PR number is saved as an artifact so it can be used to determine the PR to comment on by the vet-pr-comment workflow

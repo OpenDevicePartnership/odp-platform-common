@@ -33,6 +33,7 @@ jobs:
           components: rustfmt
       - name: cargo fmt --check
         run: cargo fmt --check
+        working-directory: ec
 
   # Enable once we have a released crate
   # semver:
@@ -66,6 +67,7 @@ jobs:
       # Note: --all-features is not used because ec-test-lib's acpi feature requires aarch64-pc-windows-msvc
       - name: cargo doc
         run: cargo doc --no-deps --locked
+        working-directory: ec
         env:
           RUSTDOCFLAGS: --cfg docsrs
 
@@ -106,6 +108,7 @@ jobs:
       # --feature-powerset runs for every combination of features
       - name: cargo hack
         run: cargo hack --feature-powerset ${{ matrix.hack-flags }} clippy --locked -p ${{ matrix.crate }} -- -Dwarnings -D clippy::suspicious -D clippy::correctness -D clippy::perf -D clippy::style
+        working-directory: ec
 
   acpi-clippy:
     # Separate job for the acpi feature which requires cross-compiling to aarch64-pc-windows-msvc
@@ -136,6 +139,7 @@ jobs:
           key: cargo-xwin-crt
       - name: cargo xwin clippy
         run: cargo xwin clippy --target aarch64-pc-windows-msvc --features acpi --locked -p ec-test-lib -- -Dwarnings -D clippy::suspicious -D clippy::correctness -D clippy::perf -D clippy::style
+        working-directory: ec
 
   deny:
     # cargo-deny checks licenses, advisories, sources, and bans for
@@ -154,6 +158,7 @@ jobs:
           log-level: warn
           command: check
           arguments: --locked
+          manifest-path: ec/Cargo.toml
 
   machete:
     # cargo-machete checks for unused dependencies in Cargo.toml files
@@ -169,3 +174,4 @@ jobs:
         uses: taiki-e/install-action@cargo-machete
       - name: cargo machete
         run: cargo machete
+        working-directory: ec
