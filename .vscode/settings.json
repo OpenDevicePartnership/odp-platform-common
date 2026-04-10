@@ -11,6 +11,7 @@
     },
     "rust-analyzer.linkedProjects": [
         "ec-test-tui/Cargo.toml",
-        "ec-test-lib/Cargo.toml"
+        "ec-test-lib/Cargo.toml",
+        "ec-test-cli/Cargo.toml"
     ]
 }

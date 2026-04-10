@@ -20,6 +20,7 @@ tui-input = "0.14.0"
 time-alarm-service-messages.workspace = true
 embedded-mcu-hal.workspace = true
 battery-service-messages.workspace = true
+critical-section.workspace = true
 
 # EC transport library
 ec-test-lib = { path = "../ec-test-lib" }

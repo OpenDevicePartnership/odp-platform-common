@@ -44,7 +44,7 @@ fn main() -> color_eyre::Result<()> {
             .parse::<u32>()
             .expect("Serial baud rate must be a u32");
 
-        ec_test_lib::serial::Serial::new(path.as_str(), baud, flow_control)
+        ec_test_lib::serial::Serial::new(path.as_str(), baud, flow_control)?
     };
 
     app::App::new(source).run(terminal)

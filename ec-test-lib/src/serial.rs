@@ -118,7 +118,7 @@ pub struct Serial {
 }
 
 impl Serial {
-    pub fn new(path: &str, baud_rate: u32, flow_control: bool) -> Self {
+    pub fn new(path: &str, baud_rate: u32, flow_control: bool) -> Result<Self, Error> {
         let flow_control = if flow_control {
             serialport::FlowControl::Hardware
         } else {
@@ -129,13 +129,13 @@ impl Serial {
             .flow_control(flow_control)
             .timeout(READ_TIMEOUT)
             .open()
-            .expect("Serial port must be available");
+            .map_err(|e| Error::Io(format!("{e}")))?;
         port.clear(serialport::ClearBuffer::All)
-            .expect("Port must be available");
+            .map_err(|e| Error::Io(format!("{e}")))?;
 
-        Self {
+        Ok(Self {
             port: Arc::new(Mutex::new(port)),
-        }
+        })
     }
 }
 

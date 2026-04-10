@@ -79,8 +79,11 @@ jobs:
       matrix:
         # Get early warning of new lints which are regularly introduced in beta channels.
         toolchain: [stable, beta]
-        crate: [ec-test-lib, ec-test-tui]
+        crate: [ec-test-cli, ec-test-lib, ec-test-tui]
         include:
+          - crate: ec-test-cli
+            # Same transport feature constraints as ec-test-tui; exclude acpi (cross-compile only)
+            hack-flags: "--exclude-features acpi --mutually-exclusive-features mock,serial --at-least-one-of mock,serial"
           - crate: ec-test-lib
             # Skip acpi feature (requires aarch64-pc-windows-msvc) and mark mock/serial as mutually exclusive
             hack-flags: "--exclude-features acpi --mutually-exclusive-features mock,serial"
