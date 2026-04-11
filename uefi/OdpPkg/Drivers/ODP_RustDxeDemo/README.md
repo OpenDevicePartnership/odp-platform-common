@@ -40,9 +40,9 @@ The `.efi` file can be added to the UEFI `.fdf` file without a `.dsc` file entry
 
 ``` text
   FILE DRIVER = 56807AE4-B832-45A4-891E-CAB773564B1C {
-    SECTION DXE_DEPEX = <path-to>/OdpPkg/Drivers/ODP_RustDxeDemo/true.depex
-    SECTION PE32 = <path-to>/OdpPkg/Drivers/ODP_RustDxeDemo/target/x86_64-unknown-uefi/debug/StandaloneDxeDemo.efi
-    SECTION UI = "StandaloneDxeDemo"
+    SECTION DXE_DEPEX = <path-to>/OdpPkg/Drivers/ODP_RustDxeDemo/ODP_RustDxeDemo.depex
+    SECTION PE32 = <path-to>/OdpPkg/Drivers/ODP_RustDxeDemo/target/x86_64-unknown-uefi/debug/ODP_RustDxeDemo.efi
+    SECTION UI = "ODP_RustDxeDemo"
   }
 ```
 
