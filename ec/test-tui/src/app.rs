@@ -73,10 +73,7 @@ impl App {
         let mut modules: BTreeMap<SelectedTab, Box<dyn Module>> = BTreeMap::new();
         let source = Arc::new(source);
 
-        modules.insert(
-            SelectedTab::TabThermal,
-            Box::new(Thermal::new(Arc::clone(&source))),
-        );
+        modules.insert(SelectedTab::TabThermal, Box::new(Thermal::new(Arc::clone(&source))));
         modules.insert(SelectedTab::TabRTC, Box::new(Rtc::new(Arc::clone(&source))));
         modules.insert(SelectedTab::TabUCSI, Box::new(Ucsi::new()));
 
