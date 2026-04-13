@@ -466,6 +466,7 @@ dependencies = [
  "embedded-mcu-hal",
  "ratatui",
  "strum 0.27.2",
+ "supports-unicode",
  "time-alarm-service-messages",
  "tui-input",
 ]
@@ -1402,6 +1403,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "supports-unicode"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7401a30af6cb5818bb64852270bb722533397edcfc7344954a38f420819ece2"
 
 [[package]]
 name = "syn"

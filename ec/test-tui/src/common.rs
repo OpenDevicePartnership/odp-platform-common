@@ -7,6 +7,22 @@ use ratatui::{
     widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Padding, Widget},
 };
 use std::collections::VecDeque;
+use std::sync::LazyLock;
+
+/// Chart marker selected once at startup.
+/// Override with `EC_TUI_MARKER=dot` or `EC_TUI_MARKER=braille`.
+/// Default: Braille if the terminal advertises Unicode support, Dot otherwise.
+static CHART_MARKER: LazyLock<symbols::Marker> = LazyLock::new(|| match std::env::var("EC_TUI_MARKER").as_deref() {
+    Ok("dot") => symbols::Marker::Dot,
+    Ok("braille") => symbols::Marker::Braille,
+    _ => {
+        if supports_unicode::on(supports_unicode::Stream::Stdout) {
+            symbols::Marker::Braille
+        } else {
+            symbols::Marker::Dot
+        }
+    }
+});
 
 #[derive(Default)]
 pub struct SampleBuf<T, const N: usize> {
@@ -79,7 +95,7 @@ pub fn render_chart(area: Rect, buf: &mut Buffer, graph: Graph) {
     let samples = &graph.samples[..];
     let datasets = vec![
         Dataset::default()
-            .marker(symbols::Marker::Braille)
+            .marker(*CHART_MARKER)
             .style(Style::default().fg(graph.color))
             .graph_type(GraphType::Line)
             .data(samples),
