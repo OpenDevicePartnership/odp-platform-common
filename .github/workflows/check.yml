@@ -65,6 +65,8 @@ jobs:
       - name: Install nightly
         uses: dtolnay/rust-toolchain@nightly
       # Note: --all-features is not used because ec-test-lib's acpi feature requires aarch64-pc-windows-msvc
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
       - name: cargo doc
         run: cargo doc --no-deps --locked
         working-directory: ec

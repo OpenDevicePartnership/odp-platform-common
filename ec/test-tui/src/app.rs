@@ -69,7 +69,7 @@ pub struct App {
 
 impl App {
     /// Construct a new instance of [`App`] from any source type.
-    pub fn new<S: Source + 'static>(source: S) -> Self {
+    pub fn new<S: Source + 'static>(source: S, battery_graph_interval: Duration) -> Self {
         let mut modules: BTreeMap<SelectedTab, Box<dyn Module>> = BTreeMap::new();
         let source = Arc::new(source);
 
@@ -77,13 +77,7 @@ impl App {
         modules.insert(SelectedTab::TabRTC, Box::new(Rtc::new(Arc::clone(&source))));
         modules.insert(SelectedTab::TabUCSI, Box::new(Ucsi::new()));
 
-        let battery = {
-            #[cfg(feature = "mock")]
-            let interval = std::time::Duration::from_secs(1);
-            #[cfg(not(feature = "mock"))]
-            let interval = std::time::Duration::from_secs(60);
-            Battery::new(Arc::clone(&source)).with_graph_sample_interval(interval)
-        };
+        let battery = Battery::new(Arc::clone(&source)).with_graph_sample_interval(battery_graph_interval);
         modules.insert(SelectedTab::TabBattery, Box::new(battery));
 
         Self {

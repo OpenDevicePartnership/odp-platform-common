@@ -1,4 +1,3 @@
-#[cfg(any(feature = "acpi", feature = "serial"))]
 pub(crate) mod guid {
     pub const _SENSOR_CRT_TEMP: uuid::Uuid = uuid::uuid!("218246e7-baf6-45f1-aa13-07e4845256b8");
     pub const _SENSOR_PROCHOT_TEMP: uuid::Uuid = uuid::uuid!("22dc52d2-fd0b-47ab-95b8-26552f9831a5");
@@ -11,7 +10,6 @@ pub(crate) mod guid {
 }
 
 /// Convert deciKelvin to degrees Celsius
-#[cfg(any(feature = "mock", feature = "acpi", feature = "serial"))]
 pub(crate) const fn dk_to_c(dk: u32) -> f64 {
     (dk as f64 / 10.0) - 273.15
 }
