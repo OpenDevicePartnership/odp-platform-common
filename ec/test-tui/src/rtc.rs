@@ -95,11 +95,7 @@ mod rtc_timer {
         }
     }
 
-    fn format_option_result<T>(
-        label: &str,
-        opt: &Fetched<T>,
-        f: impl FnOnce(&T) -> String,
-    ) -> String {
+    fn format_option_result<T>(label: &str, opt: &Fetched<T>, f: impl FnOnce(&T) -> String) -> String {
         match opt {
             None => format!("{label}Pending..."),
             Some(Ok(value)) => format!("{label}{}", f(value)),

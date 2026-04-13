@@ -441,8 +441,8 @@ impl<S: BatterySource> Battery<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use battery_service_messages::{BatterySwapCapability, BatteryTechnology, PowerUnit};
     use crate::common::test_support::TestError;
+    use battery_service_messages::{BatterySwapCapability, BatteryTechnology, PowerUnit};
     use ec_test_lib::{BatterySource, ErrorType};
 
     // ── test doubles ─────────────────────────────────────────────────────────
