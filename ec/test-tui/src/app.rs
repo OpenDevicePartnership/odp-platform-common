@@ -17,7 +17,6 @@ use ratatui::{
     widgets::{Block, Padding, Tabs, Widget},
 };
 
-use std::marker::PhantomData;
 use std::{
     collections::BTreeMap,
     sync::Arc,
@@ -62,16 +61,15 @@ enum SelectedTab {
 }
 
 /// The main application which holds the state and logic of the application.
-pub struct App<S: Source> {
+pub struct App {
     state: AppState,
     selected_tab: SelectedTab,
     modules: BTreeMap<SelectedTab, Box<dyn Module>>,
-    phantom: PhantomData<S>,
 }
 
-impl<S: Source + 'static> App<S> {
-    /// Construct a new instance of [`App`].
-    pub fn new(source: S) -> Self {
+impl App {
+    /// Construct a new instance of [`App`] from any source type.
+    pub fn new<S: Source + 'static>(source: S) -> Self {
         let mut modules: BTreeMap<SelectedTab, Box<dyn Module>> = BTreeMap::new();
         let source = Arc::new(source);
 
@@ -95,7 +93,6 @@ impl<S: Source + 'static> App<S> {
             state: Default::default(),
             selected_tab: Default::default(),
             modules,
-            phantom: PhantomData,
         }
     }
 
@@ -188,7 +185,7 @@ impl<S: Source + 'static> App<S> {
     }
 }
 
-impl<S: Source + 'static> Widget for &App<S> {
+impl Widget for &App {
     fn render(self, area: Rect, buf: &mut Buffer) {
         use Constraint::{Length, Min};
         let vertical = Layout::vertical([Length(1), Min(0), Length(1)]);
@@ -204,7 +201,7 @@ impl<S: Source + 'static> Widget for &App<S> {
     }
 }
 
-impl<S: Source> Drop for App<S> {
+impl Drop for App {
     fn drop(&mut self) {
         ratatui::restore();
     }
