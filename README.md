@@ -20,6 +20,7 @@ Each segment directory contains one or more module folders that are intended to 
 ├── ec/                 Platform segment — Embedded controller firmware
 │   ├── test-lib/           EC transport traits and implementations
 │   ├── test-tui/           Terminal UI for EC feature demonstration
+│   ├── test-cli/           Command-line interface for EC testing and validation
 │   └── test-win/           Windows-native EC driver, library, and CLI
 ├── common/             Cross-platform and cross-segment shared items
 │   └── supply-chain/       Cargo-vet audit configuration for Rust dependencies
