@@ -80,7 +80,8 @@ fn main() -> color_eyre::Result<()> {
         SourceKind::Serial => {
             let port = cli.port.expect("--port is required for --source serial");
             let hw_flow = matches!(cli.flow_control, FlowControl::Hardware);
-            let source = ec_test_lib::serial::Serial::new(&port, cli.baud, hw_flow, cli.sensor_instance, cli.fan_instance)?;
+            let source =
+                ec_test_lib::serial::Serial::new(&port, cli.baud, hw_flow, cli.sensor_instance, cli.fan_instance)?;
             let period = Duration::from_secs(cli.sample_period.unwrap_or(60));
             app::App::new(source, period).run(terminal)
         }
