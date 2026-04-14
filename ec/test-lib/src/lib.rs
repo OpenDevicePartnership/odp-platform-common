@@ -1,14 +1,5 @@
 // Multiple source features may be enabled simultaneously; the binary selects one at runtime.
 
-#[cfg(all(
-    feature = "acpi",
-    not(all(target_arch = "aarch64", target_os = "windows", target_env = "msvc"))
-))]
-compile_error!(
-    "The `acpi` feature requires targeting `aarch64-pc-windows-msvc`.\n\
-     If on WSL, try: cargo build-win --release --features acpi"
-);
-
 use battery_service_messages::{BixFixedStrings, BstReturn};
 use time_alarm_service_messages::{
     AcpiTimerId, AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
@@ -16,12 +7,7 @@ use time_alarm_service_messages::{
 
 pub(crate) mod common;
 
-#[cfg(all(
-    feature = "acpi",
-    target_arch = "aarch64",
-    target_os = "windows",
-    target_env = "msvc"
-))]
+#[cfg(target_os = "windows")]
 pub mod acpi;
 
 pub mod mock;

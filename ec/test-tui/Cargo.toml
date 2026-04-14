@@ -27,8 +27,5 @@ critical-section.workspace = true
 # EC transport library
 ec-test-lib = { path = "../test-lib" }
 
-[features]
-acpi = ["ec-test-lib/acpi"]
-
 [lints]
 workspace = true
