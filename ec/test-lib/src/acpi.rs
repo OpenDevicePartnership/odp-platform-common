@@ -21,7 +21,7 @@ const GUID_DEVCLASS_ECTEST: GUID = GUID::from_values(
     0x429d,
     [0x93, 0x05, 0x31, 0xc0, 0xad, 0x27, 0x88, 0x0a],
 );
-const IOCTL_ACPI_EVAL_METHOD_EX: u32 = 0x0032C018; // CTL_CODE(FILE_DEVICE_ACPI, 4, METHOD_BUFFERED, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+const IOCTL_ACPI_EVAL_METHOD_EX: u32 = 0x0032C018; // CTL_CODE(FILE_DEVICE_ACPI, 6, METHOD_BUFFERED, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
 
 fn get_device_path() -> Result<String, AcpiParseError> {
     let device_info_set = unsafe {
