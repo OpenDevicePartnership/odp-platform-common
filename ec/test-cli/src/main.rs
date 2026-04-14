@@ -20,12 +20,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let source = ec_test_lib::mock::Mock::default();
 
     #[cfg(feature = "acpi")]
-    let source = ec_test_lib::acpi::Acpi::default();
+    let source = ec_test_lib::acpi::Acpi::new(cli.fan_instance);
 
     #[cfg(feature = "serial")]
     let source = {
         let flow_control = cli.flow_control == cli::FlowControl::Hw;
-        ec_test_lib::serial::Serial::new(&cli.port, cli.baud, flow_control)?
+        ec_test_lib::serial::Serial::new(&cli.port, cli.baud, flow_control, cli.sensor_instance, cli.fan_instance)?
     };
 
     match cli.command {

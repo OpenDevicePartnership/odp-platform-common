@@ -63,7 +63,6 @@ const BUFFER_SZ: usize = 256;
 const MCTP_MAX_PACKET_LEN: usize = 69;
 
 const THERMAL_VAR_LEN: u16 = 4;
-const SENSOR_INSTANCE: u8 = 0;
 const BATTERY_INSTANCE: u8 = 0;
 
 #[derive(Clone, Copy, Debug)]
@@ -115,10 +114,18 @@ fn append_cmd(
 #[derive(Clone)]
 pub struct Serial {
     port: Arc<Mutex<Box<dyn SerialPort>>>,
+    sensor_instance: u8,
+    fan_instance: u8,
 }
 
 impl Serial {
-    pub fn new(path: &str, baud_rate: u32, flow_control: bool) -> Result<Self, Error> {
+    pub fn new(
+        path: &str,
+        baud_rate: u32,
+        flow_control: bool,
+        sensor_instance: u8,
+        fan_instance: u8,
+    ) -> Result<Self, Error> {
         let flow_control = if flow_control {
             serialport::FlowControl::Hardware
         } else {
@@ -135,6 +142,8 @@ impl Serial {
 
         Ok(Self {
             port: Arc::new(Mutex::new(port)),
+            sensor_instance,
+            fan_instance,
         })
     }
 }
@@ -221,7 +230,7 @@ impl Serial {
 
     fn thermal_get_var(&self, guid: uuid::Uuid) -> Result<f64, Error> {
         let request = ThermalRequest::ThermalGetVarRequest {
-            instance_id: SENSOR_INSTANCE,
+            instance_id: self.fan_instance,
             len: THERMAL_VAR_LEN,
             var_uuid: guid.to_bytes_le(),
         };
@@ -236,7 +245,7 @@ impl Serial {
 
     fn thermal_set_var(&self, guid: uuid::Uuid, raw: u32) -> Result<(), Error> {
         let request = ThermalRequest::ThermalSetVarRequest {
-            instance_id: SENSOR_INSTANCE,
+            instance_id: self.fan_instance,
             len: THERMAL_VAR_LEN,
             var_uuid: guid.to_bytes_le(),
             set_var: raw,
@@ -258,7 +267,7 @@ impl ErrorType for Serial {
 impl ThermalSource for Serial {
     fn get_temperature(&self) -> Result<f64, Self::Error> {
         let request = ThermalRequest::ThermalGetTmpRequest {
-            instance_id: SENSOR_INSTANCE,
+            instance_id: self.sensor_instance,
         };
         let response = self.send(Destination::Thermal, request)?;
 

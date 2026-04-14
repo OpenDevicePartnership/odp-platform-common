@@ -346,11 +346,13 @@ impl TryFrom<Vec<u8>> for AcpiEvalOutputBufferV1 {
 }
 
 #[derive(Default, Copy, Clone)]
-pub struct Acpi {}
+pub struct Acpi {
+    fan_instance: u8,
+}
 
 impl Acpi {
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new(fan_instance: u8) -> Self {
+        Self { fan_instance }
     }
 
     fn evaluate(name: &str, args: Option<&[AcpiMethodArgument]>) -> Result<AcpiEvalOutputBufferV1, AcpiParseError> {
@@ -438,35 +440,40 @@ impl Acpi {
     }
 }
 
-fn acpi_get_var(guid: uuid::Uuid) -> Result<f64, Error> {
-    let args = [AcpiMethodArgument::Int(1), AcpiMethodArgument::Guid(guid.to_bytes_le())];
-    let output = Acpi::evaluate("\\_SB.ECT0.TGVR", Some(&args))?;
+impl Acpi {
+    fn acpi_get_var(&self, guid: uuid::Uuid) -> Result<f64, Error> {
+        let args = [
+            AcpiMethodArgument::Int(self.fan_instance as u32),
+            AcpiMethodArgument::Guid(guid.to_bytes_le()),
+        ];
+        let output = Acpi::evaluate("\\_SB.ECT0.TGVR", Some(&args))?;
 
-    if output.count != 2 {
-        Err(Error::UnexpectedResponse)
-    } else if output.arguments[0].data_32 != 0 {
-        Err(Error::OperationFailed)
-    } else {
-        Ok(f64::from(output.arguments[1].data_32))
+        if output.count != 2 {
+            Err(Error::UnexpectedResponse)
+        } else if output.arguments[0].data_32 != 0 {
+            Err(Error::OperationFailed)
+        } else {
+            Ok(f64::from(output.arguments[1].data_32))
+        }
     }
-}
 
-fn acpi_set_var(guid: uuid::Uuid, value: f64) -> Result<(), Error> {
-    let value = value as u32;
+    fn acpi_set_var(&self, guid: uuid::Uuid, value: f64) -> Result<(), Error> {
+        let value = value as u32;
 
-    let args = [
-        AcpiMethodArgument::Int(1),
-        AcpiMethodArgument::Guid(guid.to_bytes_le()),
-        AcpiMethodArgument::Int(value),
-    ];
-    let output = Acpi::evaluate("\\_SB.ECT0.TSVR", Some(&args))?;
+        let args = [
+            AcpiMethodArgument::Int(self.fan_instance as u32),
+            AcpiMethodArgument::Guid(guid.to_bytes_le()),
+            AcpiMethodArgument::Int(value),
+        ];
+        let output = Acpi::evaluate("\\_SB.ECT0.TSVR", Some(&args))?;
 
-    if output.count != 1 {
-        Err(Error::UnexpectedResponse)
-    } else if output.arguments[0].data_32 != 0 {
-        Err(Error::OperationFailed)
-    } else {
-        Ok(())
+        if output.count != 1 {
+            Err(Error::UnexpectedResponse)
+        } else if output.arguments[0].data_32 != 0 {
+            Err(Error::OperationFailed)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -485,27 +492,27 @@ impl ThermalSource for Acpi {
     }
 
     fn get_rpm(&self) -> Result<f64, Self::Error> {
-        acpi_get_var(common::guid::FAN_CURRENT_RPM)
+        self.acpi_get_var(common::guid::FAN_CURRENT_RPM)
     }
 
     fn get_min_rpm(&self) -> Result<f64, Self::Error> {
-        acpi_get_var(common::guid::FAN_MIN_RPM)
+        self.acpi_get_var(common::guid::FAN_MIN_RPM)
     }
 
     fn get_max_rpm(&self) -> Result<f64, Self::Error> {
-        acpi_get_var(common::guid::FAN_MAX_RPM)
+        self.acpi_get_var(common::guid::FAN_MAX_RPM)
     }
 
     fn get_threshold(&self, threshold: Threshold) -> Result<f64, Self::Error> {
         match threshold {
-            Threshold::On => Ok(common::dk_to_c(acpi_get_var(common::guid::FAN_ON_TEMP)? as u32)),
-            Threshold::Ramping => Ok(common::dk_to_c(acpi_get_var(common::guid::FAN_RAMP_TEMP)? as u32)),
-            Threshold::Max => Ok(common::dk_to_c(acpi_get_var(common::guid::FAN_MAX_TEMP)? as u32)),
+            Threshold::On => Ok(common::dk_to_c(self.acpi_get_var(common::guid::FAN_ON_TEMP)? as u32)),
+            Threshold::Ramping => Ok(common::dk_to_c(self.acpi_get_var(common::guid::FAN_RAMP_TEMP)? as u32)),
+            Threshold::Max => Ok(common::dk_to_c(self.acpi_get_var(common::guid::FAN_MAX_TEMP)? as u32)),
         }
     }
 
     fn set_rpm(&self, rpm: f64) -> Result<(), Self::Error> {
-        acpi_set_var(common::guid::FAN_CURRENT_RPM, rpm)
+        self.acpi_set_var(common::guid::FAN_CURRENT_RPM, rpm)
     }
 }
 

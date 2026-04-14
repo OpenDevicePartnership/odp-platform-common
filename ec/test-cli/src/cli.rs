@@ -15,6 +15,14 @@ pub struct Cli {
     #[arg(long, default_value = "115200")]
     pub baud: u32,
 
+    /// Sensor instance index.
+    #[arg(long, default_value_t = 0)]
+    pub sensor_instance: u8,
+
+    /// Fan instance index.
+    #[arg(long, default_value_t = 0)]
+    pub fan_instance: u8,
+
     #[command(subcommand)]
     pub command: Command,
 }

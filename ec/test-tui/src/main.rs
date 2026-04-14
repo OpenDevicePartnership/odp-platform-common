@@ -30,6 +30,14 @@ struct Cli {
     #[arg(long, default_value_t = 115_200)]
     baud: u32,
 
+    /// Sensor instance index.
+    #[arg(long, default_value_t = 0)]
+    sensor_instance: u8,
+
+    /// Fan instance index.
+    #[arg(long, default_value_t = 0)]
+    fan_instance: u8,
+
     /// Battery graph sample period in seconds.
     /// Defaults to 1 for mock sources and 60 for real hardware.
     #[arg(long)]
@@ -72,7 +80,8 @@ fn main() -> color_eyre::Result<()> {
         SourceKind::Serial => {
             let port = cli.port.expect("--port is required for --source serial");
             let hw_flow = matches!(cli.flow_control, FlowControl::Hardware);
-            let source = ec_test_lib::serial::Serial::new(&port, cli.baud, hw_flow)?;
+            let source =
+                ec_test_lib::serial::Serial::new(&port, cli.baud, hw_flow, cli.sensor_instance, cli.fan_instance)?;
             let period = Duration::from_secs(cli.sample_period.unwrap_or(60));
             app::App::new(source, period).run(terminal)
         }
@@ -80,7 +89,7 @@ fn main() -> color_eyre::Result<()> {
         #[cfg(feature = "acpi")]
         SourceKind::Acpi => {
             let period = Duration::from_secs(cli.sample_period.unwrap_or(60));
-            app::App::new(ec_test_lib::acpi::Acpi::default(), period).run(terminal)
+            app::App::new(ec_test_lib::acpi::Acpi::new(cli.fan_instance), period).run(terminal)
         }
     }
 }
