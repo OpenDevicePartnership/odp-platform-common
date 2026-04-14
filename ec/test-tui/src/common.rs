@@ -66,13 +66,14 @@ pub struct Graph {
 
 // Split an area in a direction with given percentages
 pub fn area_split(area: Rect, direction: Direction, first: u16, second: u16) -> [Rect; 2] {
+    // SAFETY: We always split into exactly 2 constraints, so the conversion is infallible.
     Layout::default()
         .direction(direction)
         .constraints([Constraint::Percentage(first), Constraint::Percentage(second)])
         .split(area)
         .as_ref()
         .try_into()
-        .unwrap()
+        .expect("layout always produces exactly 2 areas")
 }
 
 // Create a wrapping title block
@@ -132,4 +133,28 @@ pub fn time_labels(t: usize, max_samples: usize) -> [Span<'static>; 3] {
         Span::styled(mid.to_string(), Style::default().bold()),
         Span::styled(end.to_string(), Style::default().bold()),
     ]
+}
+
+/// Minimal test doubles shared across module test suites.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use ec_test_lib::{Error as EcError, ErrorKind};
+
+    /// A zero-size error type that always maps to [`ErrorKind::Other`].
+    #[derive(Debug)]
+    pub(crate) struct TestError;
+
+    impl std::fmt::Display for TestError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "test error")
+        }
+    }
+
+    impl std::error::Error for TestError {}
+
+    impl EcError for TestError {
+        fn kind(&self) -> ErrorKind {
+            ErrorKind::Other
+        }
+    }
 }

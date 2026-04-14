@@ -1,10 +1,4 @@
-const _: () = {
-    let count = cfg!(feature = "mock") as u8 + cfg!(feature = "acpi") as u8 + cfg!(feature = "serial") as u8;
-    assert!(
-        count <= 1,
-        "At most one of the following features may be enabled: `mock`, `acpi`, or `serial`."
-    );
-};
+// Multiple source features may be enabled simultaneously; the binary selects one at runtime.
 
 #[cfg(all(
     feature = "acpi",
@@ -30,10 +24,7 @@ pub(crate) mod common;
 ))]
 pub mod acpi;
 
-#[cfg(feature = "mock")]
 pub mod mock;
-
-#[cfg(feature = "serial")]
 pub mod serial;
 
 /// EC data source error.
@@ -158,8 +149,67 @@ pub trait RtcSource: ErrorType {
 }
 
 /// Marker trait implemented by all EC data sources.
-pub trait Source: Clone + ThermalSource + BatterySource + RtcSource {}
-impl<T: Clone + ThermalSource + BatterySource + RtcSource> Source for T {}
+pub trait Source: ThermalSource + BatterySource + RtcSource {}
+impl<T: ThermalSource + BatterySource + RtcSource> Source for T {}
+
+// Blanket impls so that Arc<S> can be used anywhere a source trait is required.
+// This lets modules share one source instance via Arc instead of each owning a clone.
+use std::sync::Arc;
+
+impl<T: ErrorType> ErrorType for Arc<T> {
+    type Error = T::Error;
+}
+
+impl<T: ThermalSource> ThermalSource for Arc<T> {
+    fn get_temperature(&self) -> Result<f64, Self::Error> {
+        self.as_ref().get_temperature()
+    }
+    fn get_rpm(&self) -> Result<f64, Self::Error> {
+        self.as_ref().get_rpm()
+    }
+    fn get_min_rpm(&self) -> Result<f64, Self::Error> {
+        self.as_ref().get_min_rpm()
+    }
+    fn get_max_rpm(&self) -> Result<f64, Self::Error> {
+        self.as_ref().get_max_rpm()
+    }
+    fn get_threshold(&self, threshold: Threshold) -> Result<f64, Self::Error> {
+        self.as_ref().get_threshold(threshold)
+    }
+    fn set_rpm(&self, rpm: f64) -> Result<(), Self::Error> {
+        self.as_ref().set_rpm(rpm)
+    }
+}
+
+impl<T: BatterySource> BatterySource for Arc<T> {
+    fn get_bst(&self) -> Result<BstReturn, Self::Error> {
+        self.as_ref().get_bst()
+    }
+    fn get_bix(&self) -> Result<BixFixedStrings, Self::Error> {
+        self.as_ref().get_bix()
+    }
+    fn set_btp(&self, trippoint: u32) -> Result<(), Self::Error> {
+        self.as_ref().set_btp(trippoint)
+    }
+}
+
+impl<T: RtcSource> RtcSource for Arc<T> {
+    fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities, Self::Error> {
+        self.as_ref().get_capabilities()
+    }
+    fn get_real_time(&self) -> Result<AcpiTimestamp, Self::Error> {
+        self.as_ref().get_real_time()
+    }
+    fn get_wake_status(&self, timer_id: AcpiTimerId) -> Result<TimerStatus, Self::Error> {
+        self.as_ref().get_wake_status(timer_id)
+    }
+    fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy, Self::Error> {
+        self.as_ref().get_expired_timer_wake_policy(timer_id)
+    }
+    fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds, Self::Error> {
+        self.as_ref().get_timer_value(timer_id)
+    }
+}
 
 /// Fan threshold type
 pub enum Threshold {

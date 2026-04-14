@@ -15,9 +15,9 @@ time-alarm-service-messages.workspace = true
 battery-service-messages.workspace = true
 
 [features]
-mock = ["ec-test-lib/mock"]
+mock = []
 acpi = ["ec-test-lib/acpi"]
-serial = ["ec-test-lib/serial"]
+serial = []
 
 [lints]
 workspace = true

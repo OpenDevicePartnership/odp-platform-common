@@ -1,11 +1,3 @@
-const _: () = {
-    let count = cfg!(feature = "mock") as u8 + cfg!(feature = "acpi") as u8 + cfg!(feature = "serial") as u8;
-    assert!(
-        count == 1,
-        "Exactly one of the following features must be enabled: `mock`, `acpi`, or `serial`."
-    );
-};
-
 mod app;
 mod battery;
 mod common;
@@ -14,38 +6,81 @@ mod thermal;
 mod ucsi;
 mod widgets;
 
+use std::time::Duration;
+
+use clap::Parser;
+
+/// ODP Embedded Controller demo TUI.
+#[derive(Parser)]
+#[command(about, version)]
+struct Cli {
+    /// Data source to use.
+    #[arg(long, value_enum)]
+    source: SourceKind,
+
+    /// Serial port path (required when --source serial).
+    #[arg(long, required_if_eq("source", "serial"))]
+    port: Option<String>,
+
+    /// Serial flow-control mode.
+    #[arg(long, value_enum, default_value_t = FlowControl::None)]
+    flow_control: FlowControl,
+
+    /// Serial baud rate.
+    #[arg(long, default_value_t = 115_200)]
+    baud: u32,
+
+    /// Battery graph sample period in seconds.
+    /// Defaults to 1 for mock sources and 60 for real hardware.
+    #[arg(long)]
+    sample_period: Option<u64>,
+}
+
+/// Available data sources (only variants whose feature is compiled in are shown).
+#[derive(clap::ValueEnum, Clone, Copy)]
+enum SourceKind {
+    /// Deterministic in-process mock — no hardware required.
+    Mock,
+    /// Real hardware via serial transport.
+    Serial,
+    /// Real hardware via ACPI (aarch64-pc-windows-msvc only).
+    #[cfg(feature = "acpi")]
+    Acpi,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Default)]
+enum FlowControl {
+    #[default]
+    #[value(name = "none")]
+    None,
+    #[value(name = "hw")]
+    Hardware,
+}
+
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
+    let cli = Cli::parse();
     let terminal = ratatui::init();
 
-    #[cfg(feature = "mock")]
-    let source = ec_test_lib::mock::Mock::default();
+    match cli.source {
+        SourceKind::Mock => {
+            let period = Duration::from_secs(cli.sample_period.unwrap_or(1));
+            app::App::new(ec_test_lib::mock::Mock::default(), period).run(terminal)
+        }
 
-    #[cfg(feature = "acpi")]
-    let source = ec_test_lib::acpi::Acpi::default();
+        SourceKind::Serial => {
+            let port = cli.port.expect("--port is required for --source serial");
+            let hw_flow = matches!(cli.flow_control, FlowControl::Hardware);
+            let source = ec_test_lib::serial::Serial::new(&port, cli.baud, hw_flow)?;
+            let period = Duration::from_secs(cli.sample_period.unwrap_or(60));
+            app::App::new(source, period).run(terminal)
+        }
 
-    #[cfg(feature = "serial")]
-    let source = {
-        // Revisit: Quick and easy for grabbing command line args, but when
-        // debug tab PR is merged this can switch to clap for arg parsing
-        let mut args = std::env::args().skip(1);
-        let path = args.next().expect("Serial port path must be provided");
-        let flow_control = args.next().expect("Flow control mode must be provided");
-        let flow_control = match flow_control.as_str() {
-            "hw" => true,
-            "none" => false,
-            _ => panic!("Flow control mode must be either `hw` or `none`"),
-        };
-
-        let baud = args
-            .next()
-            .unwrap_or("115200".to_string())
-            .parse::<u32>()
-            .expect("Serial baud rate must be a u32");
-
-        ec_test_lib::serial::Serial::new(path.as_str(), baud, flow_control)?
-    };
-
-    app::App::new(source).run(terminal)
+        #[cfg(feature = "acpi")]
+        SourceKind::Acpi => {
+            let period = Duration::from_secs(cli.sample_period.unwrap_or(60));
+            app::App::new(ec_test_lib::acpi::Acpi::default(), period).run(terminal)
+        }
+    }
 }

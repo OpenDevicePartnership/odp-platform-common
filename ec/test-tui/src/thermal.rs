@@ -10,19 +10,20 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Gauge, Paragraph, Widget},
 };
+use std::sync::Arc;
 use tui_input::{Input, backend::crossterm::EventHandler};
 
 const LABEL_COLOR: Color = tailwind::SLATE.c200;
 const MAX_SAMPLES: usize = 60;
 
-// Always return mock data for thresholds until sensor GET/SET VAR and GET/SET THRS supported
-fn get_sensor_thresholds<S: ThermalSource>(_source: &S) -> Result<SensorThresholds> {
-    Ok(SensorThresholds {
-        _warn_low: 13.0,
+// TODO: Implement using source once GET/SET VAR and GET/SET THRS commands are supported.
+fn get_sensor_thresholds() -> SensorThresholds {
+    SensorThresholds {
+        warn_low: 13.0,
         warn_high: 35.0,
         prochot: 40.0,
         critical: 45.0,
-    })
+    }
 }
 
 fn get_fan_bounds<S: ThermalSource>(source: &S) -> Result<FanRpmBounds> {
@@ -42,23 +43,24 @@ fn get_fan_levels<S: ThermalSource>(source: &S) -> Result<FanStateLevels> {
 
 #[derive(Default)]
 struct SensorThresholds {
-    _warn_low: f64,
-    warn_high: f64,
-    prochot: f64,
-    critical: f64,
+    #[allow(dead_code)] // reserved for future low-threshold enforcement
+    pub warn_low: f64,
+    pub warn_high: f64,
+    pub prochot: f64,
+    pub critical: f64,
 }
 
 #[derive(Default)]
 struct SensorState {
-    skin_temp: f64,
-    temp_success: bool,
-    thresholds: SensorThresholds,
-    thresholds_success: bool,
-    samples: common::SampleBuf<f64, MAX_SAMPLES>,
+    pub skin_temp: f64,
+    pub temp_success: bool,
+    pub thresholds: SensorThresholds,
+    pub thresholds_success: bool,
+    pub samples: common::SampleBuf<f64, MAX_SAMPLES>,
 }
 
 impl SensorState {
-    fn update<S: ThermalSource>(&mut self, source: &S) {
+    pub(crate) fn update<S: ThermalSource>(&mut self, source: &S) {
         if let Ok(temp) = source.get_temperature() {
             self.skin_temp = temp;
             self.samples.insert(temp);
@@ -67,41 +69,37 @@ impl SensorState {
             self.temp_success = false;
         }
 
-        if let Ok(thresholds) = get_sensor_thresholds(source) {
-            self.thresholds = thresholds;
-            self.thresholds_success = true;
-        } else {
-            self.thresholds_success = false;
-        }
+        self.thresholds = get_sensor_thresholds();
+        self.thresholds_success = true;
     }
 }
 
 #[derive(Default)]
 struct FanRpmBounds {
-    min: f64,
-    max: f64,
+    pub min: f64,
+    pub max: f64,
 }
 
 #[derive(Default)]
 struct FanStateLevels {
-    on: f64,
-    ramping: f64,
-    max: f64,
+    pub on: f64,
+    pub ramping: f64,
+    pub max: f64,
 }
 
 #[derive(Default)]
 struct FanState {
-    rpm: f64,
-    rpm_success: bool,
-    rpm_bounds: FanRpmBounds,
-    bounds_success: bool,
-    state_levels: FanStateLevels,
-    levels_success: bool,
-    samples: common::SampleBuf<u32, MAX_SAMPLES>,
+    pub rpm: f64,
+    pub rpm_success: bool,
+    pub rpm_bounds: FanRpmBounds,
+    pub bounds_success: bool,
+    pub state_levels: FanStateLevels,
+    pub levels_success: bool,
+    pub samples: common::SampleBuf<u32, MAX_SAMPLES>,
 }
 
 impl FanState {
-    fn update<S: ThermalSource>(&mut self, source: &S) {
+    pub(crate) fn update<S: ThermalSource>(&mut self, source: &S) {
         if let Ok(rpm) = source.get_rpm() {
             self.rpm = rpm;
             self.samples.insert(rpm as u32);
@@ -131,7 +129,7 @@ pub struct Thermal<S: ThermalSource> {
     sensor: SensorState,
     fan: FanState,
     t: usize,
-    source: S,
+    source: Arc<S>,
 }
 
 impl<S: ThermalSource> Module for Thermal<S> {
@@ -166,7 +164,7 @@ impl<S: ThermalSource> Module for Thermal<S> {
 }
 
 impl<S: ThermalSource> Thermal<S> {
-    pub fn new(source: S) -> Self {
+    pub fn new(source: Arc<S>) -> Self {
         let mut inst = Self {
             rpm_input: Default::default(),
             sensor: Default::default(),
@@ -329,5 +327,134 @@ impl<S: ThermalSource> Thermal<S> {
             .scroll((0, scroll as u16))
             .block(Block::bordered().title("Set Fan RPM <ENTER>"));
         input.render(area, buf);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::test_support::TestError;
+    use ec_test_lib::{ErrorType, Threshold};
+
+    // ── test doubles ─────────────────────────────────────────────────────────
+
+    struct OkThermal;
+    impl ErrorType for OkThermal {
+        type Error = TestError;
+    }
+    impl ThermalSource for OkThermal {
+        fn get_temperature(&self) -> Result<f64, Self::Error> {
+            Ok(25.5)
+        }
+        fn get_rpm(&self) -> Result<f64, Self::Error> {
+            Ok(3000.0)
+        }
+        fn get_min_rpm(&self) -> Result<f64, Self::Error> {
+            Ok(0.0)
+        }
+        fn get_max_rpm(&self) -> Result<f64, Self::Error> {
+            Ok(6000.0)
+        }
+        fn get_threshold(&self, threshold: Threshold) -> Result<f64, Self::Error> {
+            match threshold {
+                Threshold::On => Ok(28.0),
+                Threshold::Ramping => Ok(40.0),
+                Threshold::Max => Ok(44.0),
+            }
+        }
+        fn set_rpm(&self, _: f64) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    struct ErrThermal;
+    impl ErrorType for ErrThermal {
+        type Error = TestError;
+    }
+    impl ThermalSource for ErrThermal {
+        fn get_temperature(&self) -> Result<f64, Self::Error> {
+            Err(TestError)
+        }
+        fn get_rpm(&self) -> Result<f64, Self::Error> {
+            Err(TestError)
+        }
+        fn get_min_rpm(&self) -> Result<f64, Self::Error> {
+            Err(TestError)
+        }
+        fn get_max_rpm(&self) -> Result<f64, Self::Error> {
+            Err(TestError)
+        }
+        fn get_threshold(&self, _: Threshold) -> Result<f64, Self::Error> {
+            Err(TestError)
+        }
+        fn set_rpm(&self, _: f64) -> Result<(), Self::Error> {
+            Err(TestError)
+        }
+    }
+
+    // ── SensorState ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn sensor_update_sets_success_and_temp_on_ok() {
+        let mut state = SensorState::default();
+        state.update(&OkThermal);
+        assert!(state.temp_success);
+        assert_eq!(state.skin_temp, 25.5);
+        // get_sensor_thresholds returns hardcoded values; always succeeds
+        assert!(state.thresholds_success);
+        assert_eq!(state.thresholds.warn_high, 35.0);
+    }
+
+    #[test]
+    fn sensor_update_clears_temp_success_on_err() {
+        let mut state = SensorState::default();
+        state.skin_temp = 99.9;
+        state.update(&ErrThermal);
+        assert!(!state.temp_success);
+        // Stale value is preserved on failure.
+        assert_eq!(state.skin_temp, 99.9);
+        // Hardcoded thresholds are always loaded successfully.
+        assert!(state.thresholds_success);
+    }
+
+    #[test]
+    fn sensor_update_records_sample_on_ok() {
+        let mut state = SensorState::default();
+        state.update(&OkThermal);
+        // At least one sample must have been pushed.
+        assert!(!state.samples.get().is_empty());
+    }
+
+    // ── FanState ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn fan_update_sets_success_on_ok() {
+        let mut state = FanState::default();
+        state.update(&OkThermal);
+        assert!(state.rpm_success);
+        assert_eq!(state.rpm, 3000.0);
+        assert!(state.bounds_success);
+        assert_eq!(state.rpm_bounds.max, 6000.0);
+        assert!(state.levels_success);
+        assert_eq!(state.state_levels.ramping, 40.0);
+    }
+
+    #[test]
+    fn fan_update_clears_success_on_err() {
+        let mut state = FanState::default();
+        state.rpm = 1234.0;
+        state.update(&ErrThermal);
+        assert!(!state.rpm_success);
+        assert!(!state.bounds_success);
+        assert!(!state.levels_success);
+        // Stale RPM is preserved.
+        assert_eq!(state.rpm, 1234.0);
+    }
+
+    #[test]
+    fn fan_update_records_sample_on_ok() {
+        let mut state = FanState::default();
+        state.update(&OkThermal);
+        assert!(!state.samples.get().is_empty());
     }
 }

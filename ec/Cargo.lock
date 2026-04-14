@@ -459,6 +459,7 @@ name = "ec-test-tui"
 version = "0.1.0"
 dependencies = [
  "battery-service-messages",
+ "clap",
  "color-eyre",
  "critical-section",
  "crossterm",

@@ -17,11 +17,9 @@ use ratatui::{
     widgets::{Block, Padding, Tabs, Widget},
 };
 
-use std::marker::PhantomData;
 use std::{
-    cell::RefCell,
     collections::BTreeMap,
-    rc::Rc,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -32,7 +30,11 @@ pub(crate) trait Module {
     /// The module's title.
     fn title(&self) -> &'static str;
 
-    /// Update the module.
+    /// Poll the data source and refresh internal state.
+    ///
+    /// Returns `()` intentionally: each module tracks failures via internal
+    /// success flags so the UI can display error states rather than crashing.
+    /// If a future need arises, this signature could change to `Result<()>`.
     fn update(&mut self);
 
     /// Handle input event.
@@ -63,39 +65,29 @@ enum SelectedTab {
 }
 
 /// The main application which holds the state and logic of the application.
-pub struct App<S: Source> {
+pub struct App {
     state: AppState,
     selected_tab: SelectedTab,
     modules: BTreeMap<SelectedTab, Box<dyn Module>>,
-    phantom: PhantomData<S>,
 }
 
-impl<S: Source + Clone + 'static> App<S> {
-    /// Construct a new instance of [`App`].
-    pub fn new(source: S) -> Self {
+impl App {
+    /// Construct a new instance of [`App`] from any source type.
+    pub fn new<S: Source + 'static>(source: S, battery_graph_interval: Duration) -> Self {
         let mut modules: BTreeMap<SelectedTab, Box<dyn Module>> = BTreeMap::new();
-        let source = Rc::new(RefCell::new(source));
+        let source = Arc::new(source);
 
-        let thermal_source = Rc::clone(&source);
-        let battery_source = Rc::clone(&source);
-        let rtc_source = Rc::clone(&source);
-
-        modules.insert(
-            SelectedTab::TabThermal,
-            Box::new(Thermal::new(thermal_source.borrow().clone())),
-        );
-        modules.insert(SelectedTab::TabRTC, Box::new(Rtc::new(rtc_source.borrow().clone())));
+        modules.insert(SelectedTab::TabThermal, Box::new(Thermal::new(Arc::clone(&source))));
+        modules.insert(SelectedTab::TabRTC, Box::new(Rtc::new(Arc::clone(&source))));
         modules.insert(SelectedTab::TabUCSI, Box::new(Ucsi::new()));
-        modules.insert(
-            SelectedTab::TabBattery,
-            Box::new(Battery::new(battery_source.borrow().clone())),
-        );
+
+        let battery = Battery::new(Arc::clone(&source)).with_graph_sample_interval(battery_graph_interval);
+        modules.insert(SelectedTab::TabBattery, Box::new(battery));
 
         Self {
             state: Default::default(),
             selected_tab: Default::default(),
             modules,
-            phantom: PhantomData,
         }
     }
 
@@ -188,7 +180,7 @@ impl<S: Source + Clone + 'static> App<S> {
     }
 }
 
-impl<S: Source + 'static> Widget for &App<S> {
+impl Widget for &App {
     fn render(self, area: Rect, buf: &mut Buffer) {
         use Constraint::{Length, Min};
         let vertical = Layout::vertical([Length(1), Min(0), Length(1)]);
@@ -204,7 +196,7 @@ impl<S: Source + 'static> Widget for &App<S> {
     }
 }
 
-impl<S: Source> Drop for App<S> {
+impl Drop for App {
     fn drop(&mut self) {
         ratatui::restore();
     }
