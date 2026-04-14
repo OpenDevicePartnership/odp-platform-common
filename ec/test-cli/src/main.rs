@@ -27,6 +27,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             dispatch(source, cli.command)
         }
 
-        SourceKind::Acpi => dispatch(ec_test_lib::acpi::Acpi::default(), cli.command),
+        SourceKind::Acpi => dispatch(ec_test_lib::os::OsSource::default(), cli.command),
     }
 }

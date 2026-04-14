@@ -445,6 +445,7 @@ dependencies = [
  "battery-service-messages",
  "embedded-mcu-hal",
  "embedded-services",
+ "libc",
  "num_enum",
  "scopeguard",
  "serialport",

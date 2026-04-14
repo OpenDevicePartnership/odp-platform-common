@@ -78,7 +78,7 @@ fn main() -> color_eyre::Result<()> {
 
         SourceKind::Acpi => {
             let period = Duration::from_secs(cli.sample_period.unwrap_or(60));
-            app::App::new(ec_test_lib::acpi::Acpi::default(), period).run(terminal)
+            app::App::new(ec_test_lib::os::OsSource::default(), period).run(terminal)
         }
     }
 }

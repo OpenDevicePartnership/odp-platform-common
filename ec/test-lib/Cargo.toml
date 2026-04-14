@@ -14,8 +14,14 @@ battery-service-messages.workspace = true
 
 embedded-mcu-hal = { workspace = true }
 
-# ACPI feature specific
+# Serial transport specific
+serialport = { version = "4.8.1" }
+embedded-services = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0" }
+thermal-service-messages = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
 num_enum = { version = "0.7.5", default-features = false }
+scopeguard = { version = "1.2" }
 windows = { version = "0.58", features = [
     "Win32_Devices_DeviceAndDriverInstallation",
     "Win32_Devices_Properties",
@@ -25,12 +31,9 @@ windows = { version = "0.58", features = [
     "Win32_System_SystemServices",
     "Win32_Security",
 ] }
-scopeguard = { version = "1.2" }
 
-# Serial feature specific
-serialport = { version = "4.8.1" }
-embedded-services = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0" }
-thermal-service-messages = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0" }
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { version = "0.2" }
 
 [features]
 

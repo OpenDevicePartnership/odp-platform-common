@@ -346,9 +346,9 @@ impl TryFrom<Vec<u8>> for AcpiEvalOutputBufferV1 {
 }
 
 #[derive(Default, Copy, Clone)]
-pub struct Acpi {}
+pub struct OsSource {}
 
-impl Acpi {
+impl OsSource {
     pub fn new() -> Self {
         Default::default()
     }
@@ -426,7 +426,7 @@ impl Acpi {
     /// Evaluates the provided method with the provided arguments and returns its single u32 result.
     /// Errors if the result is not a single u32.
     fn evaluate_u32(name: &str, args: Option<&[AcpiMethodArgument]>) -> Result<u32, Error> {
-        let output = Acpi::evaluate(name, args)?;
+        let output = OsSource::evaluate(name, args)?;
 
         if output.count != 1 {
             Err(Error::UnexpectedResponse)
@@ -440,7 +440,7 @@ impl Acpi {
 
 fn acpi_get_var(guid: uuid::Uuid) -> Result<f64, Error> {
     let args = [AcpiMethodArgument::Int(1), AcpiMethodArgument::Guid(guid.to_bytes_le())];
-    let output = Acpi::evaluate("\\_SB.ECT0.TGVR", Some(&args))?;
+    let output = OsSource::evaluate("\\_SB.ECT0.TGVR", Some(&args))?;
 
     if output.count != 2 {
         Err(Error::UnexpectedResponse)
@@ -459,7 +459,7 @@ fn acpi_set_var(guid: uuid::Uuid, value: f64) -> Result<(), Error> {
         AcpiMethodArgument::Guid(guid.to_bytes_le()),
         AcpiMethodArgument::Int(value),
     ];
-    let output = Acpi::evaluate("\\_SB.ECT0.TSVR", Some(&args))?;
+    let output = OsSource::evaluate("\\_SB.ECT0.TSVR", Some(&args))?;
 
     if output.count != 1 {
         Err(Error::UnexpectedResponse)
@@ -470,13 +470,13 @@ fn acpi_set_var(guid: uuid::Uuid, value: f64) -> Result<(), Error> {
     }
 }
 
-impl ErrorType for Acpi {
+impl ErrorType for OsSource {
     type Error = Error;
 }
 
-impl ThermalSource for Acpi {
+impl ThermalSource for OsSource {
     fn get_temperature(&self) -> Result<f64, Self::Error> {
-        let output = Acpi::evaluate("\\_SB.ECT0.RTMP", None)?;
+        let output = OsSource::evaluate("\\_SB.ECT0.RTMP", None)?;
         if output.count != 1 {
             Err(Error::UnexpectedResponse)
         } else {
@@ -509,9 +509,9 @@ impl ThermalSource for Acpi {
     }
 }
 
-impl BatterySource for Acpi {
+impl BatterySource for OsSource {
     fn get_bst(&self) -> Result<BstReturn, Self::Error> {
-        let data = Acpi::evaluate("\\_SB.ECT0.TBST", None)?;
+        let data = OsSource::evaluate("\\_SB.ECT0.TBST", None)?;
 
         // We are expecting 4 32-bit values
         if data.count != 4 {
@@ -527,7 +527,7 @@ impl BatterySource for Acpi {
     }
 
     fn get_bix(&self) -> Result<BixFixedStrings, Self::Error> {
-        let data = Acpi::evaluate("\\_SB.ECT0.TBIX", None)?;
+        let data = OsSource::evaluate("\\_SB.ECT0.TBIX", None)?;
         // We are expecting 21 arguments
         if data.count != 21 {
             Err(Error::UnexpectedResponse)
@@ -577,21 +577,21 @@ impl BatterySource for Acpi {
 
     fn set_btp(&self, trippoint: u32) -> Result<(), Self::Error> {
         // No return value is expected according to ACPI spec
-        let _ = Acpi::evaluate("\\_SB.ECT0.TBTP", Some(&[AcpiMethodArgument::Int(trippoint)]))?;
+        let _ = OsSource::evaluate("\\_SB.ECT0.TBTP", Some(&[AcpiMethodArgument::Int(trippoint)]))?;
         Ok(())
     }
 }
 
-impl RtcSource for Acpi {
+impl RtcSource for OsSource {
     fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities, Self::Error> {
-        Ok(TimeAlarmDeviceCapabilities(Acpi::evaluate_u32(
+        Ok(TimeAlarmDeviceCapabilities(OsSource::evaluate_u32(
             "\\_SB.ECT0._GCP",
             None,
         )?))
     }
 
     fn get_real_time(&self) -> Result<AcpiTimestamp, Self::Error> {
-        let result = Acpi::evaluate("\\_SB.ECT0._GRT", None)?;
+        let result = OsSource::evaluate("\\_SB.ECT0._GRT", None)?;
         if result.count != 1 {
             return Err(Error::UnexpectedResponse);
         }
@@ -605,21 +605,21 @@ impl RtcSource for Acpi {
     }
 
     fn get_wake_status(&self, timer_id: AcpiTimerId) -> Result<TimerStatus, Self::Error> {
-        Ok(TimerStatus(Acpi::evaluate_u32(
+        Ok(TimerStatus(OsSource::evaluate_u32(
             "\\_SB.ECT0._GWS",
             Some(&[AcpiMethodArgument::Int(timer_id.into())]),
         )?))
     }
 
     fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy, Self::Error> {
-        Ok(AlarmExpiredWakePolicy(Acpi::evaluate_u32(
+        Ok(AlarmExpiredWakePolicy(OsSource::evaluate_u32(
             "\\_SB.ECT0._TIP",
             Some(&[AcpiMethodArgument::Int(timer_id.into())]),
         )?))
     }
 
     fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds, Self::Error> {
-        Ok(AlarmTimerSeconds(Acpi::evaluate_u32(
+        Ok(AlarmTimerSeconds(OsSource::evaluate_u32(
             "\\_SB.ECT0._TIV",
             Some(&[AcpiMethodArgument::Int(timer_id.into())]),
         )?))

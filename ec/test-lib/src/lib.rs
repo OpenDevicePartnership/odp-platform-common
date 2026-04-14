@@ -7,8 +7,7 @@ use time_alarm_service_messages::{
 
 pub(crate) mod common;
 
-#[cfg(target_os = "windows")]
-pub mod acpi;
+pub mod os;
 
 pub mod mock;
 pub mod serial;
