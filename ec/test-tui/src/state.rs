@@ -7,6 +7,7 @@ use crate::common::SampleBuf;
 
 pub const BATTERY_MAX_SAMPLES: usize = 60;
 pub const THERMAL_MAX_SAMPLES: usize = 60;
+pub const SYSTEM_MAX_SAMPLES: usize = 60;
 
 /// `None` = not yet fetched, `Some(Ok(v))` = success, `Some(Err(e))` = fetch failed.
 pub type Fetched<T> = Option<color_eyre::Result<T>>;
@@ -110,6 +111,49 @@ pub enum ThermalCommand {
     SetRpm(f64),
 }
 
+// ── System (CPU / Memory / Network) ──────────────────────────────────────────
+
+#[derive(Default)]
+pub struct CpuData {
+    pub usage: f64,
+    pub per_core: Vec<f32>,
+    pub samples: SampleBuf<f64, SYSTEM_MAX_SAMPLES>,
+    pub success: bool,
+}
+
+#[derive(Default)]
+pub struct MemoryData {
+    pub used_bytes: u64,
+    pub total_bytes: u64,
+    pub swap_used_bytes: u64,
+    pub swap_total_bytes: u64,
+    /// History samples: RAM usage expressed as 0.0–100.0 %.
+    pub samples: SampleBuf<f64, SYSTEM_MAX_SAMPLES>,
+    pub success: bool,
+}
+
+#[derive(Default)]
+pub struct NetworkData {
+    /// Current receive rate in bytes/sec.
+    pub rx_bps: f64,
+    /// Current transmit rate in bytes/sec.
+    pub tx_bps: f64,
+    pub total_rx: u64,
+    pub total_tx: u64,
+    pub rx_samples: SampleBuf<f64, SYSTEM_MAX_SAMPLES>,
+    pub tx_samples: SampleBuf<f64, SYSTEM_MAX_SAMPLES>,
+    pub success: bool,
+}
+
+#[derive(Default)]
+pub struct SystemState {
+    pub cpu: CpuData,
+    pub memory: MemoryData,
+    pub network: NetworkData,
+    /// Monotonic tick counter; used for graph x-axis labels.
+    pub t: usize,
+}
+
 // ── RTC ──────────────────────────────────────────────────────────────────────
 
 #[derive(Default)]
@@ -135,4 +179,5 @@ pub struct AppState {
     pub battery: BatteryState,
     pub thermal: ThermalState,
     pub rtc: RtcState,
+    pub system: SystemState,
 }

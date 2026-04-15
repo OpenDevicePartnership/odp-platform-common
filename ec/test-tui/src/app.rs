@@ -2,6 +2,7 @@ use crate::battery::Battery;
 use crate::logging::LogBuffer;
 use crate::rtc::Rtc;
 use crate::state::{AppState, BatteryCommand, ThermalCommand};
+use crate::system::System;
 use crate::thermal::Thermal;
 
 use color_eyre::Result;
@@ -30,6 +31,7 @@ pub(crate) enum TabModule {
     Battery(Battery),
     Thermal(Thermal),
     Rtc(Rtc),
+    System(System),
 }
 
 impl TabModule {
@@ -38,6 +40,7 @@ impl TabModule {
             Self::Battery(_) => "Battery Information",
             Self::Thermal(_) => "Thermal Information",
             Self::Rtc(_) => "RTC Information",
+            Self::System(_) => "System Information",
         }
     }
 
@@ -46,6 +49,7 @@ impl TabModule {
             Self::Battery(m) => m.handle_event(evt),
             Self::Thermal(m) => m.handle_event(evt),
             Self::Rtc(m) => m.handle_event(evt),
+            Self::System(m) => m.handle_event(evt),
         }
     }
 
@@ -54,6 +58,7 @@ impl TabModule {
             Self::Battery(m) => m.render(state, area, buf),
             Self::Thermal(m) => m.render(state, area, buf),
             Self::Rtc(m) => m.render(state, area, buf),
+            Self::System(m) => m.render(state, area, buf),
         }
     }
 
@@ -62,6 +67,7 @@ impl TabModule {
             Self::Battery(m) => m.render_card(state, area, buf),
             Self::Thermal(m) => m.render_card(state, area, buf),
             Self::Rtc(m) => m.render_card(state, area, buf),
+            Self::System(m) => m.render_card(state, area, buf),
         }
     }
 }
@@ -84,13 +90,15 @@ enum SelectedTab {
     TabThermal,
     #[strum(to_string = "RTC")]
     TabRTC,
+    #[strum(to_string = "System")]
+    TabSystem,
 }
 
 /// The main application: holds UI state and a read handle on the shared data.
 pub struct App {
     run_state: RunState,
     selected_tab: SelectedTab,
-    modules: [TabModule; 3],
+    modules: [TabModule; 4],
     shared_state: Arc<RwLock<AppState>>,
     log_buffer: LogBuffer,
     log_visible: bool,
@@ -112,6 +120,7 @@ impl App {
             TabModule::Battery(Battery::new(battery_tx)),
             TabModule::Thermal(Thermal::new(thermal_tx)),
             TabModule::Rtc(Rtc::new()),
+            TabModule::System(System::new()),
         ];
 
         let app = Self {
@@ -169,6 +178,7 @@ impl App {
                 KeyCode::Char('2') => self.selected_tab = SelectedTab::TabBattery,
                 KeyCode::Char('3') => self.selected_tab = SelectedTab::TabThermal,
                 KeyCode::Char('4') => self.selected_tab = SelectedTab::TabRTC,
+                KeyCode::Char('5') => self.selected_tab = SelectedTab::TabSystem,
                 KeyCode::Char('l') => {
                     self.log_visible = !self.log_visible;
                     if self.log_visible {
@@ -350,7 +360,7 @@ impl App {
         let mut spans = vec![
             Span::styled(" ◄ ► ", key),
             Span::styled(" switch tab  ", desc),
-            Span::styled(" 1-4 ", key),
+            Span::styled(" 1-5 ", key),
             Span::styled(" jump to tab  ", desc),
             Span::styled(" l ", key),
             Span::styled(log_hint, desc),
@@ -372,6 +382,7 @@ impl SelectedTab {
             Self::TabBattery => Some(0),
             Self::TabThermal => Some(1),
             Self::TabRTC => Some(2),
+            Self::TabSystem => Some(3),
         }
     }
 
@@ -421,6 +432,7 @@ impl SelectedTab {
             Self::TabBattery => tailwind::SKY,
             Self::TabThermal => tailwind::ORANGE,
             Self::TabRTC => tailwind::VIOLET,
+            Self::TabSystem => tailwind::EMERALD,
         }
     }
 }

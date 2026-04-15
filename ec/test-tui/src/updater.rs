@@ -7,7 +7,6 @@ use tracing::{debug, info, trace, warn};
 
 use crate::battery::{poll_bix, poll_bst};
 use crate::state::{AppState, BatteryCommand, FanRpmBounds, FanStateLevels, ThermalCommand};
-
 /// Background updater — owns the data source and periodically refreshes
 /// the shared [`AppState`] so the UI thread only has to render.
 ///
@@ -23,6 +22,9 @@ pub struct Updater<S: Source> {
     bix_cached: bool,
     /// True once RTC capabilities (static) have been fetched successfully.
     rtc_caps_cached: bool,
+    sys_info: sysinfo::System,
+    sys_nets: sysinfo::Networks,
+    last_system_update: Option<Instant>,
 }
 
 impl<S: Source + Send + 'static> Updater<S> {
@@ -43,6 +45,9 @@ impl<S: Source + Send + 'static> Updater<S> {
             last_graph_update: None,
             bix_cached: false,
             rtc_caps_cached: false,
+            sys_info: sysinfo::System::new_all(),
+            sys_nets: sysinfo::Networks::new_with_refreshed_list(),
+            last_system_update: None,
         }
     }
 
@@ -237,6 +242,70 @@ impl<S: Source + Send + 'static> Updater<S> {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
+    #[tracing::instrument(skip_all)]
+    fn update_system(&mut self) {
+        let now = Instant::now();
+        let elapsed_secs = self
+            .last_system_update
+            .map(|t| now.duration_since(t).as_secs_f64())
+            .unwrap_or(1.0)
+            .max(0.001);
+        self.last_system_update = Some(now);
+
+        self.sys_info.refresh_cpu_all();
+        self.sys_info.refresh_memory();
+        self.sys_nets.refresh(true);
+
+        let mut s = self.state.write().expect("state RwLock poisoned");
+
+        // ── CPU ───────────────────────────────────────────────────────────────
+        let usage = self.sys_info.global_cpu_usage() as f64;
+        s.system.cpu.usage = usage;
+        s.system.cpu.per_core = self.sys_info.cpus().iter().map(|c| c.cpu_usage()).collect();
+        s.system.cpu.samples.insert(usage);
+        s.system.cpu.success = true;
+        trace!(usage, "CPU usage sampled");
+
+        // ── Memory ────────────────────────────────────────────────────────────
+        let total = self.sys_info.total_memory();
+        let used = self.sys_info.used_memory();
+        s.system.memory.total_bytes = total;
+        s.system.memory.used_bytes = used;
+        s.system.memory.swap_total_bytes = self.sys_info.total_swap();
+        s.system.memory.swap_used_bytes = self.sys_info.used_swap();
+        let mem_pct = if total > 0 {
+            used as f64 / total as f64 * 100.0
+        } else {
+            0.0
+        };
+        s.system.memory.samples.insert(mem_pct);
+        s.system.memory.success = true;
+        trace!(used, total, "memory sampled");
+
+        // ── Network ───────────────────────────────────────────────────────────
+        let (total_rx, total_tx, delta_rx, delta_tx) =
+            self.sys_nets.iter().fold((0u64, 0u64, 0u64, 0u64), |acc, (_, d)| {
+                (
+                    acc.0 + d.total_received(),
+                    acc.1 + d.total_transmitted(),
+                    acc.2 + d.received(),
+                    acc.3 + d.transmitted(),
+                )
+            });
+        let rx_bps = delta_rx as f64 / elapsed_secs;
+        let tx_bps = delta_tx as f64 / elapsed_secs;
+        s.system.network.rx_bps = rx_bps;
+        s.system.network.tx_bps = tx_bps;
+        s.system.network.total_rx = total_rx;
+        s.system.network.total_tx = total_tx;
+        s.system.network.rx_samples.insert(rx_bps);
+        s.system.network.tx_samples.insert(tx_bps);
+        s.system.network.success = true;
+        trace!(rx_bps, tx_bps, "network sampled");
+
+        s.system.t += 1;
+    }
+
     /// Drain pending commands and refresh all subsystems once.
     #[tracing::instrument(skip_all)]
     pub fn update(&mut self) {
@@ -245,6 +314,7 @@ impl<S: Source + Send + 'static> Updater<S> {
         self.update_battery();
         self.update_thermal();
         self.update_rtc();
+        self.update_system();
     }
 
     /// Perform an initial fetch, then loop forever sleeping `interval` between

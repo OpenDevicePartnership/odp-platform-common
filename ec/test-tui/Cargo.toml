@@ -13,6 +13,7 @@ rust-version.workspace = true
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "time"] }
+sysinfo = "0.33"
 
 # TUI dependencies
 crossterm = "0.28.1"

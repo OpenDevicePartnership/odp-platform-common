@@ -4,6 +4,7 @@ mod common;
 mod logging;
 mod rtc;
 mod state;
+mod system;
 mod thermal;
 mod updater;
 mod widgets;
