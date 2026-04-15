@@ -3,10 +3,12 @@ mod battery;
 mod common;
 mod logging;
 mod rtc;
+mod state;
 mod thermal;
+mod updater;
 mod widgets;
 
-use std::{path::PathBuf, sync::Mutex, time::Duration};
+use std::{path::PathBuf, sync::{Arc, Mutex, RwLock}, time::Duration};
 
 use clap::Parser;
 use tracing_subscriber::{EnvFilter, prelude::*};
@@ -104,7 +106,7 @@ async fn main() -> color_eyre::Result<()> {
     match cli.source {
         SourceKind::Mock => {
             let period = Duration::from_secs(cli.sample_period.unwrap_or(1));
-            app::App::new(ec_test_lib::mock::Mock::default(), period, log_buffer).run(terminal)
+            run_with_source(ec_test_lib::mock::Mock::default(), period, log_buffer, terminal)
         }
 
         SourceKind::Serial => {
@@ -113,13 +115,36 @@ async fn main() -> color_eyre::Result<()> {
             let source =
                 ec_test_lib::serial::Serial::new(&port, cli.baud, hw_flow, cli.sensor_instance, cli.fan_instance)?;
             let period = Duration::from_secs(cli.sample_period.unwrap_or(60));
-            app::App::new(source, period, log_buffer).run(terminal)
+            run_with_source(source, period, log_buffer, terminal)
         }
 
         #[cfg(target_os = "windows")]
         SourceKind::Acpi => {
             let period = Duration::from_secs(cli.sample_period.unwrap_or(60));
-            app::App::new(ec_test_lib::acpi::Acpi::new(cli.fan_instance), period, log_buffer).run(terminal)
+            run_with_source(ec_test_lib::acpi::Acpi::new(cli.fan_instance), period, log_buffer, terminal)
         }
     }
+}
+
+fn run_with_source<S>(
+    source: S,
+    period: Duration,
+    log_buffer: logging::LogBuffer,
+    terminal: ratatui::DefaultTerminal,
+) -> color_eyre::Result<()>
+where
+    S: ec_test_lib::Source + Send + Sync + 'static,
+{
+    let shared_state = Arc::new(RwLock::new(state::AppState::default()));
+    let (battery_tx, battery_rx) = std::sync::mpsc::channel::<state::BatteryCommand>();
+    let (thermal_tx, thermal_rx) = std::sync::mpsc::channel::<state::ThermalCommand>();
+    let upd = updater::Updater::new(
+        Arc::new(source),
+        Arc::clone(&shared_state),
+        battery_rx,
+        thermal_rx,
+        period,
+    );
+    std::thread::spawn(move || upd.run(period));
+    app::App::new(shared_state, battery_tx, thermal_tx, log_buffer).run(terminal)
 }

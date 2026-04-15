@@ -1,8 +1,8 @@
 use crate::battery::Battery;
 use crate::logging::LogBuffer;
 use crate::rtc::Rtc;
+use crate::state::{AppState, BatteryCommand, ThermalCommand};
 use crate::thermal::Thermal;
-use ec_test_lib::Source;
 
 use color_eyre::Result;
 use tracing::Level;
@@ -19,36 +19,34 @@ use ratatui::{
 
 use std::{
     collections::BTreeMap,
-    sync::Arc,
+    sync::{Arc, RwLock, mpsc},
     time::{Duration, Instant},
 };
 
 use strum::{Display, EnumIter, FromRepr, IntoEnumIterator};
 
-/// Internal trait to be implemented by modules (or Tabs).
+/// Internal trait implemented by every UI module (tab).
+///
+/// Modules are purely presentational: they hold UI-local state (input
+/// boxes, cursor positions, etc.) but **no data source**.  The shared
+/// [`AppState`] is passed in at render time and written by the background
+/// [`crate::updater::Updater`].
 pub(crate) trait Module {
-    /// The module's title.
+    /// The module's display title.
     fn title(&self) -> &'static str;
 
-    /// Poll the data source and refresh internal state.
-    ///
-    /// Returns `()` intentionally: each module tracks failures via internal
-    /// success flags so the UI can display error states rather than crashing.
-    /// If a future need arises, this signature could change to `Result<()>`.
-    fn update(&mut self);
-
-    /// Handle input event.
+    /// Handle a terminal input event (keyboard, mouse, resize, …).
     fn handle_event(&mut self, evt: &Event);
 
-    /// Render the module.
-    fn render(&self, area: Rect, buf: &mut Buffer);
+    /// Render the full tab view.
+    fn render(&self, state: &AppState, area: Rect, buf: &mut Buffer);
 
     /// Render a compact summary card for the dashboard overview.
-    fn render_card(&self, area: Rect, buf: &mut Buffer);
+    fn render_card(&self, state: &AppState, area: Rect, buf: &mut Buffer);
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
-enum AppState {
+enum RunState {
     #[default]
     Running,
     Quitting,
@@ -67,31 +65,38 @@ enum SelectedTab {
     TabRTC,
 }
 
-/// The main application which holds the state and logic of the application.
+/// The main application: holds UI state and a read handle on the shared data.
 pub struct App {
-    state: AppState,
+    run_state: RunState,
     selected_tab: SelectedTab,
     modules: BTreeMap<SelectedTab, Box<dyn Module>>,
+    shared_state: Arc<RwLock<AppState>>,
     log_buffer: LogBuffer,
     log_visible: bool,
 }
 
 impl App {
-    /// Construct a new instance of [`App`] from any source type.
-    pub fn new<S: Source + 'static>(source: S, battery_graph_interval: Duration, log_buffer: LogBuffer) -> Self {
+    /// Construct the application.
+    ///
+    /// * `shared_state` — populated by the background updater thread.
+    /// * `battery_tx` / `thermal_tx` — command channels for hardware write-backs.
+    pub fn new(
+        shared_state: Arc<RwLock<AppState>>,
+        battery_tx: mpsc::Sender<BatteryCommand>,
+        thermal_tx: mpsc::Sender<ThermalCommand>,
+        log_buffer: LogBuffer,
+    ) -> Self {
         let mut modules: BTreeMap<SelectedTab, Box<dyn Module>> = BTreeMap::new();
-        let source = Arc::new(source);
 
-        modules.insert(SelectedTab::TabThermal, Box::new(Thermal::new(Arc::clone(&source))));
-        modules.insert(SelectedTab::TabRTC, Box::new(Rtc::new(Arc::clone(&source))));
-
-        let battery = Battery::new(Arc::clone(&source)).with_graph_sample_interval(battery_graph_interval);
-        modules.insert(SelectedTab::TabBattery, Box::new(battery));
+        modules.insert(SelectedTab::TabBattery, Box::new(Battery::new(battery_tx)));
+        modules.insert(SelectedTab::TabThermal, Box::new(Thermal::new(thermal_tx)));
+        modules.insert(SelectedTab::TabRTC, Box::new(Rtc::new()));
 
         Self {
-            state: Default::default(),
+            run_state: Default::default(),
             selected_tab: Default::default(),
             modules,
+            shared_state,
             log_buffer,
             log_visible: false,
         }
@@ -99,22 +104,18 @@ impl App {
 
     /// Run the application's main loop.
     pub fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
-        let tick_rate = Duration::from_millis(1000);
+        let tick_rate = Duration::from_millis(250);
         let mut last_tick = Instant::now();
 
-        while self.state == AppState::Running {
+        while self.run_state == RunState::Running {
             terminal.draw(|frame| frame.render_widget(&self, frame.area()))?;
 
-            // Adjust timeout to account for delay from handling input
             let timeout = tick_rate.saturating_sub(last_tick.elapsed());
-
-            // Handle event if we got it, and only update tab states if we timed out
             if event::poll(timeout)? {
                 self.handle_events()?;
             }
 
             if last_tick.elapsed() >= tick_rate {
-                self.update_tabs();
                 last_tick = Instant::now();
             }
         }
@@ -136,8 +137,6 @@ impl App {
                 KeyCode::Char('4') => self.selected_tab = SelectedTab::TabRTC,
                 KeyCode::Char('l') => self.log_visible = !self.log_visible,
                 KeyCode::Char('q') | KeyCode::Esc => self.quit(),
-
-                // Let the current tab handle event in this case
                 _ => self.handle_tab_event(&evt),
             }
         }
@@ -150,12 +149,6 @@ impl App {
         }
     }
 
-    fn update_tabs(&mut self) {
-        for module in self.modules.values_mut() {
-            module.update();
-        }
-    }
-
     fn next_tab(&mut self) {
         self.selected_tab = self.selected_tab.next();
     }
@@ -165,7 +158,7 @@ impl App {
     }
 
     fn quit(&mut self) {
-        self.state = AppState::Quitting;
+        self.run_state = RunState::Quitting;
     }
 
     fn render_tabs(&self, area: Rect, buf: &mut Buffer) {
@@ -180,9 +173,9 @@ impl App {
             .render(area, buf);
     }
 
-    fn render_selected_tab(&self, area: Rect, buf: &mut Buffer) {
+    fn render_selected_tab(&self, state: &AppState, area: Rect, buf: &mut Buffer) {
         if self.selected_tab == SelectedTab::TabDashboard {
-            self.render_dashboard(area, buf);
+            self.render_dashboard(state, area, buf);
             return;
         }
 
@@ -194,17 +187,16 @@ impl App {
         let inner = block.inner(area);
 
         block.render(area, buf);
-        module.render(inner, buf);
+        module.render(state, inner, buf);
     }
 
-    fn render_dashboard(&self, area: Rect, buf: &mut Buffer) {
+    fn render_dashboard(&self, state: &AppState, area: Rect, buf: &mut Buffer) {
         let block = SelectedTab::TabDashboard
             .block()
             .title(Line::from("System Overview").bold().centered());
         let inner = block.inner(area);
         block.render(area, buf);
 
-        // Lay out cards: equal-width columns for each module.
         let tab_order = [SelectedTab::TabBattery, SelectedTab::TabThermal, SelectedTab::TabRTC];
         let n = tab_order.len() as u16;
         let constraints: Vec<Constraint> = (0..n).map(|_| Constraint::Ratio(1, n as u32)).collect();
@@ -212,7 +204,7 @@ impl App {
 
         for (i, tab) in tab_order.iter().enumerate() {
             if let Some(module) = self.modules.get(tab) {
-                module.render_card(card_areas[i], buf);
+                module.render_card(state, card_areas[i], buf);
             }
         }
     }
@@ -221,6 +213,8 @@ impl App {
 impl Widget for &App {
     fn render(self, area: Rect, buf: &mut Buffer) {
         use Constraint::{Length, Min};
+
+        let state = self.shared_state.read().expect("state RwLock poisoned");
 
         let log_height = if self.log_visible { LOG_PANEL_HEIGHT } else { 0 };
         let vertical = Layout::vertical([Length(1), Min(0), Length(log_height), Length(1)]);
@@ -231,7 +225,7 @@ impl Widget for &App {
 
         render_title(title_area, buf);
         self.render_tabs(tabs_area, buf);
-        self.render_selected_tab(inner_area, buf);
+        self.render_selected_tab(&state, inner_area, buf);
         if self.log_visible {
             self.render_log_panel(log_area, buf);
         }

@@ -1,7 +1,12 @@
 use crate::app::Module;
 use crate::common;
-use color_eyre::Result;
-use ec_test_lib::{ThermalSource, Threshold};
+use crate::state::{AppState, FanStateLevels, SensorThresholds, ThermalCommand};
+
+#[cfg(test)]
+use crate::state::{FanData, FanRpmBounds, SensorData};
+
+#[cfg(test)]
+use ec_test_lib::ThermalSource;
 use ratatui::{
     buffer::Buffer,
     crossterm::event::{Event, KeyCode, KeyEventKind},
@@ -10,14 +15,16 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Paragraph, Widget},
 };
-use std::sync::Arc;
+use std::sync::mpsc;
 use tui_input::{Input, backend::crossterm::EventHandler};
 
 const LABEL_COLOR: Color = tailwind::ORANGE.c300;
-const MAX_SAMPLES: usize = 60;
+
+// ── Threshold configuration ───────────────────────────────────────────────────
 
 // TODO: Implement using source once GET/SET VAR and GET/SET THRS commands are supported.
-fn get_sensor_thresholds() -> SensorThresholds {
+/// Returns the hardcoded sensor thresholds.  Called by the background updater.
+pub(crate) fn sensor_thresholds() -> SensorThresholds {
     SensorThresholds {
         warn_low: 13.0,
         warn_high: 35.0,
@@ -26,41 +33,11 @@ fn get_sensor_thresholds() -> SensorThresholds {
     }
 }
 
-fn get_fan_bounds<S: ThermalSource>(source: &S) -> Result<FanRpmBounds> {
-    let min = source.get_min_rpm()?;
-    let max = source.get_max_rpm()?;
+// ── State-type update methods (used by tests) ─────────────────────────────────
 
-    Ok(FanRpmBounds { min, max })
-}
-
-fn get_fan_levels<S: ThermalSource>(source: &S) -> Result<FanStateLevels> {
-    let on = source.get_threshold(Threshold::On)?;
-    let ramping = source.get_threshold(Threshold::Ramping)?;
-    let max = source.get_threshold(Threshold::Max)?;
-
-    Ok(FanStateLevels { on, ramping, max })
-}
-
-#[derive(Default)]
-struct SensorThresholds {
-    #[allow(dead_code)] // reserved for future low-threshold enforcement
-    pub warn_low: f64,
-    pub warn_high: f64,
-    pub prochot: f64,
-    pub critical: f64,
-}
-
-#[derive(Default)]
-struct SensorState {
-    pub skin_temp: f64,
-    pub temp_success: bool,
-    pub thresholds: SensorThresholds,
-    pub thresholds_success: bool,
-    pub samples: common::SampleBuf<f64, MAX_SAMPLES>,
-}
-
-impl SensorState {
-    pub(crate) fn update<S: ThermalSource>(&mut self, source: &S) {
+#[cfg(test)]
+impl SensorData {
+    pub fn update<S: ThermalSource>(&mut self, source: &S) {
         if let Ok(temp) = source.get_temperature() {
             self.skin_temp = temp;
             self.samples.insert(temp);
@@ -68,38 +45,14 @@ impl SensorState {
         } else {
             self.temp_success = false;
         }
-
-        self.thresholds = get_sensor_thresholds();
+        self.thresholds = sensor_thresholds();
         self.thresholds_success = true;
     }
 }
 
-#[derive(Default)]
-struct FanRpmBounds {
-    pub min: f64,
-    pub max: f64,
-}
-
-#[derive(Default)]
-struct FanStateLevels {
-    pub on: f64,
-    pub ramping: f64,
-    pub max: f64,
-}
-
-#[derive(Default)]
-struct FanState {
-    pub rpm: f64,
-    pub rpm_success: bool,
-    pub rpm_bounds: FanRpmBounds,
-    pub bounds_success: bool,
-    pub state_levels: FanStateLevels,
-    pub levels_success: bool,
-    pub samples: common::SampleBuf<u32, MAX_SAMPLES>,
-}
-
-impl FanState {
-    pub(crate) fn update<S: ThermalSource>(&mut self, source: &S) {
+#[cfg(test)]
+impl FanData {
+    pub fn update<S: ThermalSource>(&mut self, source: &S) {
         if let Ok(rpm) = source.get_rpm() {
             self.rpm = rpm;
             self.samples.insert(rpm as u32);
@@ -107,22 +60,29 @@ impl FanState {
         } else {
             self.rpm_success = false;
         }
-
-        if let Ok(rpm_bounds) = get_fan_bounds(source) {
-            self.rpm_bounds = rpm_bounds;
-            self.bounds_success = true;
-        } else {
-            self.bounds_success = false;
+        match (source.get_min_rpm(), source.get_max_rpm()) {
+            (Ok(min), Ok(max)) => {
+                self.rpm_bounds = FanRpmBounds { min, max };
+                self.bounds_success = true;
+            }
+            _ => self.bounds_success = false,
         }
-
-        if let Ok(state_levels) = get_fan_levels(source) {
-            self.state_levels = state_levels;
-            self.levels_success = true;
-        } else {
-            self.levels_success = false;
+        use ec_test_lib::Threshold;
+        match (
+            source.get_threshold(Threshold::On),
+            source.get_threshold(Threshold::Ramping),
+            source.get_threshold(Threshold::Max),
+        ) {
+            (Ok(on), Ok(ramping), Ok(max)) => {
+                self.state_levels = FanStateLevels { on, ramping, max };
+                self.levels_success = true;
+            }
+            _ => self.levels_success = false,
         }
     }
 }
+
+// ── Color / zone helpers ──────────────────────────────────────────────────────
 
 fn temp_level_color(temp: f64, thresholds: &SensorThresholds) -> Color {
     if temp >= thresholds.critical {
@@ -172,29 +132,27 @@ fn fan_zone_color(rpm: f64, levels: &FanStateLevels) -> Color {
     }
 }
 
-pub struct Thermal<S: ThermalSource> {
+// ── UI module ─────────────────────────────────────────────────────────────────
+
+/// Thermal UI module.  Holds only UI-local state: the fan RPM text input and
+/// the command channel for sending write-backs to the background updater.
+pub struct Thermal {
     rpm_input: Input,
-    sensor: SensorState,
-    fan: FanState,
-    t: usize,
-    source: Arc<S>,
+    cmd_tx: mpsc::Sender<ThermalCommand>,
 }
 
-impl<S: ThermalSource> Module for Thermal<S> {
+impl Thermal {
+    pub fn new(cmd_tx: mpsc::Sender<ThermalCommand>) -> Self {
+        Self {
+            rpm_input: Input::default(),
+            cmd_tx,
+        }
+    }
+}
+
+impl Module for Thermal {
     fn title(&self) -> &'static str {
         "Thermal Information"
-    }
-
-    fn update(&mut self) {
-        self.sensor.update(&self.source);
-        self.fan.update(&self.source);
-        self.t += 1;
-    }
-
-    fn render(&self, area: Rect, buf: &mut Buffer) {
-        let [sensor_area, fan_area] = common::area_split(area, Direction::Horizontal, 50, 50);
-        self.render_sensor(sensor_area, buf);
-        self.render_fan(fan_area, buf);
     }
 
     fn handle_event(&mut self, evt: &Event) {
@@ -203,18 +161,25 @@ impl<S: ThermalSource> Module for Thermal<S> {
             && key.kind == KeyEventKind::Press
         {
             if let Ok(rpm) = self.rpm_input.value_and_reset().parse() {
-                let _ = self.source.set_rpm(rpm);
+                let _ = self.cmd_tx.send(ThermalCommand::SetRpm(rpm));
             }
         } else {
             let _ = self.rpm_input.handle_event(evt);
         }
     }
 
-    fn render_card(&self, area: Rect, buf: &mut Buffer) {
+    fn render(&self, state: &AppState, area: Rect, buf: &mut Buffer) {
+        let [sensor_area, fan_area] = common::area_split(area, Direction::Horizontal, 50, 50);
+        self.render_sensor(state, sensor_area, buf);
+        self.render_fan(state, fan_area, buf);
+    }
+
+    fn render_card(&self, state: &AppState, area: Rect, buf: &mut Buffer) {
         use ratatui::layout::Constraint::{Length, Min};
 
+        let th = &state.thermal;
         let block = Block::bordered()
-            .title(common::status_title("Thermal", self.sensor.temp_success && self.fan.rpm_success))
+            .title(common::status_title("Thermal", th.sensor.temp_success && th.fan.rpm_success))
             .border_style(tailwind::ORANGE.c700);
         let inner = block.inner(area);
         block.render(area, buf);
@@ -223,71 +188,73 @@ impl<S: ThermalSource> Module for Thermal<S> {
             Layout::vertical([Length(1), Length(1), Length(1), Length(1), Min(0)]).areas(inner);
 
         // Temperature line + zone label
-        let temp_color = temp_level_color(self.sensor.skin_temp, &self.sensor.thresholds);
-        let zone = thermal_zone(self.sensor.skin_temp, &self.sensor.thresholds);
+        let temp_color = temp_level_color(th.sensor.skin_temp, &th.sensor.thresholds);
+        let zone = thermal_zone(th.sensor.skin_temp, &th.sensor.thresholds);
         Line::from(vec![
-            Span::styled(format!("Skin  {:.1} °C", self.sensor.skin_temp), Style::default().fg(temp_color).bold()),
+            Span::styled(
+                format!("Skin  {:.1} \u{00b0}C", th.sensor.skin_temp),
+                Style::default().fg(temp_color).bold(),
+            ),
             Span::raw("  "),
             Span::styled(zone, Style::default().fg(temp_color)),
         ])
         .render(temp_line, buf);
 
         // Temperature threshold gauge
-        let max = self.sensor.thresholds.critical + 5.0;
-        let ratio = (self.sensor.skin_temp / max).clamp(0.0, 1.0);
+        let max = th.sensor.thresholds.critical + 5.0;
+        let ratio = (th.sensor.skin_temp / max).clamp(0.0, 1.0);
         let temp_thresholds = [
             (0.0, tailwind::GREEN.c400),
-            (self.sensor.thresholds.warn_high / max, tailwind::AMBER.c400),
-            (self.sensor.thresholds.prochot / max, tailwind::ORANGE.c400),
-            (self.sensor.thresholds.critical / max, tailwind::RED.c500),
+            (th.sensor.thresholds.warn_high / max, tailwind::AMBER.c400),
+            (th.sensor.thresholds.prochot / max, tailwind::ORANGE.c400),
+            (th.sensor.thresholds.critical / max, tailwind::RED.c500),
         ];
         common::ThresholdGauge {
             ratio,
-            label: Some(Span::raw(format!("{:.1}°C", self.sensor.skin_temp))),
+            label: Some(Span::raw(format!("{:.1}\u{00b0}C", th.sensor.skin_temp))),
             thresholds: &temp_thresholds,
             track_color: tailwind::SLATE.c800,
         }
         .render(temp_gauge, buf);
 
         // Fan line + zone label
-        let fan_zone = fan_zone(self.fan.rpm, &self.fan.state_levels);
-        let fan_color = fan_zone_color(self.fan.rpm, &self.fan.state_levels);
+        let fan_zone_str = fan_zone(th.fan.rpm, &th.fan.state_levels);
+        let fan_color = fan_zone_color(th.fan.rpm, &th.fan.state_levels);
         Line::from(vec![
             Span::styled(
-                format!("Fan   {:.0} RPM", self.fan.rpm),
+                format!("Fan   {:.0} RPM", th.fan.rpm),
                 Style::default().fg(LABEL_COLOR).bold(),
             ),
             Span::raw("  "),
-            Span::styled(fan_zone, Style::default().fg(fan_color)),
+            Span::styled(fan_zone_str, Style::default().fg(fan_color)),
         ])
         .render(fan_line, buf);
 
         // Fan RPM gauge
-        let max_rpm = self.fan.rpm_bounds.max.max(1.0);
-        let rpm_ratio = (self.fan.rpm / max_rpm).clamp(0.0, 1.0);
+        let max_rpm = th.fan.rpm_bounds.max.max(1.0);
+        let rpm_ratio = (th.fan.rpm / max_rpm).clamp(0.0, 1.0);
         let rpm_thresholds = [
             (0.0, tailwind::SLATE.c500),
-            (self.fan.state_levels.on / max_rpm, tailwind::GREEN.c500),
-            (self.fan.state_levels.ramping / max_rpm, tailwind::SKY.c400),
-            (self.fan.state_levels.max / max_rpm, tailwind::AMBER.c400),
+            (th.fan.state_levels.on / max_rpm, tailwind::GREEN.c500),
+            (th.fan.state_levels.ramping / max_rpm, tailwind::SKY.c400),
+            (th.fan.state_levels.max / max_rpm, tailwind::AMBER.c400),
         ];
         common::ThresholdGauge {
             ratio: rpm_ratio,
-            label: Some(Span::raw(format!("{:.0} RPM", self.fan.rpm))),
+            label: Some(Span::raw(format!("{:.0} RPM", th.fan.rpm))),
             thresholds: &rpm_thresholds,
             track_color: tailwind::SLATE.c800,
         }
         .render(fan_gauge, buf);
 
-        // Compact threshold reference row
         Paragraph::new(vec![
             common::metric_row(
                 "Temp  ",
                 format!(
-                    "W:{:.0}° P:{:.0}° C:{:.0}°",
-                    self.sensor.thresholds.warn_high,
-                    self.sensor.thresholds.prochot,
-                    self.sensor.thresholds.critical
+                    "W:{:.0}\u{00b0} P:{:.0}\u{00b0} C:{:.0}\u{00b0}",
+                    th.sensor.thresholds.warn_high,
+                    th.sensor.thresholds.prochot,
+                    th.sensor.thresholds.critical
                 ),
                 tailwind::SLATE.c500,
             ),
@@ -295,9 +262,9 @@ impl<S: ThermalSource> Module for Thermal<S> {
                 "Fan   ",
                 format!(
                     "On:{:.0} Ramp:{:.0} Max:{:.0} RPM",
-                    self.fan.state_levels.on,
-                    self.fan.state_levels.ramping,
-                    self.fan.state_levels.max
+                    th.fan.state_levels.on,
+                    th.fan.state_levels.ramping,
+                    th.fan.state_levels.max
                 ),
                 tailwind::SLATE.c500,
             ),
@@ -306,55 +273,46 @@ impl<S: ThermalSource> Module for Thermal<S> {
     }
 }
 
-impl<S: ThermalSource> Thermal<S> {
-    pub fn new(source: Arc<S>) -> Self {
-        let mut inst = Self {
-            rpm_input: Default::default(),
-            sensor: Default::default(),
-            fan: Default::default(),
-            t: Default::default(),
-            source,
-        };
+// ── Render helpers ────────────────────────────────────────────────────────────
 
-        inst.update();
-        inst
-    }
-
-    fn render_sensor(&self, area: Rect, buf: &mut Buffer) {
+impl Thermal {
+    fn render_sensor(&self, state: &AppState, area: Rect, buf: &mut Buffer) {
         let [chart_area, stats_area] = common::area_split(area, Direction::Vertical, 65, 35);
-        self.render_sensor_chart(chart_area, buf);
-        self.render_sensor_stats(stats_area, buf);
+        self.render_sensor_chart(state, chart_area, buf);
+        self.render_sensor_stats(state, stats_area, buf);
     }
 
-    fn render_sensor_chart(&self, area: Rect, buf: &mut Buffer) {
+    fn render_sensor_chart(&self, state: &AppState, area: Rect, buf: &mut Buffer) {
+        let s = &state.thermal.sensor;
         let y_labels = [
             "0.0".bold(),
             Span::styled(
-                format!("{:.1}", (self.sensor.thresholds.critical + 5.0) / 2.0),
+                format!("{:.1}", (s.thresholds.critical + 5.0) / 2.0),
                 Style::default().bold(),
             ),
             Span::styled(
-                format!("{:.1}", self.sensor.thresholds.critical + 5.0),
+                format!("{:.1}", s.thresholds.critical + 5.0),
                 Style::default().bold(),
             ),
         ];
         let graph = common::Graph {
             title: "Temperature vs Time".to_string(),
             color: tailwind::ORANGE.c400,
-            samples: self.sensor.samples.get(),
+            samples: s.samples.get(),
             x_axis: "Time (s)".to_string(),
             x_bounds: [0.0, 60.0],
-            x_labels: common::time_labels(self.t, MAX_SAMPLES),
-            y_axis: "Temperature (°C)".to_string(),
-            y_bounds: [0.0, self.sensor.thresholds.critical + 5.0],
+            x_labels: common::time_labels(state.thermal.t, crate::state::THERMAL_MAX_SAMPLES),
+            y_axis: "Temperature (\u{00b0}C)".to_string(),
+            y_bounds: [0.0, s.thresholds.critical + 5.0],
             y_labels,
         };
         common::render_chart(area, buf, graph);
     }
 
-    fn render_sensor_stats(&self, area: Rect, buf: &mut Buffer) {
+    fn render_sensor_stats(&self, state: &AppState, area: Rect, buf: &mut Buffer) {
+        let s = &state.thermal.sensor;
         let block = common::title_block(
-            common::status_title("Live Temperature", self.sensor.temp_success),
+            common::status_title("Live Temperature", s.temp_success),
             0,
             LABEL_COLOR,
         );
@@ -365,72 +323,71 @@ impl<S: ThermalSource> Thermal<S> {
         let [temp_line, gauge_area, thresholds_area] =
             Layout::vertical([Length(1), Length(1), Min(0)]).areas(inner);
 
-        // Temperature value line
-        let color = temp_level_color(self.sensor.skin_temp, &self.sensor.thresholds);
+        let color = temp_level_color(s.skin_temp, &s.thresholds);
         Paragraph::new(common::metric_row(
             "Skin ",
-            format!("{:.2} °C", self.sensor.skin_temp),
+            format!("{:.2} \u{00b0}C", s.skin_temp),
             color,
         ))
         .render(temp_line, buf);
 
-        // Threshold gauge
-        let max = self.sensor.thresholds.critical + 5.0;
-        let ratio = (self.sensor.skin_temp / max).clamp(0.0, 1.0);
+        let max = s.thresholds.critical + 5.0;
+        let ratio = (s.skin_temp / max).clamp(0.0, 1.0);
         let thresholds = [
             (0.0, tailwind::GREEN.c400),
-            (self.sensor.thresholds.warn_high / max, tailwind::AMBER.c400),
-            (self.sensor.thresholds.prochot / max, tailwind::ORANGE.c400),
-            (self.sensor.thresholds.critical / max, tailwind::RED.c500),
+            (s.thresholds.warn_high / max, tailwind::AMBER.c400),
+            (s.thresholds.prochot / max, tailwind::ORANGE.c400),
+            (s.thresholds.critical / max, tailwind::RED.c500),
         ];
         common::ThresholdGauge {
             ratio,
-            label: Some(Span::raw(format!("{:.1}°C", self.sensor.skin_temp))),
+            label: Some(Span::raw(format!("{:.1}\u{00b0}C", s.skin_temp))),
             thresholds: &thresholds,
             track_color: tailwind::SLATE.c800,
         }
         .render(gauge_area, buf);
 
-        // Threshold labels
         Paragraph::new(vec![
-            common::metric_row("Warn    ", format!("{:.0} °C", self.sensor.thresholds.warn_high), LABEL_COLOR),
-            common::metric_row("Prochot ", format!("{:.0} °C", self.sensor.thresholds.prochot), LABEL_COLOR),
-            common::metric_row("Critical", format!("{:.0} °C", self.sensor.thresholds.critical), LABEL_COLOR),
+            common::metric_row("Warn    ", format!("{:.0} \u{00b0}C", s.thresholds.warn_high), LABEL_COLOR),
+            common::metric_row("Prochot ", format!("{:.0} \u{00b0}C", s.thresholds.prochot), LABEL_COLOR),
+            common::metric_row("Critical", format!("{:.0} \u{00b0}C", s.thresholds.critical), LABEL_COLOR),
         ])
         .render(thresholds_area, buf);
     }
 
-    fn render_fan(&self, area: Rect, buf: &mut Buffer) {
+    fn render_fan(&self, state: &AppState, area: Rect, buf: &mut Buffer) {
         let [chart_area, widget_area] = common::area_split(area, Direction::Vertical, 65, 35);
         let [stats_area, levels_area] = common::area_split(widget_area, Direction::Horizontal, 50, 50);
-        self.render_fan_chart(chart_area, buf);
-        self.render_fan_stats(stats_area, buf);
-        self.render_fan_levels(levels_area, buf);
+        self.render_fan_chart(state, chart_area, buf);
+        self.render_fan_stats(state, stats_area, buf);
+        self.render_fan_levels(state, levels_area, buf);
     }
 
-    fn render_fan_chart(&self, area: Rect, buf: &mut Buffer) {
+    fn render_fan_chart(&self, state: &AppState, area: Rect, buf: &mut Buffer) {
+        let f = &state.thermal.fan;
         let y_labels = [
             "0.0".bold(),
-            Span::styled((self.fan.rpm_bounds.max / 2.0).to_string(), Style::default().bold()),
-            Span::styled(self.fan.rpm_bounds.max.to_string(), Style::default().bold()),
+            Span::styled((f.rpm_bounds.max / 2.0).to_string(), Style::default().bold()),
+            Span::styled(f.rpm_bounds.max.to_string(), Style::default().bold()),
         ];
         let graph = common::Graph {
             title: "Fan RPM vs Time".to_string(),
             color: tailwind::SKY.c400,
-            samples: self.fan.samples.get(),
+            samples: f.samples.get(),
             x_axis: "Time (s)".to_string(),
             x_bounds: [0.0, 60.0],
-            x_labels: common::time_labels(self.t, MAX_SAMPLES),
+            x_labels: common::time_labels(state.thermal.t, crate::state::THERMAL_MAX_SAMPLES),
             y_axis: "RPM".to_string(),
-            y_bounds: [0.0, self.fan.rpm_bounds.max],
+            y_bounds: [0.0, f.rpm_bounds.max],
             y_labels,
         };
         common::render_chart(area, buf, graph);
     }
 
-    fn render_fan_stats(&self, area: Rect, buf: &mut Buffer) {
+    fn render_fan_stats(&self, state: &AppState, area: Rect, buf: &mut Buffer) {
+        let f = &state.thermal.fan;
         let block = common::title_block(
-            common::status_title("Live Fan RPM", self.fan.rpm_success && self.fan.bounds_success),
+            common::status_title("Live Fan RPM", f.rpm_success && f.bounds_success),
             0,
             LABEL_COLOR,
         );
@@ -443,22 +400,22 @@ impl<S: ThermalSource> Thermal<S> {
 
         Paragraph::new(common::metric_row(
             "RPM  ",
-            format!("{:.0}  ({} – {})", self.fan.rpm, self.fan.rpm_bounds.min, self.fan.rpm_bounds.max),
+            format!("{:.0}  ({} \u{2013} {})", f.rpm, f.rpm_bounds.min, f.rpm_bounds.max),
             LABEL_COLOR,
         ))
         .render(rpm_line, buf);
 
-        let max = self.fan.rpm_bounds.max.max(1.0);
-        let ratio = (self.fan.rpm / max).clamp(0.0, 1.0);
+        let max = f.rpm_bounds.max.max(1.0);
+        let ratio = (f.rpm / max).clamp(0.0, 1.0);
         let thresholds = [
             (0.0, tailwind::GREEN.c500),
-            (self.fan.state_levels.on / max, tailwind::SKY.c400),
-            (self.fan.state_levels.ramping / max, tailwind::AMBER.c400),
-            (self.fan.state_levels.max / max, tailwind::ORANGE.c400),
+            (f.state_levels.on / max, tailwind::SKY.c400),
+            (f.state_levels.ramping / max, tailwind::AMBER.c400),
+            (f.state_levels.max / max, tailwind::ORANGE.c400),
         ];
         common::ThresholdGauge {
             ratio,
-            label: Some(Span::raw(format!("{:.0} RPM", self.fan.rpm))),
+            label: Some(Span::raw(format!("{:.0} RPM", f.rpm))),
             thresholds: &thresholds,
             track_color: tailwind::SLATE.c800,
         }
@@ -467,16 +424,17 @@ impl<S: ThermalSource> Thermal<S> {
         self.render_fan_rpm_input(input_area, buf);
     }
 
-    fn render_fan_levels(&self, area: Rect, buf: &mut Buffer) {
+    fn render_fan_levels(&self, state: &AppState, area: Rect, buf: &mut Buffer) {
+        let f = &state.thermal.fan;
         let block = common::title_block(
-            common::status_title("Fan State Levels", self.fan.levels_success),
+            common::status_title("Fan State Levels", f.levels_success),
             1,
             LABEL_COLOR,
         );
         Paragraph::new(vec![
-            common::metric_row("On      ", format!("{:.0} °C", self.fan.state_levels.on), LABEL_COLOR),
-            common::metric_row("Ramping ", format!("{:.0} °C", self.fan.state_levels.ramping), LABEL_COLOR),
-            common::metric_row("Max     ", format!("{:.0} °C", self.fan.state_levels.max), LABEL_COLOR),
+            common::metric_row("On      ", format!("{:.0} \u{00b0}C", f.state_levels.on), LABEL_COLOR),
+            common::metric_row("Ramping ", format!("{:.0} \u{00b0}C", f.state_levels.ramping), LABEL_COLOR),
+            common::metric_row("Max     ", format!("{:.0} \u{00b0}C", f.state_levels.max), LABEL_COLOR),
         ])
         .block(block)
         .render(area, buf);
@@ -485,16 +443,15 @@ impl<S: ThermalSource> Thermal<S> {
     fn render_fan_rpm_input(&self, area: Rect, buf: &mut Buffer) {
         let width = area.width.max(3) - 3;
         let scroll = self.rpm_input.visual_scroll(width as usize);
-
-        let input = Paragraph::new(self.rpm_input.value())
+        Paragraph::new(self.rpm_input.value())
             .style(Style::default())
             .scroll((0, scroll as u16))
             .block(
                 Block::bordered()
                     .title("Set Fan RPM <ENTER>")
                     .border_style(Style::default().fg(tailwind::ORANGE.c600)),
-            );
-        input.render(area, buf);
+            )
+            .render(area, buf);
     }
 }
 
@@ -560,69 +517,64 @@ mod tests {
         }
     }
 
-    // ── SensorState ──────────────────────────────────────────────────────────
+    // ── SensorData ───────────────────────────────────────────────────────────
 
     #[test]
     fn sensor_update_sets_success_and_temp_on_ok() {
-        let mut state = SensorState::default();
-        state.update(&OkThermal);
-        assert!(state.temp_success);
-        assert_eq!(state.skin_temp, 25.5);
-        // get_sensor_thresholds returns hardcoded values; always succeeds
-        assert!(state.thresholds_success);
-        assert_eq!(state.thresholds.warn_high, 35.0);
+        let mut data = SensorData::default();
+        data.update(&OkThermal);
+        assert!(data.temp_success);
+        assert_eq!(data.skin_temp, 25.5);
+        assert!(data.thresholds_success);
+        assert_eq!(data.thresholds.warn_high, 35.0);
     }
 
     #[test]
     fn sensor_update_clears_temp_success_on_err() {
-        let mut state = SensorState::default();
-        state.skin_temp = 99.9;
-        state.update(&ErrThermal);
-        assert!(!state.temp_success);
-        // Stale value is preserved on failure.
-        assert_eq!(state.skin_temp, 99.9);
-        // Hardcoded thresholds are always loaded successfully.
-        assert!(state.thresholds_success);
+        let mut data = SensorData::default();
+        data.skin_temp = 99.9;
+        data.update(&ErrThermal);
+        assert!(!data.temp_success);
+        assert_eq!(data.skin_temp, 99.9);
+        assert!(data.thresholds_success);
     }
 
     #[test]
     fn sensor_update_records_sample_on_ok() {
-        let mut state = SensorState::default();
-        state.update(&OkThermal);
-        // At least one sample must have been pushed.
-        assert!(!state.samples.get().is_empty());
+        let mut data = SensorData::default();
+        data.update(&OkThermal);
+        assert!(!data.samples.get().is_empty());
     }
 
-    // ── FanState ─────────────────────────────────────────────────────────────
+    // ── FanData ──────────────────────────────────────────────────────────────
 
     #[test]
     fn fan_update_sets_success_on_ok() {
-        let mut state = FanState::default();
-        state.update(&OkThermal);
-        assert!(state.rpm_success);
-        assert_eq!(state.rpm, 3000.0);
-        assert!(state.bounds_success);
-        assert_eq!(state.rpm_bounds.max, 6000.0);
-        assert!(state.levels_success);
-        assert_eq!(state.state_levels.ramping, 40.0);
+        let mut data = FanData::default();
+        data.update(&OkThermal);
+        assert!(data.rpm_success);
+        assert_eq!(data.rpm, 3000.0);
+        assert!(data.bounds_success);
+        assert_eq!(data.rpm_bounds.max, 6000.0);
+        assert!(data.levels_success);
+        assert_eq!(data.state_levels.ramping, 40.0);
     }
 
     #[test]
     fn fan_update_clears_success_on_err() {
-        let mut state = FanState::default();
-        state.rpm = 1234.0;
-        state.update(&ErrThermal);
-        assert!(!state.rpm_success);
-        assert!(!state.bounds_success);
-        assert!(!state.levels_success);
-        // Stale RPM is preserved.
-        assert_eq!(state.rpm, 1234.0);
+        let mut data = FanData::default();
+        data.rpm = 1234.0;
+        data.update(&ErrThermal);
+        assert!(!data.rpm_success);
+        assert!(!data.bounds_success);
+        assert!(!data.levels_success);
+        assert_eq!(data.rpm, 1234.0);
     }
 
     #[test]
     fn fan_update_records_sample_on_ok() {
-        let mut state = FanState::default();
-        state.update(&OkThermal);
-        assert!(!state.samples.get().is_empty());
+        let mut data = FanData::default();
+        data.update(&OkThermal);
+        assert!(!data.samples.get().is_empty());
     }
 }
