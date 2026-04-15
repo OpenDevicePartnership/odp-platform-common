@@ -158,6 +158,6 @@ where
         thermal_rx,
         period,
     );
-    std::thread::spawn(move || upd.run(period));
+    tokio::task::spawn(async move { upd.run(period).await });
     app::App::new(shared_state, battery_tx, thermal_tx, log_buffer).run(terminal)
 }

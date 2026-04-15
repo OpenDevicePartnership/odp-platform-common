@@ -251,12 +251,12 @@ impl<S: Source + Send + 'static> Updater<S> {
     }
 
     /// Perform an initial fetch, then loop forever sleeping `interval` between
-    /// updates.  Intended to be called from a dedicated [`std::thread::spawn`].
-    pub fn run(mut self, interval: Duration) {
-        info!(interval_ms = interval.as_millis(), "updater thread started");
+    /// updates.  Intended to be called as a [`tokio::task::spawn`] task.
+    pub async fn run(mut self, interval: Duration) {
+        info!(interval_ms = interval.as_millis(), "updater task started");
         self.update();
         loop {
-            std::thread::sleep(interval);
+            tokio::time::sleep(interval).await;
             self.update();
         }
     }
