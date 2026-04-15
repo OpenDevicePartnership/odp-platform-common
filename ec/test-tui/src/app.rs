@@ -14,7 +14,6 @@ use ratatui::{
     crossterm::event::{self, Event, KeyCode, KeyEventKind},
     layout::{Constraint, Layout, Rect},
     style::{Color, Style, Stylize, palette::tailwind},
-    symbols,
     text::{Line, Span},
     widgets::{Block, Padding, Paragraph, Tabs, Widget},
 };
@@ -313,7 +312,6 @@ impl SelectedTab {
     /// A block surrounding the tab's content
     fn block(self) -> Block<'static> {
         Block::bordered()
-            .border_set(symbols::border::PROPORTIONAL_TALL)
             .padding(Padding::uniform(1))
             .border_style(self.palette().c500)
     }

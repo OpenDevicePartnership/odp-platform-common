@@ -349,7 +349,7 @@ impl<S: BatterySource> Battery<S> {
     }
 
     fn render_bix(&self, area: Rect, buf: &mut Buffer) {
-        let widths = [Constraint::Percentage(30), Constraint::Percentage(70)];
+        let widths = [Constraint::Min(24), Constraint::Fill(1)];
         let table = Table::new(self.create_info(), widths)
             .block(
                 Block::bordered()
@@ -394,7 +394,7 @@ impl<S: BatterySource> Battery<S> {
     fn render_bst(&self, area: Rect, buf: &mut Buffer) {
         let table = Table::new(
             self.create_status_rows(),
-            [Constraint::Percentage(45), Constraint::Percentage(55)],
+            [Constraint::Min(20), Constraint::Fill(1)],
         )
         .block(
             Block::bordered()

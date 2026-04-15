@@ -134,7 +134,7 @@ impl StatefulWidget for Battery {
             .bar_style(Style::default().fg(color))
             .block(
                 Block::bordered()
-                    .border_type(BorderType::Double)
+                    .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(color)),
             )
             .bar_width(battery_area.width - 2)
@@ -151,7 +151,7 @@ impl StatefulWidget for Battery {
 
         Block::bordered()
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-            .border_type(BorderType::Double)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(color))
             .render(tip_area, buf);
 
