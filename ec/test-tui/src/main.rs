@@ -9,6 +9,7 @@ mod widgets;
 use std::time::Duration;
 
 use clap::Parser;
+use tracing_subscriber::EnvFilter;
 
 /// ODP Embedded Controller demo TUI.
 #[derive(Parser)]
@@ -65,7 +66,15 @@ enum FlowControl {
     Hardware,
 }
 
-fn main() -> color_eyre::Result<()> {
+#[tokio::main]
+async fn main() -> color_eyre::Result<()> {
+    // Log to a file rather than stderr to avoid corrupting the ratatui terminal.
+    let log_file = std::fs::File::create("ec-test-tui.log")?;
+    tracing_subscriber::fmt()
+        .with_writer(log_file)
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
     color_eyre::install()?;
 
     let cli = Cli::parse();
