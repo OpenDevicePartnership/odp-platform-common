@@ -21,9 +21,9 @@ concurrency:
 name: check
 jobs:
   fmt:
-    runs-on: ubuntu-latest
-    name: stable / fmt
-    steps:
+   runs-on: ubuntu-latest
+   name: stable / fmt
+   steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
@@ -56,91 +56,69 @@ jobs:
     # run docs generation on nightly rather than stable. This enables features like
     # https://doc.rust-lang.org/beta/unstable-book/language-features/doc-cfg.html which allows an
     # API be documented as only available in some specific platforms.
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
     name: nightly / doc
+
     steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-      - name: Install nightly
-        uses: dtolnay/rust-toolchain@nightly
-      # Note: --all-features is not used because ec-test-lib's acpi feature requires aarch64-pc-windows-msvc
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev
-      - name: cargo doc
-        run: cargo doc --no-deps --locked
-        working-directory: ec
-        env:
-          RUSTDOCFLAGS: --cfg docsrs
+       - uses: actions/checkout@v4
+         with:
+           submodules: true
+
+       - name: Install nightly
+         uses: dtolnay/rust-toolchain@nightly
+
+       - name: Install system dependencies
+         if: runner.os == 'Linux'
+         run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+       - name: cargo doc
+         run: cargo doc --all-features --no-deps --locked
+         working-directory: ec
+         env:
+           RUSTDOCFLAGS: --cfg docsrs
 
   hack-clippy:
     # cargo-hack checks combinations of feature flags to ensure that features are all additive
     # which is required for feature unification
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+
     name: ${{ matrix.toolchain }} / ${{ matrix.crate }} / clippy
+
     strategy:
       fail-fast: false
+
       matrix:
         # Get early warning of new lints which are regularly introduced in beta channels.
         toolchain: [stable, beta]
         crate: [ec-test-cli, ec-test-lib, ec-test-tui]
-        include:
-          - crate: ec-test-cli
-            # Same transport feature constraints as ec-test-tui; exclude acpi (cross-compile only)
-            hack-flags: "--exclude-features acpi --mutually-exclusive-features mock,serial --at-least-one-of mock,serial"
-          - crate: ec-test-lib
-            # Skip acpi feature (requires aarch64-pc-windows-msvc) and mark mock/serial as mutually exclusive
-            hack-flags: "--exclude-features acpi --mutually-exclusive-features mock,serial"
-          - crate: ec-test-tui
-            # Requires exactly one transport feature; exclude acpi (cross-compile only)
-            hack-flags: "--exclude-features acpi --mutually-exclusive-features mock,serial --at-least-one-of mock,serial"
+        os: [ubuntu-latest, windows-latest]
+
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
+
       - name: Install system dependencies
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
       - name: Install ${{ matrix.toolchain }}
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.toolchain }}
           components: clippy
+
       - name: cargo install cargo-hack
         uses: taiki-e/install-action@cargo-hack
+
       # --feature-powerset runs for every combination of features
       - name: cargo hack
-        run: cargo hack --feature-powerset ${{ matrix.hack-flags }} clippy --locked -p ${{ matrix.crate }} -- -Dwarnings -D clippy::suspicious -D clippy::correctness -D clippy::perf -D clippy::style
-        working-directory: ec
-
-  acpi-clippy:
-    # Separate job for the acpi feature which requires cross-compiling to aarch64-pc-windows-msvc
-    runs-on: ubuntu-latest
-    name: ${{ matrix.toolchain }} / acpi / clippy
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain: [stable, beta]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-      - name: Install ${{ matrix.toolchain }}
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ matrix.toolchain }}
-          target: aarch64-pc-windows-msvc
-          components: clippy
-      - name: Install cargo-xwin
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-xwin
-      - name: Cache Windows CRT/SDK
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/cargo-xwin
-          key: cargo-xwin-crt
-      - name: cargo xwin clippy
-        run: cargo xwin clippy --target aarch64-pc-windows-msvc --features acpi --locked -p ec-test-lib -- -Dwarnings -D clippy::suspicious -D clippy::correctness -D clippy::perf -D clippy::style
+        run: cargo hack --feature-powerset clippy --locked -p ${{ matrix.crate }} -- -Dwarnings -D clippy::suspicious -D clippy::correctness -D clippy::perf -D clippy::style
         working-directory: ec
 
   deny:

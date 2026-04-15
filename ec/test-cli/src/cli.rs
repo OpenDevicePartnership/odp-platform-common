@@ -3,16 +3,20 @@ use clap::{Parser, Subcommand, ValueEnum};
 #[derive(Parser)]
 #[command(name = "ec-test-cli", about = "CLI tool for EC feature testing")]
 pub struct Cli {
-    #[cfg(feature = "serial")]
-    #[arg(long)]
-    pub port: String,
+    /// Data source to use.
+    #[arg(long, value_enum)]
+    pub source: SourceKind,
 
-    #[cfg(feature = "serial")]
-    #[arg(long, value_enum, default_value = "none")]
+    /// Serial port path (required when --source serial).
+    #[arg(long, required_if_eq("source", "serial"))]
+    pub port: Option<String>,
+
+    /// Serial flow-control mode.
+    #[arg(long, value_enum, default_value_t = FlowControl::None)]
     pub flow_control: FlowControl,
 
-    #[cfg(feature = "serial")]
-    #[arg(long, default_value = "115200")]
+    /// Serial baud rate.
+    #[arg(long, default_value_t = 115_200)]
     pub baud: u32,
 
     /// Sensor instance index.
@@ -27,11 +31,25 @@ pub struct Cli {
     pub command: Command,
 }
 
-#[cfg(feature = "serial")]
-#[derive(Clone, PartialEq, ValueEnum)]
+/// Available data sources.
+#[derive(Clone, Copy, ValueEnum)]
+pub enum SourceKind {
+    /// Deterministic in-process mock — no hardware required.
+    Mock,
+    /// Real hardware via serial transport.
+    Serial,
+    #[cfg(target_os = "windows")]
+    /// Real hardware via ACPI (Windows only).
+    Acpi,
+}
+
+#[derive(Clone, Copy, Default, ValueEnum)]
 pub enum FlowControl {
-    Hw,
+    #[default]
+    #[value(name = "none")]
     None,
+    #[value(name = "hw")]
+    Hw,
 }
 
 #[derive(Subcommand)]

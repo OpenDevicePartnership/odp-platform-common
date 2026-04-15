@@ -1,38 +1,34 @@
-const _: () = {
-    let count = cfg!(feature = "mock") as u8 + cfg!(feature = "acpi") as u8 + cfg!(feature = "serial") as u8;
-    assert!(
-        count == 1,
-        "Exactly one of the following features must be enabled: `mock`, `acpi`, or `serial`."
-    );
-};
-
 mod cli;
 mod commands;
 mod debug;
 
 use clap::Parser;
-use cli::{Cli, Command};
+use cli::{Cli, Command, SourceKind};
+use ec_test_lib::Source;
+
+fn dispatch<S: Source>(source: S, command: Command) -> Result<(), Box<dyn std::error::Error>> {
+    match command {
+        Command::Thermal(cmd) => commands::thermal::run(source, cmd).map_err(Into::into),
+        Command::Battery(cmd) => commands::battery::run(source, cmd).map_err(Into::into),
+        Command::Rtc(cmd) => commands::rtc::run(source, cmd).map_err(Into::into),
+    }
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    #[cfg(feature = "mock")]
-    let source = ec_test_lib::mock::Mock::default();
+    match cli.source {
+        SourceKind::Mock => dispatch(ec_test_lib::mock::Mock::default(), cli.command),
 
-    #[cfg(feature = "acpi")]
-    let source = ec_test_lib::acpi::Acpi::new(cli.fan_instance);
+        SourceKind::Serial => {
+            let port = cli.port.expect("--port is required for --source serial");
+            let hw_flow = matches!(cli.flow_control, cli::FlowControl::Hw);
+            let source =
+                ec_test_lib::serial::Serial::new(&port, cli.baud, hw_flow, cli.sensor_instance, cli.fan_instance)?;
+            dispatch(source, cli.command)
+        }
 
-    #[cfg(feature = "serial")]
-    let source = {
-        let flow_control = cli.flow_control == cli::FlowControl::Hw;
-        ec_test_lib::serial::Serial::new(&cli.port, cli.baud, flow_control, cli.sensor_instance, cli.fan_instance)?
-    };
-
-    match cli.command {
-        Command::Thermal(cmd) => commands::thermal::run(source, cmd)?,
-        Command::Battery(cmd) => commands::battery::run(source, cmd)?,
-        Command::Rtc(cmd) => commands::rtc::run(source, cmd)?,
+        #[cfg(target_os = "windows")]
+        SourceKind::Acpi => dispatch(ec_test_lib::acpi::Acpi::new(cli.fan_instance), cli.command),
     }
-
-    Ok(())
 }

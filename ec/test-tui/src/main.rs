@@ -51,8 +51,8 @@ enum SourceKind {
     Mock,
     /// Real hardware via serial transport.
     Serial,
+    #[cfg(target_os = "windows")]
     /// Real hardware via ACPI (aarch64-pc-windows-msvc only).
-    #[cfg(feature = "acpi")]
     Acpi,
 }
 
@@ -86,7 +86,7 @@ fn main() -> color_eyre::Result<()> {
             app::App::new(source, period).run(terminal)
         }
 
-        #[cfg(feature = "acpi")]
+        #[cfg(target_os = "windows")]
         SourceKind::Acpi => {
             let period = Duration::from_secs(cli.sample_period.unwrap_or(60));
             app::App::new(ec_test_lib::acpi::Acpi::new(cli.fan_instance), period).run(terminal)

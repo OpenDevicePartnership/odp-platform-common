@@ -14,10 +14,5 @@ ec-test-lib = { path = "../test-lib" }
 time-alarm-service-messages.workspace = true
 battery-service-messages.workspace = true
 
-[features]
-mock = []
-acpi = ["ec-test-lib/acpi"]
-serial = []
-
 [lints]
 workspace = true
