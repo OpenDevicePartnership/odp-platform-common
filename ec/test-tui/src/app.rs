@@ -1,20 +1,22 @@
 use crate::battery::Battery;
+use crate::logging::LogBuffer;
 use crate::rtc::Rtc;
 use crate::thermal::Thermal;
 use crate::ucsi::Ucsi;
 use ec_test_lib::Source;
 
 use color_eyre::Result;
+use tracing::Level;
 
 use ratatui::{
     DefaultTerminal,
     buffer::Buffer,
     crossterm::event::{self, Event, KeyCode, KeyEventKind},
     layout::{Constraint, Layout, Rect},
-    style::{Color, Stylize, palette::tailwind},
+    style::{Color, Style, Stylize, palette::tailwind},
     symbols,
-    text::Line,
-    widgets::{Block, Padding, Tabs, Widget},
+    text::{Line, Span},
+    widgets::{Block, Padding, Paragraph, Tabs, Widget},
 };
 
 use std::{
@@ -69,11 +71,12 @@ pub struct App {
     state: AppState,
     selected_tab: SelectedTab,
     modules: BTreeMap<SelectedTab, Box<dyn Module>>,
+    log_buffer: LogBuffer,
 }
 
 impl App {
     /// Construct a new instance of [`App`] from any source type.
-    pub fn new<S: Source + 'static>(source: S, battery_graph_interval: Duration) -> Self {
+    pub fn new<S: Source + 'static>(source: S, battery_graph_interval: Duration, log_buffer: LogBuffer) -> Self {
         let mut modules: BTreeMap<SelectedTab, Box<dyn Module>> = BTreeMap::new();
         let source = Arc::new(source);
 
@@ -88,6 +91,7 @@ impl App {
             state: Default::default(),
             selected_tab: Default::default(),
             modules,
+            log_buffer,
         }
     }
 
@@ -183,8 +187,8 @@ impl App {
 impl Widget for &App {
     fn render(self, area: Rect, buf: &mut Buffer) {
         use Constraint::{Length, Min};
-        let vertical = Layout::vertical([Length(1), Min(0), Length(1)]);
-        let [header_area, inner_area, footer_area] = vertical.areas(area);
+        let vertical = Layout::vertical([Length(1), Min(0), Length(LOG_PANEL_HEIGHT), Length(1)]);
+        let [header_area, inner_area, log_area, footer_area] = vertical.areas(area);
 
         let horizontal = Layout::horizontal([Min(0), Length(20)]);
         let [tabs_area, title_area] = horizontal.areas(header_area);
@@ -192,6 +196,7 @@ impl Widget for &App {
         render_title(title_area, buf);
         self.render_tabs(tabs_area, buf);
         self.render_selected_tab(inner_area, buf);
+        self.render_log_panel(log_area, buf);
         render_footer(footer_area, buf);
     }
 }
@@ -199,6 +204,47 @@ impl Widget for &App {
 impl Drop for App {
     fn drop(&mut self) {
         ratatui::restore();
+    }
+}
+
+// ── Log panel ─────────────────────────────────────────────────────────────────
+
+/// Height of the persistent log panel in terminal rows (includes the border).
+const LOG_PANEL_HEIGHT: u16 = 8;
+
+fn level_color(level: Level) -> Color {
+    match level {
+        Level::ERROR => tailwind::RED.c400,
+        Level::WARN => tailwind::YELLOW.c400,
+        Level::INFO => tailwind::GREEN.c400,
+        Level::DEBUG => tailwind::CYAN.c400,
+        Level::TRACE => tailwind::SLATE.c500,
+    }
+}
+
+impl App {
+    fn render_log_panel(&self, area: Rect, buf: &mut Buffer) {
+        let entries = self.log_buffer.entries();
+        // Subtract 2 for the top and bottom borders.
+        let visible_rows = area.height.saturating_sub(2) as usize;
+
+        let skip = entries.len().saturating_sub(visible_rows);
+        let lines: Vec<Line<'_>> = entries[skip..]
+            .iter()
+            .map(|entry| {
+                Line::from(vec![
+                    Span::styled(
+                        format!("[{:<5}]", entry.level),
+                        Style::default().fg(level_color(entry.level)),
+                    ),
+                    Span::raw(format!(" {}: {}", entry.target, entry.message)),
+                ])
+            })
+            .collect();
+
+        Paragraph::new(lines)
+            .block(Block::bordered().title(" Logs (set RUST_LOG to change verbosity) "))
+            .render(area, buf);
     }
 }
 

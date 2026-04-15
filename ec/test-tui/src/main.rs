@@ -1,15 +1,16 @@
 mod app;
 mod battery;
 mod common;
+mod logging;
 mod rtc;
 mod thermal;
 mod ucsi;
 mod widgets;
 
-use std::time::Duration;
+use std::{path::PathBuf, sync::Mutex, time::Duration};
 
 use clap::Parser;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{EnvFilter, prelude::*};
 
 /// ODP Embedded Controller demo TUI.
 #[derive(Parser)]
@@ -43,10 +44,14 @@ struct Cli {
     /// Defaults to 1 for mock sources and 60 for real hardware.
     #[arg(long)]
     sample_period: Option<u64>,
+
+    /// Write logs to this file in addition to the in-app log panel.
+    #[arg(long)]
+    log_file: Option<PathBuf>,
 }
 
 /// Available data sources (only variants whose feature is compiled in are shown).
-#[derive(clap::ValueEnum, Clone, Copy)]
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
 enum SourceKind {
     /// Deterministic in-process mock — no hardware required.
     Mock,
@@ -68,22 +73,39 @@ enum FlowControl {
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-    // Log to a file rather than stderr to avoid corrupting the ratatui terminal.
-    let log_file = std::fs::File::create("ec-test-tui.log")?;
-    tracing_subscriber::fmt()
-        .with_writer(log_file)
-        .with_env_filter(EnvFilter::from_default_env())
+    let cli = Cli::parse();
+
+    // Build an optional file layer when --log-file is supplied.
+    let file_layer: Option<_> = cli
+        .log_file
+        .as_ref()
+        .map(|path| -> color_eyre::Result<_> {
+            let file = std::fs::File::create(path)?;
+            Ok(tracing_subscriber::fmt::layer().with_writer(Mutex::new(file)))
+        })
+        .transpose()?;
+
+    let log_buffer = logging::LogBuffer::default();
+
+    // Default to WARN when RUST_LOG is not set so the panel isn't flooded.
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(logging::TuiLayer::new(log_buffer.clone()))
+        .with(file_layer)
         .init();
 
     color_eyre::install()?;
 
-    let cli = Cli::parse();
+    tracing::debug!("Starting EC test TUI with source: '{:?}'", cli.source);
+
     let terminal = ratatui::init();
 
     match cli.source {
         SourceKind::Mock => {
             let period = Duration::from_secs(cli.sample_period.unwrap_or(1));
-            app::App::new(ec_test_lib::mock::Mock::default(), period).run(terminal)
+            app::App::new(ec_test_lib::mock::Mock::default(), period, log_buffer).run(terminal)
         }
 
         SourceKind::Serial => {
@@ -92,13 +114,13 @@ async fn main() -> color_eyre::Result<()> {
             let source =
                 ec_test_lib::serial::Serial::new(&port, cli.baud, hw_flow, cli.sensor_instance, cli.fan_instance)?;
             let period = Duration::from_secs(cli.sample_period.unwrap_or(60));
-            app::App::new(source, period).run(terminal)
+            app::App::new(source, period, log_buffer).run(terminal)
         }
 
         #[cfg(target_os = "windows")]
         SourceKind::Acpi => {
             let period = Duration::from_secs(cli.sample_period.unwrap_or(60));
-            app::App::new(ec_test_lib::acpi::Acpi::new(cli.fan_instance), period).run(terminal)
+            app::App::new(ec_test_lib::acpi::Acpi::new(cli.fan_instance), period, log_buffer).run(terminal)
         }
     }
 }
