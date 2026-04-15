@@ -2,7 +2,6 @@ use crate::battery::Battery;
 use crate::logging::LogBuffer;
 use crate::rtc::Rtc;
 use crate::thermal::Thermal;
-use crate::ucsi::Ucsi;
 use ec_test_lib::Source;
 
 use color_eyre::Result;
@@ -61,8 +60,6 @@ enum SelectedTab {
     TabThermal,
     #[strum(to_string = "RTC")]
     TabRTC,
-    #[strum(to_string = "UCSI")]
-    TabUCSI,
 }
 
 /// The main application which holds the state and logic of the application.
@@ -81,7 +78,6 @@ impl App {
 
         modules.insert(SelectedTab::TabThermal, Box::new(Thermal::new(Arc::clone(&source))));
         modules.insert(SelectedTab::TabRTC, Box::new(Rtc::new(Arc::clone(&source))));
-        modules.insert(SelectedTab::TabUCSI, Box::new(Ucsi::new()));
 
         let battery = Battery::new(Arc::clone(&source)).with_graph_sample_interval(battery_graph_interval);
         modules.insert(SelectedTab::TabBattery, Box::new(battery));
@@ -321,7 +317,6 @@ impl SelectedTab {
             Self::TabBattery => tailwind::SKY,
             Self::TabThermal => tailwind::ORANGE,
             Self::TabRTC => tailwind::VIOLET,
-            Self::TabUCSI => tailwind::SLATE,
         }
     }
 }

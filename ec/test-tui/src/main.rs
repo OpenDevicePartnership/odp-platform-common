@@ -4,7 +4,6 @@ mod common;
 mod logging;
 mod rtc;
 mod thermal;
-mod ucsi;
 mod widgets;
 
 use std::{path::PathBuf, sync::Mutex, time::Duration};
