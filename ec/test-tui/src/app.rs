@@ -5,7 +5,7 @@ use crate::state::{AppState, BatteryCommand, ThermalCommand};
 use crate::thermal::Thermal;
 
 use color_eyre::Result;
-use tracing::Level;
+use tracing::{debug, info, Level};
 
 use ratatui::{
     DefaultTerminal,
@@ -113,20 +113,24 @@ impl App {
             TabModule::Rtc(Rtc::new()),
         ];
 
-        Self {
+        let app = Self {
             run_state: Default::default(),
             selected_tab: Default::default(),
             modules,
             shared_state,
             log_buffer,
             log_visible: false,
-        }
+        };
+        info!("application initialized");
+        app
     }
 
     /// Run the application's main loop.
     pub fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
         let tick_rate = Duration::from_millis(250);
         let mut last_tick = Instant::now();
+
+        info!("entering main loop");
 
         while self.run_state == RunState::Running {
             terminal.draw(|frame| frame.render_widget(&self, frame.area()))?;
@@ -141,6 +145,7 @@ impl App {
             }
         }
 
+        info!("exiting main loop");
         Ok(())
     }
 
@@ -172,13 +177,16 @@ impl App {
 
     fn next_tab(&mut self) {
         self.selected_tab = self.selected_tab.next();
+        debug!(tab = %self.selected_tab, "switched to next tab");
     }
 
     fn previous_tab(&mut self) {
         self.selected_tab = self.selected_tab.previous();
+        debug!(tab = %self.selected_tab, "switched to previous tab");
     }
 
     fn quit(&mut self) {
+        info!("quit requested");
         self.run_state = RunState::Quitting;
     }
 

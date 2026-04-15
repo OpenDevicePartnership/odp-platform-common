@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use ec_test_lib::{Source, Threshold};
 use time_alarm_service_messages::AcpiTimerId;
+use tracing::{debug, info, trace, warn};
 
 use crate::battery::{poll_bix, poll_bst};
 use crate::state::{AppState, BatteryCommand, FanRpmBounds, FanStateLevels, ThermalCommand};
@@ -32,6 +33,10 @@ impl<S: Source + Send + 'static> Updater<S> {
         thermal_rx: mpsc::Receiver<ThermalCommand>,
         graph_sample_interval: Duration,
     ) -> Self {
+        info!(
+            interval_secs = graph_sample_interval.as_secs_f64(),
+            "updater created"
+        );
         Self {
             source,
             state,
@@ -46,10 +51,17 @@ impl<S: Source + Send + 'static> Updater<S> {
 
     // ── Command processing ────────────────────────────────────────────────────
 
+    #[tracing::instrument(skip_all)]
     fn process_commands(&mut self) {
         while let Ok(cmd) = self.battery_rx.try_recv() {
             let BatteryCommand::SetBtp(v) = cmd;
+            debug!(btp = v, "processing SetBtp command");
             let success = self.source.set_btp(v).is_ok();
+            if success {
+                info!(btp = v, "battery trip-point set successfully");
+            } else {
+                warn!(btp = v, "failed to set battery trip-point on hardware");
+            }
             if let Ok(mut s) = self.state.write() {
                 s.battery.btp = v;
                 s.battery.btp_success = success;
@@ -57,12 +69,16 @@ impl<S: Source + Send + 'static> Updater<S> {
         }
         while let Ok(cmd) = self.thermal_rx.try_recv() {
             let ThermalCommand::SetRpm(rpm) = cmd;
-            let _ = self.source.set_rpm(rpm);
+            debug!(rpm, "processing SetRpm command");
+            if self.source.set_rpm(rpm).is_err() {
+                warn!(rpm, "failed to set fan RPM on hardware");
+            }
         }
     }
 
     // ── Per-subsystem update helpers ──────────────────────────────────────────
 
+    #[tracing::instrument(skip_all)]
     fn update_battery(&mut self) {
         let now = Instant::now();
         let update_graph = self
@@ -74,6 +90,9 @@ impl<S: Source + Send + 'static> Updater<S> {
         // BIX is static — only fetch until we get one good read.
         if !self.bix_cached {
             poll_bix(&mut s.battery, self.source.as_ref());
+            if s.battery.bix_success {
+                info!("BIX static battery info cached successfully");
+            }
             self.bix_cached = s.battery.bix_success;
         }
 
@@ -81,6 +100,11 @@ impl<S: Source + Send + 'static> Updater<S> {
 
         if update_graph && s.battery.bst_success {
             let cap = s.battery.bst.battery_remaining_capacity;
+            trace!(
+                remaining_capacity = cap,
+                voltage_mv = s.battery.bst.battery_present_voltage,
+                "battery graph sample recorded"
+            );
             s.battery.samples.insert(cap);
             s.battery.t_min += 1;
         }
@@ -92,6 +116,7 @@ impl<S: Source + Send + 'static> Updater<S> {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     fn update_thermal(&mut self) {
         // Fetch all thermal readings before acquiring the write lock so
         // we hold the lock only for the short write phase.
@@ -107,11 +132,15 @@ impl<S: Source + Send + 'static> Updater<S> {
 
         match temp {
             Ok(t) => {
+                trace!(skin_temp = t, "temperature read OK");
                 s.thermal.sensor.skin_temp = t;
                 s.thermal.sensor.samples.insert(t);
                 s.thermal.sensor.temp_success = true;
             }
-            Err(_) => s.thermal.sensor.temp_success = false,
+            Err(e) => {
+                warn!(error = %e, "failed to read skin temperature");
+                s.thermal.sensor.temp_success = false;
+            }
         }
         // Thresholds are hardcoded for now (see thermal.rs).
         s.thermal.sensor.thresholds = crate::thermal::sensor_thresholds();
@@ -119,30 +148,45 @@ impl<S: Source + Send + 'static> Updater<S> {
 
         match rpm {
             Ok(r) => {
+                trace!(rpm = r, "fan RPM read OK");
                 s.thermal.fan.rpm = r;
                 s.thermal.fan.samples.insert(r as u32);
                 s.thermal.fan.rpm_success = true;
             }
-            Err(_) => s.thermal.fan.rpm_success = false,
+            Err(e) => {
+                warn!(error = %e, "failed to read fan RPM");
+                s.thermal.fan.rpm_success = false;
+            }
         }
         match (min_rpm, max_rpm) {
             (Ok(min), Ok(max)) => {
                 s.thermal.fan.rpm_bounds = FanRpmBounds { min, max };
                 s.thermal.fan.bounds_success = true;
             }
-            _ => s.thermal.fan.bounds_success = false,
+            (Err(e), _) | (_, Err(e)) => {
+                warn!(error = %e, "failed to read fan RPM bounds");
+                s.thermal.fan.bounds_success = false;
+            }
         }
         match (thresh_on, thresh_ramp, thresh_max) {
             (Ok(on), Ok(ramping), Ok(max)) => {
                 s.thermal.fan.state_levels = FanStateLevels { on, ramping, max };
                 s.thermal.fan.levels_success = true;
             }
-            _ => s.thermal.fan.levels_success = false,
+            (Err(e), ..) => {
+                warn!(error = %e, "failed to read fan state levels");
+                s.thermal.fan.levels_success = false;
+            }
+            (_, Err(e), _) | (_, _, Err(e)) => {
+                warn!(error = %e, "failed to read fan state levels");
+                s.thermal.fan.levels_success = false;
+            }
         }
 
         s.thermal.t += 1;
     }
 
+    #[tracing::instrument(skip_all)]
     fn update_rtc(&mut self) {
         // Capabilities are static — only fetch until we get a good read.
         let caps = if self.rtc_caps_cached {
@@ -162,12 +206,30 @@ impl<S: Source + Send + 'static> Updater<S> {
 
         if let Some(c) = caps {
             let ok = c.is_ok();
+            if ok {
+                info!("RTC capabilities cached successfully");
+            } else if let Err(ref e) = c {
+                warn!(error = %e, "failed to read RTC capabilities");
+            }
             s.rtc.capabilities = Some(c.map_err(Into::into));
             if ok {
                 self.rtc_caps_cached = true;
             }
         }
+
+        match &timestamp {
+            Ok(_) => trace!("RTC timestamp read OK"),
+            Err(e) => warn!(error = %e, "failed to read RTC timestamp"),
+        }
         s.rtc.timestamp = Some(timestamp.map_err(Into::into));
+
+        if let Err(ref e) = ac_value {
+            warn!(error = %e, "failed to read AC power timer value");
+        }
+        if let Err(ref e) = dc_value {
+            warn!(error = %e, "failed to read DC power timer value");
+        }
+
         s.rtc.timers[0].value = Some(ac_value.map_err(Into::into));
         s.rtc.timers[0].wake_policy = Some(ac_policy.map_err(Into::into));
         s.rtc.timers[0].timer_status = Some(ac_status.map_err(Into::into));
@@ -179,7 +241,9 @@ impl<S: Source + Send + 'static> Updater<S> {
     // ── Public API ────────────────────────────────────────────────────────────
 
     /// Drain pending commands and refresh all subsystems once.
+    #[tracing::instrument(skip_all)]
     pub fn update(&mut self) {
+        debug!("update cycle start");
         self.process_commands();
         self.update_battery();
         self.update_thermal();
@@ -189,6 +253,7 @@ impl<S: Source + Send + 'static> Updater<S> {
     /// Perform an initial fetch, then loop forever sleeping `interval` between
     /// updates.  Intended to be called from a dedicated [`std::thread::spawn`].
     pub fn run(mut self, interval: Duration) {
+        info!(interval_ms = interval.as_millis(), "updater thread started");
         self.update();
         loop {
             std::thread::sleep(interval);

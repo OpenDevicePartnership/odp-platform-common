@@ -1,5 +1,6 @@
 use crate::common;
 use crate::state::{AppState, FanStateLevels, SensorThresholds, ThermalCommand};
+use tracing::{debug, warn};
 
 #[cfg(test)]
 use crate::state::{FanData, FanRpmBounds, SensorData};
@@ -155,8 +156,12 @@ impl Thermal {
             && key.code == KeyCode::Enter
             && key.kind == KeyEventKind::Press
         {
-            if let Ok(rpm) = self.rpm_input.value_and_reset().parse() {
+            let raw = self.rpm_input.value_and_reset();
+            if let Ok(rpm) = raw.parse::<f64>() {
+                debug!(rpm, "user requested fan RPM change");
                 let _ = self.cmd_tx.send(ThermalCommand::SetRpm(rpm));
+            } else {
+                warn!(input = raw, "invalid fan RPM value; expected a number");
             }
         } else {
             let _ = self.rpm_input.handle_event(evt);

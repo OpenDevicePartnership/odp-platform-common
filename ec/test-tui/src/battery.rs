@@ -7,6 +7,7 @@ use battery_service_messages::{
 use core::ffi::CStr;
 use ec_test_lib::BatterySource;
 use std::sync::mpsc;
+use tracing::{debug, instrument, warn};
 
 use ratatui::style::Modifier;
 use ratatui::text::Text;
@@ -75,24 +76,38 @@ fn swap_cap_as_str(swap_cap: BatterySwapCapability) -> &'static str {
 // ── Fetch helpers (used by the background updater) ────────────────────────────
 
 /// Fetch the latest BST reading into `state`.
+#[instrument(skip_all)]
 pub(crate) fn poll_bst(state: &mut BatteryState, source: &impl BatterySource) {
     match source.get_bst() {
         Ok(bst) => {
+            debug!(
+                remaining_capacity = bst.battery_remaining_capacity,
+                voltage_mv = bst.battery_present_voltage,
+                "BST read OK"
+            );
             state.bst = bst;
             state.bst_success = true;
         }
-        Err(_) => state.bst_success = false,
+        Err(e) => {
+            warn!(error = %e, "BST read failed");
+            state.bst_success = false;
+        }
     }
 }
 
 /// Fetch static BIX info into `state` (call until `state.bix_success` is true).
+#[instrument(skip_all)]
 pub(crate) fn poll_bix(state: &mut BatteryState, source: &impl BatterySource) {
     match source.get_bix() {
         Ok(bix) => {
+            debug!("BIX read OK");
             state.bix = bix;
             state.bix_success = true;
         }
-        Err(_) => state.bix_success = false,
+        Err(e) => {
+            warn!(error = %e, "BIX read failed");
+            state.bix_success = false;
+        }
     }
 }
 
@@ -120,8 +135,12 @@ impl Battery {
             && key.code == KeyCode::Enter
             && key.kind == KeyEventKind::Press
         {
-            if let Ok(btp) = self.btp_input.value_and_reset().parse() {
+            let raw = self.btp_input.value_and_reset();
+            if let Ok(btp) = raw.parse::<u32>() {
+                debug!(btp, "user requested battery trip-point change");
                 let _ = self.cmd_tx.send(BatteryCommand::SetBtp(btp));
+            } else {
+                warn!(input = raw, "invalid BTP value; expected a non-negative integer");
             }
         } else {
             let _ = self.btp_input.handle_event(evt);
