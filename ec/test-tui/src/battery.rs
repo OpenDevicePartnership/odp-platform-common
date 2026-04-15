@@ -365,7 +365,7 @@ impl Battery {
             samples: bat.samples.get(),
             x_axis: "Time (m)".to_string(),
             x_bounds: [0.0, 60.0],
-            x_labels: common::time_labels(bat.t_min, crate::state::BATTERY_MAX_SAMPLES),
+            x_labels: common::time_labels(crate::state::BATTERY_MAX_SAMPLES),
             y_axis: format!("Capacity ({})", power_unit_as_capacity_str(bat.bix.power_unit)),
             y_bounds: [0.0, bat.bix.design_capacity as f64],
             y_labels,

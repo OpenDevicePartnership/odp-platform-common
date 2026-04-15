@@ -20,12 +20,13 @@ pub struct BatteryUpdater<S: Source> {
 }
 
 impl<S: Source + Send + Sync + 'static> BatteryUpdater<S> {
-    pub fn new(
-        source: Arc<S>,
-        state: Arc<RwLock<AppState>>,
-        battery_rx: mpsc::Receiver<BatteryCommand>,
-    ) -> Self {
-        Self { source, state, battery_rx, bix_cached: false }
+    pub fn new(source: Arc<S>, state: Arc<RwLock<AppState>>, battery_rx: mpsc::Receiver<BatteryCommand>) -> Self {
+        Self {
+            source,
+            state,
+            battery_rx,
+            bix_cached: false,
+        }
     }
 
     fn process_commands(&mut self) {
@@ -96,12 +97,12 @@ pub struct ThermalUpdater<S: Source> {
 }
 
 impl<S: Source + Send + Sync + 'static> ThermalUpdater<S> {
-    pub fn new(
-        source: Arc<S>,
-        state: Arc<RwLock<AppState>>,
-        thermal_rx: mpsc::Receiver<ThermalCommand>,
-    ) -> Self {
-        Self { source, state, thermal_rx }
+    pub fn new(source: Arc<S>, state: Arc<RwLock<AppState>>, thermal_rx: mpsc::Receiver<ThermalCommand>) -> Self {
+        Self {
+            source,
+            state,
+            thermal_rx,
+        }
     }
 
     fn process_commands(&mut self) {
@@ -206,7 +207,11 @@ pub struct RtcUpdater<S: Source> {
 
 impl<S: Source + Send + Sync + 'static> RtcUpdater<S> {
     pub fn new(source: Arc<S>, state: Arc<RwLock<AppState>>) -> Self {
-        Self { source, state, rtc_caps_cached: false }
+        Self {
+            source,
+            state,
+            rtc_caps_cached: false,
+        }
     }
 
     #[tracing::instrument(skip_all)]
@@ -323,7 +328,11 @@ impl SystemUpdater {
         s.system.memory.used_bytes = used;
         s.system.memory.swap_total_bytes = self.sys_info.total_swap();
         s.system.memory.swap_used_bytes = self.sys_info.used_swap();
-        let mem_pct = if total > 0 { used as f64 / total as f64 * 100.0 } else { 0.0 };
+        let mem_pct = if total > 0 {
+            used as f64 / total as f64 * 100.0
+        } else {
+            0.0
+        };
         s.system.memory.samples.insert(mem_pct);
         s.system.memory.success = true;
         trace!(used, total, "memory sampled");

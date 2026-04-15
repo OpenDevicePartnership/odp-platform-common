@@ -150,10 +150,8 @@ impl System {
 
         // Per-core grid: up to 4 columns × 16 rows = 64 cores
         let cols_used = num_cores.div_ceil(16).clamp(1, 4);
-        let col_areas = Layout::horizontal(
-            (0..cols_used).map(|_| Constraint::Ratio(1, cols_used as u32)),
-        )
-        .split(cores_area);
+        let col_areas =
+            Layout::horizontal((0..cols_used).map(|_| Constraint::Ratio(1, cols_used as u32))).split(cores_area);
 
         for col in 0..cols_used {
             let start = col * 16;
@@ -178,7 +176,6 @@ impl System {
 
         // History chart
         if chart_area.height > 3 {
-            let t = state.system.t;
             common::render_chart(
                 chart_area,
                 buf,
@@ -187,8 +184,8 @@ impl System {
                     color: CPU_COLOR,
                     samples: cpu.samples.get(),
                     x_axis: String::new(),
-                    x_bounds: [t.saturating_sub(SYSTEM_MAX_SAMPLES) as f64, t as f64],
-                    x_labels: common::time_labels(t, SYSTEM_MAX_SAMPLES),
+                    x_bounds: [0.0, SYSTEM_MAX_SAMPLES as f64],
+                    x_labels: common::time_labels(SYSTEM_MAX_SAMPLES),
                     y_axis: "%".to_string(),
                     y_bounds: [0.0, 100.0],
                     y_labels: [
@@ -275,7 +272,6 @@ impl System {
         }
 
         if chart_area.height > 3 {
-            let t = state.system.t;
             common::render_chart(
                 chart_area,
                 buf,
@@ -284,8 +280,8 @@ impl System {
                     color: MEM_COLOR,
                     samples: mem.samples.get(),
                     x_axis: String::new(),
-                    x_bounds: [t.saturating_sub(SYSTEM_MAX_SAMPLES) as f64, t as f64],
-                    x_labels: common::time_labels(t, SYSTEM_MAX_SAMPLES),
+                    x_bounds: [0.0, SYSTEM_MAX_SAMPLES as f64],
+                    x_labels: common::time_labels(SYSTEM_MAX_SAMPLES),
                     y_axis: "%".to_string(),
                     y_bounds: [0.0, 100.0],
                     y_labels: [
@@ -348,15 +344,14 @@ impl System {
         .render(totals_area, buf);
 
         if chart_area.height > 3 {
-            let t = state.system.t;
-            render_dual_chart(chart_area, buf, &rx_vals, &tx_vals, t, peak_bps);
+            render_dual_chart(chart_area, buf, &rx_vals, &tx_vals, peak_bps);
         }
     }
 }
 
 // ── Dual-dataset network chart ────────────────────────────────────────────────
 
-fn render_dual_chart(area: Rect, buf: &mut Buffer, rx: &[(f64, f64)], tx: &[(f64, f64)], t: usize, peak: f64) {
+fn render_dual_chart(area: Rect, buf: &mut Buffer, rx: &[(f64, f64)], tx: &[(f64, f64)], peak: f64) {
     let marker = *CHART_MARKER;
     let datasets = vec![
         Dataset::default()
@@ -373,25 +368,23 @@ fn render_dual_chart(area: Rect, buf: &mut Buffer, rx: &[(f64, f64)], tx: &[(f64
             .data(tx),
     ];
 
-    let x_start = t.saturating_sub(SYSTEM_MAX_SAMPLES);
+    // Fixed-width labels (10 chars) so ratatui's y-axis column never
+    // grows as peak_bps increases, which would shrink the plot area.
+    let bps_label = |v: f64| Span::raw(format!("{:>10}", format_bps(v)));
+
     Chart::new(datasets)
         .block(Block::bordered().title(Line::from("Network Throughput").cyan().bold().centered()))
         .x_axis(
             Axis::default()
                 .style(Style::default().gray())
-                .bounds([x_start as f64, t as f64])
-                .labels(common::time_labels(t, SYSTEM_MAX_SAMPLES)),
+                .bounds([0.0, SYSTEM_MAX_SAMPLES as f64])
+                .labels(common::time_labels(SYSTEM_MAX_SAMPLES)),
         )
         .y_axis(
             Axis::default()
-                .title(format_bps(peak))
                 .style(Style::default().gray())
                 .bounds([0.0, peak])
-                .labels([
-                    Span::raw("0"),
-                    Span::raw(format_bps(peak / 2.0)),
-                    Span::raw(format_bps(peak)),
-                ]),
+                .labels([bps_label(0.0), bps_label(peak / 2.0), bps_label(peak)]),
         )
         .render(area, buf);
 }

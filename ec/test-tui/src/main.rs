@@ -117,9 +117,7 @@ async fn main() -> color_eyre::Result<()> {
     let terminal = ratatui::init();
 
     match cli.source {
-        SourceKind::Mock => {
-            run_with_source(ec_test_lib::mock::Mock::default(), log_buffer, terminal)
-        }
+        SourceKind::Mock => run_with_source(ec_test_lib::mock::Mock::default(), log_buffer, terminal),
 
         SourceKind::Serial => {
             let port = cli.port.expect("--port is required for --source serial");
@@ -130,13 +128,7 @@ async fn main() -> color_eyre::Result<()> {
         }
 
         #[cfg(target_os = "windows")]
-        SourceKind::Local => {
-            run_with_source(
-                ec_test_lib::acpi::Acpi::new(cli.fan_instance),
-                log_buffer,
-                terminal,
-            )
-        }
+        SourceKind::Local => run_with_source(ec_test_lib::acpi::Acpi::new(cli.fan_instance), log_buffer, terminal),
     }
 }
 
@@ -160,19 +152,11 @@ where
     let source = Arc::new(source);
 
     tokio::task::spawn({
-        let upd = updater::BatteryUpdater::new(
-            Arc::clone(&source),
-            Arc::clone(&shared_state),
-            battery_rx,
-        );
+        let upd = updater::BatteryUpdater::new(Arc::clone(&source), Arc::clone(&shared_state), battery_rx);
         async move { upd.run(BATTERY_PERIOD).await }
     });
     tokio::task::spawn({
-        let upd = updater::ThermalUpdater::new(
-            Arc::clone(&source),
-            Arc::clone(&shared_state),
-            thermal_rx,
-        );
+        let upd = updater::ThermalUpdater::new(Arc::clone(&source), Arc::clone(&shared_state), thermal_rx);
         async move { upd.run(THERMAL_PERIOD).await }
     });
     tokio::task::spawn({

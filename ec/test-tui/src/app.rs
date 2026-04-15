@@ -250,12 +250,9 @@ impl App {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        let [row0, row1] =
-            Layout::vertical([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).areas(inner);
-        let [card00, card01] =
-            Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).areas(row0);
-        let [card10, card11] =
-            Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).areas(row1);
+        let [row0, row1] = Layout::vertical([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).areas(inner);
+        let [card00, card01] = Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).areas(row0);
+        let [card10, card11] = Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).areas(row1);
 
         self.modules[0].render_card(state, card00, buf); // Battery
         self.modules[1].render_card(state, card01, buf); // Thermal

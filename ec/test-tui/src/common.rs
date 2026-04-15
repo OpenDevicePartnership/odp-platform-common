@@ -131,16 +131,11 @@ pub fn render_chart(area: Rect, buf: &mut Buffer, graph: Graph) {
     chart.render(area, buf);
 }
 
-pub fn time_labels(t: usize, max_samples: usize) -> [Span<'static>; 3] {
-    let (start, mid, end) = if t <= max_samples {
-        (0, max_samples / 2, max_samples)
-    } else {
-        (t - max_samples, t - max_samples / 2, t)
-    };
+pub fn time_labels(max_samples: usize) -> [Span<'static>; 3] {
     [
-        Span::styled(start.to_string(), Style::default().bold()),
-        Span::styled(mid.to_string(), Style::default().bold()),
-        Span::styled(end.to_string(), Style::default().bold()),
+        Span::styled("0", Style::default().bold()),
+        Span::styled((max_samples / 2).to_string(), Style::default().bold()),
+        Span::styled(max_samples.to_string(), Style::default().bold()),
     ]
 }
 
