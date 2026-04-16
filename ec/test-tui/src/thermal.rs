@@ -1,4 +1,5 @@
 use crate::common;
+use crate::common::SYMBOLS;
 use crate::state::{AppState, FanStateLevels, SensorThresholds, ThermalCommand};
 use tracing::{debug, warn};
 
@@ -220,7 +221,7 @@ impl Thermal {
         let zone = thermal_zone(th.sensor.skin_temp, &th.sensor.thresholds);
         Line::from(vec![
             Span::styled(
-                format!("Skin  {:.1} \u{00b0}C", th.sensor.skin_temp),
+                format!("Skin  {:.1} {}C", th.sensor.skin_temp, SYMBOLS.degree),
                 Style::default().fg(temp_color).bold(),
             ),
             Span::raw("  "),
@@ -239,7 +240,7 @@ impl Thermal {
         ];
         common::ThresholdGauge {
             ratio,
-            label: Some(Span::raw(format!("{:.1}\u{00b0}C", th.sensor.skin_temp))),
+            label: Some(Span::raw(format!("{:.1}{}C", th.sensor.skin_temp, SYMBOLS.degree))),
             thresholds: &temp_thresholds,
             track_color: tailwind::SLATE.c800,
         }
@@ -279,16 +280,22 @@ impl Thermal {
             common::metric_row(
                 "Temp  ",
                 format!(
-                    "W:{:.0}\u{00b0} P:{:.0}\u{00b0} C:{:.0}\u{00b0}",
-                    th.sensor.thresholds.warn_high, th.sensor.thresholds.prochot, th.sensor.thresholds.critical
+                    "W:{:.0}{d} P:{:.0}{d} C:{:.0}{d}",
+                    th.sensor.thresholds.warn_high,
+                    th.sensor.thresholds.prochot,
+                    th.sensor.thresholds.critical,
+                    d = SYMBOLS.degree
                 ),
                 tailwind::SLATE.c500,
             ),
             common::metric_row(
                 "Fan   ",
                 format!(
-                    "On:{:.0}\u{00b0} Ramp:{:.0}\u{00b0} Max:{:.0}\u{00b0}",
-                    th.fan.state_levels.on, th.fan.state_levels.ramping, th.fan.state_levels.max
+                    "On:{:.0}{d} Ramp:{:.0}{d} Max:{:.0}{d}",
+                    th.fan.state_levels.on,
+                    th.fan.state_levels.ramping,
+                    th.fan.state_levels.max,
+                    d = SYMBOLS.degree
                 ),
                 tailwind::SLATE.c500,
             ),
@@ -323,7 +330,7 @@ impl Thermal {
             x_axis: "Time (s)".to_string(),
             x_bounds: [0.0, 60.0],
             x_labels: common::time_labels(crate::state::THERMAL_MAX_SAMPLES),
-            y_axis: "°C".to_string(),
+            y_axis: format!("{}C", SYMBOLS.degree),
             y_bounds: [0.0, s.thresholds.critical + 5.0],
             y_labels,
         };
@@ -342,7 +349,7 @@ impl Thermal {
         let color = temp_level_color(s.skin_temp, &s.thresholds);
         Paragraph::new(common::metric_row(
             "Skin ",
-            format!("{:.2} \u{00b0}C", s.skin_temp),
+            format!("{:.2} {}C", s.skin_temp, SYMBOLS.degree),
             color,
         ))
         .render(temp_line, buf);
@@ -357,7 +364,7 @@ impl Thermal {
         ];
         common::ThresholdGauge {
             ratio,
-            label: Some(Span::raw(format!("{:.1}\u{00b0}C", s.skin_temp))),
+            label: Some(Span::raw(format!("{:.1}{}C", s.skin_temp, SYMBOLS.degree))),
             thresholds: &thresholds,
             track_color: tailwind::SLATE.c800,
         }
@@ -366,17 +373,17 @@ impl Thermal {
         Paragraph::new(vec![
             common::metric_row(
                 "Warn    ",
-                format!("{:.0} \u{00b0}C", s.thresholds.warn_high),
+                format!("{:.0} {}C", s.thresholds.warn_high, SYMBOLS.degree),
                 LABEL_COLOR,
             ),
             common::metric_row(
                 "Prochot ",
-                format!("{:.0} \u{00b0}C", s.thresholds.prochot),
+                format!("{:.0} {}C", s.thresholds.prochot, SYMBOLS.degree),
                 LABEL_COLOR,
             ),
             common::metric_row(
                 "Critical",
-                format!("{:.0} \u{00b0}C", s.thresholds.critical),
+                format!("{:.0} {}C", s.thresholds.critical, SYMBOLS.degree),
                 LABEL_COLOR,
             ),
         ])
@@ -428,7 +435,10 @@ impl Thermal {
 
         Paragraph::new(common::metric_row(
             "RPM  ",
-            format!("{:.0}  ({} \u{2013} {})", f.rpm, f.rpm_bounds.min, f.rpm_bounds.max),
+            format!(
+                "{:.0}  ({} {} {})",
+                f.rpm, f.rpm_bounds.min, SYMBOLS.en_dash, f.rpm_bounds.max
+            ),
             LABEL_COLOR,
         ))
         .render(rpm_line, buf);
@@ -470,13 +480,21 @@ impl Thermal {
             LABEL_COLOR,
         );
         Paragraph::new(vec![
-            common::metric_row("On      ", format!("{:.0} \u{00b0}C", f.state_levels.on), LABEL_COLOR),
             common::metric_row(
-                "Ramping ",
-                format!("{:.0} \u{00b0}C", f.state_levels.ramping),
+                "On      ",
+                format!("{:.0} {}C", f.state_levels.on, SYMBOLS.degree),
                 LABEL_COLOR,
             ),
-            common::metric_row("Max     ", format!("{:.0} \u{00b0}C", f.state_levels.max), LABEL_COLOR),
+            common::metric_row(
+                "Ramping ",
+                format!("{:.0} {}C", f.state_levels.ramping, SYMBOLS.degree),
+                LABEL_COLOR,
+            ),
+            common::metric_row(
+                "Max     ",
+                format!("{:.0} {}C", f.state_levels.max, SYMBOLS.degree),
+                LABEL_COLOR,
+            ),
         ])
         .block(block)
         .render(area, buf);

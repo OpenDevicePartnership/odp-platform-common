@@ -9,21 +9,111 @@ use ratatui::{
 use std::collections::VecDeque;
 use std::sync::LazyLock;
 
-/// Chart marker selected once at startup.
-/// Override with `EC_TUI_MARKER=dot` or `EC_TUI_MARKER=braille`.
-/// Default: Braille if the terminal advertises Unicode support, Dot otherwise.
-pub(crate) static CHART_MARKER: LazyLock<symbols::Marker> =
-    LazyLock::new(|| match std::env::var("EC_TUI_MARKER").as_deref() {
-        Ok("dot") => symbols::Marker::Dot,
-        Ok("braille") => symbols::Marker::Braille,
-        _ => {
-            if supports_unicode::on(supports_unicode::Stream::Stdout) {
-                symbols::Marker::Braille
-            } else {
-                symbols::Marker::Dot
-            }
+// ── Unicode mode ──────────────────────────────────────────────────────────────
+
+/// Whether unicode rendering is globally enabled.
+///
+/// Set `EC_TUI_DISABLE_UNICODE=1` (or any non-empty value) to force
+/// pure-ASCII output across the entire UI.  When unset, unicode support is
+/// auto-detected from the terminal.
+static UNICODE_ENABLED: LazyLock<bool> = LazyLock::new(|| {
+    if std::env::var("EC_TUI_DISABLE_UNICODE")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .is_some()
+    {
+        return false;
+    }
+    supports_unicode::on(supports_unicode::Stream::Stdout)
+});
+
+#[inline]
+pub(crate) fn unicode_enabled() -> bool {
+    *UNICODE_ENABLED
+}
+
+/// Symbol set used throughout the UI, chosen once at startup.
+pub(crate) struct Symbols {
+    /// Status dot, no trailing space (e.g. `"●"` or `"*"`).
+    pub dot: &'static str,
+    /// Charging indicator (e.g. `"▲"` or `"^"`).
+    pub charging: &'static str,
+    /// Discharging indicator (e.g. `"▼"` or `"v"`).
+    pub discharging: &'static str,
+    /// Upward arrow (e.g. `"↑"` or `"^"`).
+    pub arrow_up: &'static str,
+    /// Downward arrow (e.g. `"↓"` or `"v"`).
+    pub arrow_down: &'static str,
+    /// Left-pointing arrow (e.g. `"◄"` or `"<"`).
+    pub arrow_left: &'static str,
+    /// Right-pointing arrow (e.g. `"►"` or `">"`).
+    pub arrow_right: &'static str,
+    /// Degree sign for temperatures (e.g. `"°"` or `""`).
+    pub degree: &'static str,
+    /// En-dash for ranges (e.g. `"–"` or `"-"`).
+    pub en_dash: &'static str,
+    /// Warning sign (e.g. `"⚠"` or `"!"`).
+    pub warning: &'static str,
+    /// Horizontal line for dividers (e.g. `"─"` or `"-"`).
+    pub h_line: &'static str,
+    /// Middle dot separator (e.g. `"·"` or `"."`).
+    pub mid_dot: &'static str,
+    /// Filled block for mini progress bars (e.g. `"█"` or `"#"`).
+    pub bar_full: &'static str,
+    /// Empty block for mini progress bars (e.g. `"░"` or `"."`).
+    pub bar_empty: &'static str,
+}
+
+/// Application-wide symbol set, selected once at startup via [`unicode_enabled()`].
+pub(crate) static SYMBOLS: LazyLock<Symbols> = LazyLock::new(|| {
+    if unicode_enabled() {
+        Symbols {
+            dot: "●",
+            charging: "▲",
+            discharging: "▼",
+            arrow_up: "↑",
+            arrow_down: "↓",
+            arrow_left: "◄",
+            arrow_right: "►",
+            degree: "°",
+            en_dash: "–",
+            warning: "⚠",
+            h_line: "─",
+            mid_dot: "·",
+            bar_full: "█",
+            bar_empty: "░",
         }
-    });
+    } else {
+        Symbols {
+            dot: "*",
+            charging: "^",
+            discharging: "v",
+            arrow_up: "^",
+            arrow_down: "v",
+            arrow_left: "<",
+            arrow_right: ">",
+            degree: "",
+            en_dash: "-",
+            warning: "!",
+            h_line: "-",
+            mid_dot: ".",
+            bar_full: "#",
+            bar_empty: ".",
+        }
+    }
+});
+
+/// Chart marker selected once at startup.
+///
+/// Uses [`Marker::Braille`] when unicode is enabled, [`Marker::Dot`] otherwise.
+/// Override globally with `EC_TUI_DISABLE_UNICODE=1`.
+pub(crate) static CHART_MARKER: LazyLock<symbols::Marker> = LazyLock::new(|| {
+    if unicode_enabled() {
+        symbols::Marker::Braille
+    } else {
+        symbols::Marker::Dot
+    }
+});
 
 #[derive(Default)]
 pub struct SampleBuf<T, const N: usize> {
@@ -90,13 +180,13 @@ pub fn title_block(title: impl Into<Line<'static>>, padding: u16, label_color: C
 /// The dot is green on success and red on failure, providing a compact
 /// visual health indicator that renders reliably without terminal emoji.
 pub fn status_title(title: impl Into<String>, success: bool) -> Line<'static> {
-    let (dot, color) = if success {
-        ("● ", tailwind::GREEN.c400)
+    let color = if success {
+        tailwind::GREEN.c400
     } else {
-        ("● ", tailwind::RED.c500)
+        tailwind::RED.c500
     };
     Line::from(vec![
-        Span::styled(dot, Style::default().fg(color)),
+        Span::styled(format!("{} ", SYMBOLS.dot), Style::default().fg(color)),
         Span::raw(title.into()),
     ])
 }

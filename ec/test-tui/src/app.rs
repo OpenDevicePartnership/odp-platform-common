@@ -5,6 +5,8 @@ use crate::state::{AppState, BatteryCommand, ThermalCommand};
 use crate::system::System;
 use crate::thermal::Thermal;
 
+use crate::common::SYMBOLS;
+
 use color_eyre::Result;
 use tracing::{Level, debug, info};
 
@@ -348,7 +350,7 @@ impl App {
             .collect();
 
         let scroll_label = if scroll > 0 {
-            format!(" Logs [↑{scroll}] ")
+            format!(" Logs [{}{scroll}] ", SYMBOLS.arrow_up)
         } else {
             " Logs ".to_owned()
         };
@@ -377,7 +379,7 @@ impl App {
         let desc = Style::default().fg(tailwind::SLATE.c500);
         let log_hint = if self.log_visible { " hide logs" } else { " show logs" };
         let mut spans = vec![
-            Span::styled(" ◄ ► ", key),
+            Span::styled(format!(" {} {} ", SYMBOLS.arrow_left, SYMBOLS.arrow_right), key),
             Span::styled(" switch tab  ", desc),
             Span::styled(" 1-5 ", key),
             Span::styled(" jump to tab  ", desc),
@@ -385,7 +387,10 @@ impl App {
             Span::styled(log_hint, desc),
         ];
         if self.log_visible {
-            spans.extend([Span::styled("  ↑ ↓ ", key), Span::styled(" scroll logs  ", desc)]);
+            spans.extend([
+                Span::styled(format!("  {} {} ", SYMBOLS.arrow_up, SYMBOLS.arrow_down), key),
+                Span::styled(" scroll logs  ", desc),
+            ]);
         }
         let show_set = matches!(self.selected_tab, SelectedTab::TabBattery | SelectedTab::TabThermal);
         if show_set {

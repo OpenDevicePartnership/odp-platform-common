@@ -1,4 +1,4 @@
-use crate::common;
+use crate::common::{self, SYMBOLS, unicode_enabled};
 use crate::state::{AppState, BatteryCommand, BatteryState};
 use crate::widgets::battery;
 use battery_service_messages::{BatteryState as BatteryStateFlag, BatterySwapCapability, BatteryTechnology, PowerUnit};
@@ -185,7 +185,11 @@ impl Battery {
     pub(crate) fn render_card(&self, state: &AppState, area: Rect, buf: &mut Buffer) {
         let bat = &state.battery;
         let is_charging = bat.bst.battery_state.contains(BatteryStateFlag::CHARGING);
-        let state_str = if is_charging { "▲ Charging" } else { "▼ Discharging" };
+        let state_str = if is_charging {
+            format!("{} Charging", SYMBOLS.charging)
+        } else {
+            format!("{} Discharging", SYMBOLS.discharging)
+        };
         let state_color = if is_charging {
             tailwind::GREEN.c400
         } else {
@@ -221,6 +225,7 @@ impl Battery {
         );
         Gauge::default()
             .gauge_style(gauge_color)
+            .use_unicode(unicode_enabled())
             .percent(bat_pct)
             .render(gauge_area, buf);
 
@@ -314,7 +319,11 @@ impl Battery {
         use Constraint::{Length, Min};
         let bat = &state.battery;
         let is_charging = bat.bst.battery_state.contains(BatteryStateFlag::CHARGING);
-        let state_str = if is_charging { "▲ Charging" } else { "▼ Discharging" };
+        let state_str = if is_charging {
+            format!("{} Charging", SYMBOLS.charging)
+        } else {
+            format!("{} Discharging", SYMBOLS.discharging)
+        };
         let state_color = if is_charging {
             tailwind::GREEN.c400
         } else {
@@ -343,6 +352,7 @@ impl Battery {
         );
         Gauge::default()
             .gauge_style(gauge_color)
+            .use_unicode(unicode_enabled())
             .percent(pct)
             .render(gauge_area, buf);
 
@@ -490,7 +500,12 @@ impl Battery {
             Row::new(vec![
                 Text::styled("Trip Point", Style::default().add_modifier(Modifier::BOLD)),
                 Text::styled(
-                    format!("{} {}  ●", bat.btp, power_unit_as_capacity_str(bat.bix.power_unit),),
+                    format!(
+                        "{} {}  {}",
+                        bat.btp,
+                        power_unit_as_capacity_str(bat.bix.power_unit),
+                        SYMBOLS.dot
+                    ),
                     Style::default().fg(if bat.btp_success {
                         tailwind::GREEN.c400
                     } else {

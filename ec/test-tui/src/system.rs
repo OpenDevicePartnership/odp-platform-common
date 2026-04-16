@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Axis, Block, Chart, Dataset, GraphType, Paragraph, Widget},
 };
 
-use crate::common::{self, CHART_MARKER, Graph};
+use crate::common::{self, CHART_MARKER, Graph, SYMBOLS};
 use crate::state::{AppState, SYSTEM_MAX_SAMPLES};
 
 const LABEL_COLOR: Color = tailwind::SLATE.c400;
@@ -94,10 +94,10 @@ impl System {
 
         // Network
         Line::from(vec![
-            Span::styled("↓ ", Style::default().fg(NET_RX_COLOR)),
+            Span::styled(format!("{} ", SYMBOLS.arrow_down), Style::default().fg(NET_RX_COLOR)),
             Span::raw(format_bps(s.network.rx_bps)),
             Span::raw("  "),
-            Span::styled("↑ ", Style::default().fg(NET_TX_COLOR)),
+            Span::styled(format!("{} ", SYMBOLS.arrow_up), Style::default().fg(NET_TX_COLOR)),
             Span::raw(format_bps(s.network.tx_bps)),
         ])
         .render(net_row, buf);
@@ -319,7 +319,12 @@ impl System {
         let [rx_line, rx_gauge, tx_line, tx_gauge, totals_area] =
             Layout::vertical([Length(1), Length(1), Length(1), Length(1), Min(0)]).areas(metrics_area);
 
-        common::metric_row("↓ RX  ", format_bps(net.rx_bps), NET_RX_COLOR).render(rx_line, buf);
+        common::metric_row(
+            &format!("{} RX  ", SYMBOLS.arrow_down),
+            format_bps(net.rx_bps),
+            NET_RX_COLOR,
+        )
+        .render(rx_line, buf);
         common::ThresholdGauge {
             ratio: (net.rx_bps / peak_bps).clamp(0.0, 1.0),
             label: Some(Span::raw("")),
@@ -328,7 +333,12 @@ impl System {
         }
         .render(rx_gauge, buf);
 
-        common::metric_row("↑ TX  ", format_bps(net.tx_bps), NET_TX_COLOR).render(tx_line, buf);
+        common::metric_row(
+            &format!("{} TX  ", SYMBOLS.arrow_up),
+            format_bps(net.tx_bps),
+            NET_TX_COLOR,
+        )
+        .render(tx_line, buf);
         common::ThresholdGauge {
             ratio: (net.tx_bps / peak_bps).clamp(0.0, 1.0),
             label: Some(Span::raw("")),
@@ -338,8 +348,16 @@ impl System {
         .render(tx_gauge, buf);
 
         Paragraph::new(vec![
-            common::metric_row("Total ↓", format_bytes(net.total_rx), LABEL_COLOR),
-            common::metric_row("Total ↑", format_bytes(net.total_tx), LABEL_COLOR),
+            common::metric_row(
+                &format!("Total {}", SYMBOLS.arrow_down),
+                format_bytes(net.total_rx),
+                LABEL_COLOR,
+            ),
+            common::metric_row(
+                &format!("Total {}", SYMBOLS.arrow_up),
+                format_bytes(net.total_tx),
+                LABEL_COLOR,
+            ),
         ])
         .render(totals_area, buf);
 
@@ -355,13 +373,13 @@ fn render_dual_chart(area: Rect, buf: &mut Buffer, rx: &[(f64, f64)], tx: &[(f64
     let marker = *CHART_MARKER;
     let datasets = vec![
         Dataset::default()
-            .name("↓ RX")
+            .name(format!("{} RX", SYMBOLS.arrow_down))
             .marker(marker)
             .style(Style::default().fg(NET_RX_COLOR))
             .graph_type(GraphType::Line)
             .data(rx),
         Dataset::default()
-            .name("↑ TX")
+            .name(format!("{} TX", SYMBOLS.arrow_up))
             .marker(marker)
             .style(Style::default().fg(NET_TX_COLOR))
             .graph_type(GraphType::Line)
@@ -414,7 +432,7 @@ fn mini_bar(pct: f64, width: usize) -> String {
     let filled = ((pct / 100.0) * width as f64).round() as usize;
     let filled = filled.min(width);
     let empty = width - filled;
-    format!("{}{}", "█".repeat(filled), "░".repeat(empty))
+    format!("{}{}", SYMBOLS.bar_full.repeat(filled), SYMBOLS.bar_empty.repeat(empty))
 }
 
 pub fn format_bytes(bytes: u64) -> String {

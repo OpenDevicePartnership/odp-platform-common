@@ -2,7 +2,6 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::Color,
-    symbols::Marker,
     widgets::{Widget, canvas::Canvas},
 };
 
@@ -28,11 +27,11 @@ impl Widget for Bolt {
             height: area.height / 2,
         };
 
-        // fill the bolt with dense points using braille marker (2x4 subcells per cell)
+        // fill the bolt with dense points; marker is selected by unicode mode
         Canvas::default()
             .x_bounds([0.0, 1.0])
             .y_bounds([0.0, 1.0])
-            .marker(Marker::Braille)
+            .marker(*crate::common::CHART_MARKER)
             .paint(|ctx| {
                 let mut pts: Vec<(f64, f64)> = Vec::new();
 

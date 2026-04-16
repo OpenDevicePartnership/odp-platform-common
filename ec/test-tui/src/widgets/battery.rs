@@ -127,6 +127,12 @@ impl StatefulWidget for Battery {
             self.color_high
         };
 
+        let border_type = if common::unicode_enabled() {
+            BorderType::Rounded
+        } else {
+            BorderType::Plain
+        };
+
         BarChart::default()
             .data(BarGroup::default().bars(&[bar]))
             .max(100)
@@ -134,7 +140,7 @@ impl StatefulWidget for Battery {
             .bar_style(Style::default().fg(color))
             .block(
                 Block::bordered()
-                    .border_type(BorderType::Rounded)
+                    .border_type(border_type)
                     .border_style(Style::default().fg(color)),
             )
             .bar_width(battery_area.width - 2)
@@ -151,7 +157,7 @@ impl StatefulWidget for Battery {
 
         Block::bordered()
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-            .border_type(BorderType::Rounded)
+            .border_type(border_type)
             .border_style(Style::default().fg(color))
             .render(tip_area, buf);
 

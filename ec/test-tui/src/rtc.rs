@@ -1,4 +1,5 @@
 use crate::common;
+use crate::common::SYMBOLS;
 use crate::state::{AppState, Fetched, TimerData};
 use embedded_mcu_hal::time::Datetime;
 use ratatui::{
@@ -30,9 +31,10 @@ impl TimerData {
                     AlarmTimerSeconds::DISABLED => "Not set".to_string(),
                     s => format!("{}s remaining", s.0),
                 };
-                let expired = match &self.timer_status {
-                    Some(Ok(s)) if s.timer_expired() => "  \u{26a0} expired",
-                    _ => "",
+                let expired = if matches!(&self.timer_status, Some(Ok(s)) if s.timer_expired()) {
+                    format!("  {} expired", SYMBOLS.warning)
+                } else {
+                    String::new()
                 };
                 format!("{time_part}{expired}")
             }
@@ -174,8 +176,9 @@ impl Rtc {
         ])
         .render(meta_area, buf);
 
+        let sep = SYMBOLS.h_line;
         Line::from(Span::styled(
-            "\u{2500}\u{2500}\u{2500} Timers \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+            format!("{sep}{sep}{sep} Timers {}", sep.repeat(21)),
             Style::default().fg(tailwind::SLATE.c700),
         ))
         .render(divider_area, buf);
@@ -217,7 +220,7 @@ impl Rtc {
                         format_time_zone(ts.time_zone),
                         Style::default().fg(tailwind::SLATE.c400),
                     ),
-                    Span::raw("  \u{b7}  DST: "),
+                    Span::raw(format!("  {}  DST: ", SYMBOLS.mid_dot)),
                     Span::styled(format_dst(ts.dst_status), Style::default().fg(tailwind::SLATE.c400)),
                 ])
                 .centered(),
