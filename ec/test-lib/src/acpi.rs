@@ -311,10 +311,22 @@ impl TryFrom<Vec<u8>> for AcpiEvalOutputBufferV1 {
                 return Err(AcpiParseError::InsufficientLength);
             }
 
-            let type_ = u16::from_le_bytes(value[offset..offset + 2].try_into().unwrap());
-            let data_length = u16::from_le_bytes(value[offset + 2..offset + 4].try_into().unwrap()) as usize;
+            let type_ = u16::from_le_bytes(
+                value[offset..offset + 2]
+                    .try_into()
+                    .map_err(|_| AcpiParseError::InsufficientLength)?,
+            );
+            let data_length = u16::from_le_bytes(
+                value[offset + 2..offset + 4]
+                    .try_into()
+                    .map_err(|_| AcpiParseError::InsufficientLength)?,
+            ) as usize;
             let data_32 = if type_ == 0 {
-                u32::from_le_bytes(value[offset + 4..offset + 8].try_into().unwrap())
+                u32::from_le_bytes(
+                    value[offset + 4..offset + 8]
+                        .try_into()
+                        .map_err(|_| AcpiParseError::InsufficientLength)?,
+                )
             } else {
                 0
             };

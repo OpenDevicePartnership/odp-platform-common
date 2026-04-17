@@ -3,11 +3,7 @@ use battery_service_messages::{
     BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit,
 };
 use embedded_mcu_hal::time::{Datetime, Month, UncheckedDatetime};
-use std::sync::{
-    Mutex, OnceLock,
-    atomic::Ordering,
-    atomic::{AtomicI64, AtomicU32},
-};
+use std::sync::{Mutex, OnceLock, atomic::AtomicI64, atomic::Ordering};
 use std::time::Instant;
 use time_alarm_service_messages::{
     AcpiDaylightSavingsTimeStatus, AcpiTimeZone, AcpiTimeZoneOffset, AcpiTimerId, AcpiTimestamp,
@@ -236,34 +232,31 @@ impl ThermalSource for Mock {
 
 impl BatterySource for Mock {
     fn get_bst(&self) -> Result<BstReturn, Self::Error> {
-        static STATE: AtomicU32 = AtomicU32::new(2);
+        static BST_STATE: OnceLock<Mutex<(u32, u32)>> = OnceLock::new();
         const MAX_CAPACITY: u32 = 10000;
-        static CAPACITY: AtomicU32 = AtomicU32::new(0);
         const RATE: u32 = 1000;
 
-        let state = STATE.load(Ordering::Relaxed);
-        let capacity = CAPACITY.load(Ordering::Relaxed);
-        let mut new_capacity = capacity;
+        // state: 2 = charging, 1 = discharging
+        let mut guard = BST_STATE.get_or_init(|| Mutex::new((2, 0))).lock().unwrap();
+        let (state, capacity) = &mut *guard;
 
-        // We are only using atomics to satisfy borrow-checker
-        // Thus we update non-atomically for simplicity
-        if state == 2 {
-            new_capacity += RATE;
-            if new_capacity > MAX_CAPACITY {
-                STATE.store(1, Ordering::Relaxed);
+        if *state == 2 {
+            *capacity += RATE;
+            if *capacity > MAX_CAPACITY {
+                *capacity = MAX_CAPACITY;
+                *state = 1;
             }
         } else {
-            new_capacity -= RATE;
-            if new_capacity < RATE {
-                STATE.store(2, Ordering::Relaxed);
+            *capacity = capacity.saturating_sub(RATE);
+            if *capacity < RATE {
+                *state = 2;
             }
         }
-        CAPACITY.store(new_capacity.clamp(0, MAX_CAPACITY), Ordering::Relaxed);
 
         Ok(BstReturn {
-            battery_state: BatteryState::from_bits(state).ok_or(Error::InvalidData)?,
+            battery_state: BatteryState::from_bits(*state).ok_or(Error::InvalidData)?,
             battery_present_rate: 3839,
-            battery_remaining_capacity: capacity,
+            battery_remaining_capacity: *capacity,
             battery_present_voltage: 12569,
         })
     }

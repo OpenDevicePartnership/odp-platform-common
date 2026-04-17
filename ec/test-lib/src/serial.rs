@@ -82,11 +82,16 @@ impl From<Destination> for u8 {
     }
 }
 
-fn prepend_headers(buffer: &mut [u8], dst: Destination, payload_sz: usize) {
+fn prepend_headers(buffer: &mut [u8], dst: Destination, payload_sz: usize) -> Result<(), Error> {
+    let packet_len = MCTP_HEADER_SZ + ODP_HEADER_SZ + payload_sz;
+    let packet_len_u8: u8 = packet_len
+        .try_into()
+        .map_err(|_| Error::Protocol(format!("Packet length {packet_len} exceeds u8 maximum")))?;
+
     // SMBUS
     buffer[0] = 0x2;
     buffer[1] = 0xF;
-    buffer[2] = (MCTP_HEADER_SZ + ODP_HEADER_SZ + payload_sz) as u8;
+    buffer[2] = packet_len_u8;
     buffer[3] = 0x1;
 
     // MCTP
@@ -99,6 +104,7 @@ fn prepend_headers(buffer: &mut [u8], dst: Destination, payload_sz: usize) {
     // ODP
     buffer[9] = 1 << 1;
     buffer[10] = dst.into();
+    Ok(())
 }
 
 fn append_cmd(
@@ -164,7 +170,7 @@ impl Serial {
         // responses (only the opposite), so we have to do manual serialization until that is changed.
 
         // And now that we know request size, serialize headers into beginning of buffer
-        prepend_headers(&mut buffer, dst, request_sz);
+        prepend_headers(&mut buffer, dst, request_sz)?;
 
         let mut port = self.port.lock().expect("Mutex must not be poisoned");
 
@@ -178,8 +184,7 @@ impl Serial {
         port.flush().map_err(|e| Error::Io(format!("{e:?}")))?;
 
         // Read response packets
-        let mut response_buf = [0u8; BUFFER_SZ];
-        let mut offset = 0;
+        let mut response_buf = Vec::new();
         let mut cmd_code = 0;
         loop {
             // Wait for SMBUS header from response packet
@@ -213,11 +218,9 @@ impl Serial {
                 SMBUS_HEADER_SZ + MCTP_HEADER_SZ
             };
 
-            // Finally copy the packet into our buffer used for storing the entire response at the appropriate offset
+            // Append the payload to the reassembly buffer
             let data_slice = &buffer[payload_start_idx..SMBUS_HEADER_SZ + len];
-            let len = data_slice.len();
-            response_buf[offset..offset + len].copy_from_slice(data_slice);
-            offset += len;
+            response_buf.extend_from_slice(data_slice);
 
             // If this is EOM packet, we are done
             if flags & 0x40 != 0 {
