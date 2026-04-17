@@ -172,7 +172,10 @@ impl Serial {
         // And now that we know request size, serialize headers into beginning of buffer
         prepend_headers(&mut buffer, dst, request_sz)?;
 
-        let mut port = self.port.lock().expect("Mutex must not be poisoned");
+        let mut port = self
+            .port
+            .lock()
+            .map_err(|_| Error::Io("serial port mutex poisoned".into()))?;
 
         // Write entire request packet
         // We first clear the input buffer in case there's anything left over if we had to bail out
