@@ -197,7 +197,6 @@ pub(crate) enum AcpiMethodArgument {
     Guid(uuid::Bytes),
 }
 
-#[repr(C)]
 #[derive(Debug, Default)]
 pub(crate) struct AcpiMethodArgumentV1 {
     pub type_: u16,
@@ -227,7 +226,6 @@ impl TryFrom<AcpiMethodArgument> for AcpiMethodArgumentV1 {
     }
 }
 
-#[repr(C)]
 #[derive(Debug)]
 pub(crate) struct AcpiEvalInputBufferComplexV1Ex {
     pub signature: u32,
@@ -237,13 +235,19 @@ pub(crate) struct AcpiEvalInputBufferComplexV1Ex {
     pub arguments: Vec<AcpiMethodArgumentV1>,
 }
 
-#[repr(C)]
 #[derive(Debug, Default)]
 pub(crate) struct AcpiEvalOutputBufferV1 {
-    pub signature: u32,
-    pub length: u32,
+    _signature: u32,
+    _length: u32,
     pub count: u32,
     pub arguments: Vec<AcpiMethodArgumentV1>,
+}
+
+impl AcpiEvalOutputBufferV1 {
+    /// Safely access an argument by index, returning an error if out of bounds.
+    fn arg(&self, index: usize) -> Result<&AcpiMethodArgumentV1, Error> {
+        self.arguments.get(index).ok_or(Error::UnexpectedResponse)
+    }
 }
 
 pub(crate) const ACPI_EVAL_INPUT_BUFFER_COMPLEX_SIGNATURE_EX: u32 = u32::from_le_bytes(*b"AeiF");
@@ -311,10 +315,22 @@ impl TryFrom<Vec<u8>> for AcpiEvalOutputBufferV1 {
                 return Err(AcpiParseError::InsufficientLength);
             }
 
-            let type_ = u16::from_le_bytes(value[offset..offset + 2].try_into().unwrap());
-            let data_length = u16::from_le_bytes(value[offset + 2..offset + 4].try_into().unwrap()) as usize;
+            let type_ = u16::from_le_bytes(
+                value[offset..offset + 2]
+                    .try_into()
+                    .map_err(|_| AcpiParseError::InsufficientLength)?,
+            );
+            let data_length = u16::from_le_bytes(
+                value[offset + 2..offset + 4]
+                    .try_into()
+                    .map_err(|_| AcpiParseError::InsufficientLength)?,
+            ) as usize;
             let data_32 = if type_ == 0 {
-                u32::from_le_bytes(value[offset + 4..offset + 8].try_into().unwrap())
+                u32::from_le_bytes(
+                    value[offset + 4..offset + 8]
+                        .try_into()
+                        .map_err(|_| AcpiParseError::InsufficientLength)?,
+                )
             } else {
                 0
             };
@@ -337,25 +353,34 @@ impl TryFrom<Vec<u8>> for AcpiEvalOutputBufferV1 {
 
         // Now return generated content
         Ok(AcpiEvalOutputBufferV1 {
-            signature,
-            length,
+            _signature: signature,
+            _length: length,
             count,
             arguments,
         })
     }
 }
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Clone)]
 pub struct Acpi {
     fan_instance: u8,
+    device_path: String,
 }
 
 impl Acpi {
     pub fn new(fan_instance: u8) -> Self {
-        Self { fan_instance }
+        let device_path = get_device_path().unwrap_or_default();
+        Self {
+            fan_instance,
+            device_path,
+        }
     }
 
-    fn evaluate(name: &str, args: Option<&[AcpiMethodArgument]>) -> Result<AcpiEvalOutputBufferV1, AcpiParseError> {
+    fn evaluate(
+        &self,
+        name: &str,
+        args: Option<&[AcpiMethodArgument]>,
+    ) -> Result<AcpiEvalOutputBufferV1, AcpiParseError> {
         // Maximum number of arguments allowed is 7 as per spec
         if let Some(args) = args
             && args.len() > 7
@@ -373,11 +398,8 @@ impl Acpi {
         let out_buf_len = 1024;
         let mut out_buf = vec![0u8; out_buf_len];
 
-        // Get device path
-        let device_path = get_device_path()?;
-
-        // Open device
-        let device_path_wide: Vec<u16> = device_path.encode_utf16().chain(std::iter::once(0)).collect();
+        // Use cached device path
+        let device_path_wide: Vec<u16> = self.device_path.encode_utf16().chain(std::iter::once(0)).collect();
         let h_device = unsafe {
             windows::Win32::Storage::FileSystem::CreateFileW(
                 PCWSTR::from_raw(device_path_wide.as_ptr()),
@@ -427,15 +449,18 @@ impl Acpi {
 
     /// Evaluates the provided method with the provided arguments and returns its single u32 result.
     /// Errors if the result is not a single u32.
-    fn evaluate_u32(name: &str, args: Option<&[AcpiMethodArgument]>) -> Result<u32, Error> {
-        let output = Acpi::evaluate(name, args)?;
+    fn evaluate_u32(&self, name: &str, args: Option<&[AcpiMethodArgument]>) -> Result<u32, Error> {
+        let output = self.evaluate(name, args)?;
 
         if output.count != 1 {
             Err(Error::UnexpectedResponse)
-        } else if output.arguments[0].type_ != AcpiArgumentType::Integer as u16 {
-            Err(Error::UnexpectedArgumentType(output.arguments[0].type_))
         } else {
-            Ok(output.arguments[0].data_32)
+            let arg = output.arg(0)?;
+            if arg.type_ != AcpiArgumentType::Integer as u16 {
+                Err(Error::UnexpectedArgumentType(arg.type_))
+            } else {
+                Ok(arg.data_32)
+            }
         }
     }
 }
@@ -446,14 +471,14 @@ impl Acpi {
             AcpiMethodArgument::Int(self.fan_instance as u32),
             AcpiMethodArgument::Guid(guid.to_bytes_le()),
         ];
-        let output = Acpi::evaluate("\\_SB.ECT0.TGVR", Some(&args))?;
+        let output = self.evaluate("\\_SB.ECT0.TGVR", Some(&args))?;
 
         if output.count != 2 {
             Err(Error::UnexpectedResponse)
-        } else if output.arguments[0].data_32 != 0 {
+        } else if output.arg(0)?.data_32 != 0 {
             Err(Error::OperationFailed)
         } else {
-            Ok(f64::from(output.arguments[1].data_32))
+            Ok(f64::from(output.arg(1)?.data_32))
         }
     }
 
@@ -465,11 +490,11 @@ impl Acpi {
             AcpiMethodArgument::Guid(guid.to_bytes_le()),
             AcpiMethodArgument::Int(value),
         ];
-        let output = Acpi::evaluate("\\_SB.ECT0.TSVR", Some(&args))?;
+        let output = self.evaluate("\\_SB.ECT0.TSVR", Some(&args))?;
 
         if output.count != 1 {
             Err(Error::UnexpectedResponse)
-        } else if output.arguments[0].data_32 != 0 {
+        } else if output.arg(0)?.data_32 != 0 {
             Err(Error::OperationFailed)
         } else {
             Ok(())
@@ -483,11 +508,11 @@ impl ErrorType for Acpi {
 
 impl ThermalSource for Acpi {
     fn get_temperature(&self) -> Result<f64, Self::Error> {
-        let output = Acpi::evaluate("\\_SB.ECT0.RTMP", None)?;
+        let output = self.evaluate("\\_SB.ECT0.RTMP", None)?;
         if output.count != 1 {
             Err(Error::UnexpectedResponse)
         } else {
-            Ok(common::dk_to_c(output.arguments[0].data_32))
+            Ok(common::dk_to_c(output.arg(0)?.data_32))
         }
     }
 
@@ -518,65 +543,49 @@ impl ThermalSource for Acpi {
 
 impl BatterySource for Acpi {
     fn get_bst(&self) -> Result<BstReturn, Self::Error> {
-        let data = Acpi::evaluate("\\_SB.ECT0.TBST", None)?;
+        let data = self.evaluate("\\_SB.ECT0.TBST", None)?;
 
         // We are expecting 4 32-bit values
         if data.count != 4 {
             Err(Error::UnexpectedResponse)
         } else {
             Ok(BstReturn {
-                battery_state: BatteryState::from_bits(data.arguments[0].data_32).ok_or(Error::InvalidData)?,
-                battery_present_rate: data.arguments[1].data_32,
-                battery_remaining_capacity: data.arguments[2].data_32,
-                battery_present_voltage: data.arguments[3].data_32,
+                battery_state: BatteryState::from_bits(data.arg(0)?.data_32).ok_or(Error::InvalidData)?,
+                battery_present_rate: data.arg(1)?.data_32,
+                battery_remaining_capacity: data.arg(2)?.data_32,
+                battery_present_voltage: data.arg(3)?.data_32,
             })
         }
     }
 
     fn get_bix(&self) -> Result<BixFixedStrings, Self::Error> {
-        let data = Acpi::evaluate("\\_SB.ECT0.TBIX", None)?;
+        let data = self.evaluate("\\_SB.ECT0.TBIX", None)?;
         // We are expecting 21 arguments
         if data.count != 21 {
             Err(Error::UnexpectedResponse)
         } else {
             Ok(BixFixedStrings {
-                revision: data.arguments[0].data_32,
-                power_unit: power_unit_try_from_u32(data.arguments[1].data_32).map_err(|_| Error::InvalidData)?,
-                design_capacity: data.arguments[2].data_32,
-                last_full_charge_capacity: data.arguments[3].data_32,
-                battery_technology: bat_tech_try_from_u32(data.arguments[4].data_32).map_err(|_| Error::InvalidData)?,
-                design_voltage: data.arguments[5].data_32,
-                design_cap_of_warning: data.arguments[6].data_32,
-                design_cap_of_low: data.arguments[7].data_32,
-                cycle_count: data.arguments[8].data_32,
-                measurement_accuracy: data.arguments[9].data_32,
-                max_sampling_time: data.arguments[10].data_32,
-                min_sampling_time: data.arguments[11].data_32,
-                max_averaging_interval: data.arguments[12].data_32,
-                min_averaging_interval: data.arguments[13].data_32,
-                battery_capacity_granularity_1: data.arguments[14].data_32,
-                battery_capacity_granularity_2: data.arguments[15].data_32,
-                model_number: data.arguments[16]
-                    .data
-                    .clone()
-                    .try_into()
-                    .map_err(|_| Error::InvalidData)?,
-                serial_number: data.arguments[17]
-                    .data
-                    .clone()
-                    .try_into()
-                    .map_err(|_| Error::InvalidData)?,
-                battery_type: data.arguments[18]
-                    .data
-                    .clone()
-                    .try_into()
-                    .map_err(|_| Error::InvalidData)?,
-                oem_info: data.arguments[19]
-                    .data
-                    .clone()
-                    .try_into()
-                    .map_err(|_| Error::InvalidData)?,
-                battery_swapping_capability: bat_swap_try_from_u32(data.arguments[20].data_32)
+                revision: data.arg(0)?.data_32,
+                power_unit: power_unit_try_from_u32(data.arg(1)?.data_32).map_err(|_| Error::InvalidData)?,
+                design_capacity: data.arg(2)?.data_32,
+                last_full_charge_capacity: data.arg(3)?.data_32,
+                battery_technology: bat_tech_try_from_u32(data.arg(4)?.data_32).map_err(|_| Error::InvalidData)?,
+                design_voltage: data.arg(5)?.data_32,
+                design_cap_of_warning: data.arg(6)?.data_32,
+                design_cap_of_low: data.arg(7)?.data_32,
+                cycle_count: data.arg(8)?.data_32,
+                measurement_accuracy: data.arg(9)?.data_32,
+                max_sampling_time: data.arg(10)?.data_32,
+                min_sampling_time: data.arg(11)?.data_32,
+                max_averaging_interval: data.arg(12)?.data_32,
+                min_averaging_interval: data.arg(13)?.data_32,
+                battery_capacity_granularity_1: data.arg(14)?.data_32,
+                battery_capacity_granularity_2: data.arg(15)?.data_32,
+                model_number: data.arg(16)?.data.clone().try_into().map_err(|_| Error::InvalidData)?,
+                serial_number: data.arg(17)?.data.clone().try_into().map_err(|_| Error::InvalidData)?,
+                battery_type: data.arg(18)?.data.clone().try_into().map_err(|_| Error::InvalidData)?,
+                oem_info: data.arg(19)?.data.clone().try_into().map_err(|_| Error::InvalidData)?,
+                battery_swapping_capability: bat_swap_try_from_u32(data.arg(20)?.data_32)
                     .map_err(|_| Error::InvalidData)?,
             })
         }
@@ -584,49 +593,46 @@ impl BatterySource for Acpi {
 
     fn set_btp(&self, trippoint: u32) -> Result<(), Self::Error> {
         // No return value is expected according to ACPI spec
-        let _ = Acpi::evaluate("\\_SB.ECT0.TBTP", Some(&[AcpiMethodArgument::Int(trippoint)]))?;
+        let _ = self.evaluate("\\_SB.ECT0.TBTP", Some(&[AcpiMethodArgument::Int(trippoint)]))?;
         Ok(())
     }
 }
 
 impl RtcSource for Acpi {
     fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities, Self::Error> {
-        Ok(TimeAlarmDeviceCapabilities(Acpi::evaluate_u32(
-            "\\_SB.ECT0._GCP",
-            None,
-        )?))
+        Ok(TimeAlarmDeviceCapabilities(self.evaluate_u32("\\_SB.ECT0._GCP", None)?))
     }
 
     fn get_real_time(&self) -> Result<AcpiTimestamp, Self::Error> {
-        let result = Acpi::evaluate("\\_SB.ECT0._GRT", None)?;
+        let result = self.evaluate("\\_SB.ECT0._GRT", None)?;
         if result.count != 1 {
             return Err(Error::UnexpectedResponse);
         }
 
-        let result = &result.arguments[0];
-        if result.type_ != AcpiArgumentType::Buffer as u16 {
+        let arg = result.arg(0)?;
+        if arg.type_ != AcpiArgumentType::Buffer as u16 {
             return Err(Error::UnexpectedResponse);
         }
 
-        AcpiTimestamp::try_from_bytes(result.data.as_slice()).map_err(|_| Error::InvalidData)
+        AcpiTimestamp::try_from_bytes(arg.data.as_slice()).map_err(|_| Error::InvalidData)
     }
 
     fn get_wake_status(&self, timer_id: AcpiTimerId) -> Result<TimerStatus, Self::Error> {
-        Ok(TimerStatus(Acpi::evaluate_u32(
+        Ok(TimerStatus(self.evaluate_u32(
             "\\_SB.ECT0._GWS",
             Some(&[AcpiMethodArgument::Int(timer_id.into())]),
         )?))
     }
 
     fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy, Self::Error> {
-        Ok(AlarmExpiredWakePolicy(Acpi::evaluate_u32(
+        Ok(AlarmExpiredWakePolicy(self.evaluate_u32(
             "\\_SB.ECT0._TIP",
             Some(&[AcpiMethodArgument::Int(timer_id.into())]),
         )?))
     }
 
     fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds, Self::Error> {
-        Ok(AlarmTimerSeconds(Acpi::evaluate_u32(
+        Ok(AlarmTimerSeconds(self.evaluate_u32(
             "\\_SB.ECT0._TIV",
             Some(&[AcpiMethodArgument::Int(timer_id.into())]),
         )?))

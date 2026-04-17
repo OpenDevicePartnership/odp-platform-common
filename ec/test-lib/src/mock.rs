@@ -3,11 +3,7 @@ use battery_service_messages::{
     BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit,
 };
 use embedded_mcu_hal::time::{Datetime, Month, UncheckedDatetime};
-use std::sync::{
-    Mutex, OnceLock,
-    atomic::Ordering,
-    atomic::{AtomicI64, AtomicU32},
-};
+use std::sync::Mutex;
 use std::time::Instant;
 use time_alarm_service_messages::{
     AcpiDaylightSavingsTimeStatus, AcpiTimeZone, AcpiTimeZoneOffset, AcpiTimerId, AcpiTimestamp,
@@ -38,11 +34,6 @@ impl crate::Error for Error {
         }
     }
 }
-
-static SET_RPM: AtomicI64 = AtomicI64::new(-1);
-static CURRENT_TEMP_C: OnceLock<Mutex<f64>> = OnceLock::new();
-static TEMP_STATE: OnceLock<Mutex<TempState>> = OnceLock::new();
-static FAN_STATE: OnceLock<Mutex<FanState>> = OnceLock::new();
 
 // ── Ramp helper (shared by fan and temperature) ─────────────────────────────
 
@@ -161,14 +152,44 @@ impl TempState {
 
 type FanState = Ramp;
 
-#[derive(Default, Copy, Clone)]
+/// Battery charge/discharge simulation state.
+struct BstState {
+    /// 2 = charging, 1 = discharging
+    state: u32,
+    capacity: u32,
+}
+
 pub struct Mock {
     rtc: MockRtc,
+    set_rpm: Mutex<Option<f64>>,
+    current_temp_c: Mutex<f64>,
+    temp_state: Mutex<TempState>,
+    fan_state: Mutex<FanState>,
+    bst_state: Mutex<BstState>,
+}
+
+impl Clone for Mock {
+    fn clone(&self) -> Self {
+        Self::new()
+    }
 }
 
 impl Mock {
     pub fn new() -> Self {
-        Default::default()
+        Self {
+            rtc: MockRtc::default(),
+            set_rpm: Mutex::new(None),
+            current_temp_c: Mutex::new(IDLE_TEMP),
+            temp_state: Mutex::new(TempState::new()),
+            fan_state: Mutex::new(Ramp::new(0.0)),
+            bst_state: Mutex::new(BstState { state: 2, capacity: 0 }),
+        }
+    }
+}
+
+impl Default for Mock {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -178,22 +199,21 @@ impl ErrorType for Mock {
 
 impl ThermalSource for Mock {
     fn get_temperature(&self) -> Result<f64, Self::Error> {
-        let mut state = TEMP_STATE.get_or_init(|| Mutex::new(TempState::new())).lock().unwrap();
+        let mut state = self.temp_state.lock().unwrap();
         let temp_c = state.poll();
 
         // Publish for get_rpm() to read.
-        *CURRENT_TEMP_C.get_or_init(|| Mutex::new(IDLE_TEMP)).lock().unwrap() = temp_c;
+        *self.current_temp_c.lock().unwrap() = temp_c;
         Ok(temp_c)
     }
 
     fn get_rpm(&self) -> Result<f64, Self::Error> {
         // If the user explicitly set an RPM, honour it.
-        let set_rpm = SET_RPM.load(Ordering::Relaxed);
-        if set_rpm >= 0 {
-            return Ok(set_rpm as f64);
+        if let Some(rpm) = *self.set_rpm.lock().unwrap() {
+            return Ok(rpm);
         }
 
-        let temp_c = *CURRENT_TEMP_C.get_or_init(|| Mutex::new(IDLE_TEMP)).lock().unwrap();
+        let temp_c = *self.current_temp_c.lock().unwrap();
         let max_rpm = self.get_max_rpm()?;
 
         // Target RPM and ramp duration based on temperature thresholds.
@@ -207,7 +227,7 @@ impl ThermalSource for Mock {
             (0.0, 2.0)
         };
 
-        let mut fan = FAN_STATE.get_or_init(|| Mutex::new(Ramp::new(0.0))).lock().unwrap();
+        let mut fan = self.fan_state.lock().unwrap();
         fan.set_target(target, ramp_secs);
         Ok(fan.value())
     }
@@ -229,41 +249,36 @@ impl ThermalSource for Mock {
     }
 
     fn set_rpm(&self, rpm: f64) -> Result<(), Self::Error> {
-        SET_RPM.store(rpm as i64, Ordering::Relaxed);
+        *self.set_rpm.lock().unwrap() = Some(rpm);
         Ok(())
     }
 }
 
 impl BatterySource for Mock {
     fn get_bst(&self) -> Result<BstReturn, Self::Error> {
-        static STATE: AtomicU32 = AtomicU32::new(2);
         const MAX_CAPACITY: u32 = 10000;
-        static CAPACITY: AtomicU32 = AtomicU32::new(0);
         const RATE: u32 = 1000;
 
-        let state = STATE.load(Ordering::Relaxed);
-        let capacity = CAPACITY.load(Ordering::Relaxed);
-        let mut new_capacity = capacity;
+        let mut guard = self.bst_state.lock().unwrap();
+        let BstState { state, capacity } = &mut *guard;
 
-        // We are only using atomics to satisfy borrow-checker
-        // Thus we update non-atomically for simplicity
-        if state == 2 {
-            new_capacity += RATE;
-            if new_capacity > MAX_CAPACITY {
-                STATE.store(1, Ordering::Relaxed);
+        if *state == 2 {
+            *capacity += RATE;
+            if *capacity > MAX_CAPACITY {
+                *capacity = MAX_CAPACITY;
+                *state = 1;
             }
         } else {
-            new_capacity -= RATE;
-            if new_capacity < RATE {
-                STATE.store(2, Ordering::Relaxed);
+            *capacity = capacity.saturating_sub(RATE);
+            if *capacity < RATE {
+                *state = 2;
             }
         }
-        CAPACITY.store(new_capacity.clamp(0, MAX_CAPACITY), Ordering::Relaxed);
 
         Ok(BstReturn {
-            battery_state: BatteryState::from_bits(state).ok_or(Error::InvalidData)?,
+            battery_state: BatteryState::from_bits(*state).ok_or(Error::InvalidData)?,
             battery_present_rate: 3839,
-            battery_remaining_capacity: capacity,
+            battery_remaining_capacity: *capacity,
             battery_present_voltage: 12569,
         })
     }
