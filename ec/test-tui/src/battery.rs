@@ -241,6 +241,12 @@ impl Battery {
             None => format!("{} {}", bat.bst.battery_present_rate, rate_str),
         };
 
+        let watts = wattage(
+            bat.bst.battery_present_rate,
+            bat.bst.battery_present_voltage,
+            bat.bix.power_unit,
+        );
+        let watts_str = format!("{watts:.2} W");
         Paragraph::new(vec![
             common::metric_row(
                 "Remaining",
@@ -251,6 +257,7 @@ impl Battery {
                 LABEL_COLOR,
             ),
             common::metric_row("Rate     ", rate_line, LABEL_COLOR),
+            common::metric_row("Power    ", watts_str, LABEL_COLOR),
             common::metric_row("Voltage  ", format!("{voltage_v:.2} V"), LABEL_COLOR),
             common::metric_row("Health   ", format!("{health_pct}%"), health_color(health_pct)),
             common::metric_row("Cycles   ", format!("{}", bat.bix.cycle_count), LABEL_COLOR),
@@ -286,6 +293,17 @@ fn health_color(health_pct: u16) -> Color {
         tailwind::AMBER.c400
     } else {
         tailwind::RED.c500
+    }
+}
+
+/// Compute real-time power draw in watts from BST fields.
+///
+/// * `MilliWatts` mode: rate is already in mW → divide by 1000.
+/// * `MilliAmps` mode: power = rate_mA × voltage_mV / 1_000_000.
+fn wattage(rate: u32, voltage_mv: u32, power_unit: PowerUnit) -> f64 {
+    match power_unit {
+        PowerUnit::MilliWatts => rate as f64 / 1000.0,
+        PowerUnit::MilliAmps => rate as f64 * voltage_mv as f64 / 1_000_000.0,
     }
 }
 
@@ -356,6 +374,11 @@ impl Battery {
             .percent(pct)
             .render(gauge_area, buf);
 
+        let watts = wattage(
+            bat.bst.battery_present_rate,
+            bat.bst.battery_present_voltage,
+            bat.bix.power_unit,
+        );
         Paragraph::new(vec![
             common::metric_row(
                 "Remaining ",
@@ -367,7 +390,7 @@ impl Battery {
             ),
             common::metric_row(
                 "Rate      ",
-                format!("{} {}", bat.bst.battery_present_rate, rate_str),
+                format!("{} {}  ({watts:.2} W)", bat.bst.battery_present_rate, rate_str),
                 LABEL_COLOR,
             ),
             common::metric_row(

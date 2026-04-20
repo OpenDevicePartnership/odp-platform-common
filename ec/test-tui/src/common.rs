@@ -129,10 +129,60 @@ pub(crate) mod palette {
 #[derive(Default)]
 pub struct SampleBuf<T, const N: usize> {
     samples: VecDeque<T>,
+    /// Running session statistics (all-time, not windowed).
+    stats: SessionStats,
+}
+
+/// Lightweight running statistics — no history needed, just accumulators.
+#[derive(Default, Clone, Copy)]
+pub struct SessionStats {
+    pub min: f64,
+    pub max: f64,
+    sum: f64,
+    count: u64,
+    /// Most recent value (used for rate-of-change).
+    prev: f64,
+    /// Difference between the two most recent samples.
+    pub delta: f64,
+}
+
+impl SessionStats {
+    pub fn avg(&self) -> f64 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.sum / self.count as f64
+        }
+    }
+
+    /// Returns true once at least one sample has been recorded.
+    pub fn has_data(&self) -> bool {
+        self.count > 0
+    }
+
+    fn record(&mut self, value: f64) {
+        if self.count == 0 {
+            self.min = value;
+            self.max = value;
+        } else {
+            if value < self.min {
+                self.min = value;
+            }
+            if value > self.max {
+                self.max = value;
+            }
+            self.delta = value - self.prev;
+        }
+        self.sum += value;
+        self.count += 1;
+        self.prev = value;
+    }
 }
 
 impl<T: Into<f64> + Copy, const N: usize> SampleBuf<T, N> {
     pub fn insert(&mut self, sample: T) {
+        let val: f64 = sample.into();
+        self.stats.record(val);
         self.samples.push_back(sample);
         if self.samples.len() > N {
             self.samples.pop_front();
@@ -146,6 +196,11 @@ impl<T: Into<f64> + Copy, const N: usize> SampleBuf<T, N> {
             .enumerate()
             .map(|(i, &val)| (i as f64, val.into()))
             .collect()
+    }
+
+    /// Returns the running session statistics.
+    pub fn stats(&self) -> &SessionStats {
+        &self.stats
     }
 }
 

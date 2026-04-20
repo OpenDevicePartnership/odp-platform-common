@@ -216,9 +216,17 @@ impl Thermal {
         let [temp_line, temp_gauge, fan_line, fan_gauge, info_area] =
             Layout::vertical([Length(1), Length(1), Length(1), Length(1), Min(0)]).areas(inner);
 
-        // Temperature line + zone label
+        // Temperature line + zone label + ΔT/Δt
         let temp_color = temp_level_color(th.sensor.skin_temp, &th.sensor.thresholds);
         let zone = thermal_zone(th.sensor.skin_temp, &th.sensor.thresholds);
+        let delta = th.sensor.samples.stats().delta;
+        let delta_arrow = if delta > 0.1 {
+            SYMBOLS.arrow_up
+        } else if delta < -0.1 {
+            SYMBOLS.arrow_down
+        } else {
+            SYMBOLS.mid_dot
+        };
         Line::from(vec![
             Span::styled(
                 format!("Skin  {:.1} {}C", th.sensor.skin_temp, SYMBOLS.degree),
@@ -226,6 +234,11 @@ impl Thermal {
             ),
             Span::raw("  "),
             Span::styled(zone, Style::default().fg(temp_color)),
+            Span::raw("  "),
+            Span::styled(
+                format!("{delta_arrow}{delta:+.1}"),
+                Style::default().fg(tailwind::SLATE.c500),
+            ),
         ])
         .render(temp_line, buf);
 
@@ -317,12 +330,30 @@ impl Thermal {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        let [temp_line, gauge_area, thresh_area, spark_area] =
-            Layout::vertical([Length(1), Length(1), Length(3), Min(0)]).areas(inner);
+        let [temp_line, gauge_area, thresh_area, stats_area, spark_area] =
+            Layout::vertical([Length(1), Length(1), Length(3), Length(1), Min(0)]).areas(inner);
 
-        // Current temp + zone
+        // Current temp + zone + ΔT/Δt
         let color = temp_level_color(s.skin_temp, &s.thresholds);
         let zone = thermal_zone(s.skin_temp, &s.thresholds);
+        let st = s.samples.stats();
+        let delta = st.delta;
+        let delta_arrow = if delta > 0.1 {
+            SYMBOLS.arrow_up
+        } else if delta < -0.1 {
+            SYMBOLS.arrow_down
+        } else {
+            SYMBOLS.mid_dot
+        };
+        let delta_color = if delta > 0.5 {
+            tailwind::RED.c500
+        } else if delta > 0.1 {
+            tailwind::AMBER.c400
+        } else if delta < -0.1 {
+            tailwind::SKY.c400
+        } else {
+            tailwind::SLATE.c500
+        };
         Line::from(vec![
             Span::styled(
                 format!("Skin  {:.1} {}C", s.skin_temp, SYMBOLS.degree),
@@ -330,6 +361,11 @@ impl Thermal {
             ),
             Span::raw("  "),
             Span::styled(zone, Style::default().fg(color)),
+            Span::raw("  "),
+            Span::styled(
+                format!("{delta_arrow}{delta:+.1}{}C/s", SYMBOLS.degree),
+                Style::default().fg(delta_color),
+            ),
         ])
         .render(temp_line, buf);
 
@@ -370,6 +406,17 @@ impl Thermal {
         ])
         .render(thresh_area, buf);
 
+        // Session stats
+        if st.has_data() {
+            let d = SYMBOLS.degree;
+            common::metric_row(
+                "Session ",
+                format!("Min:{:.1}{d}C  Max:{:.1}{d}C  Avg:{:.1}{d}C", st.min, st.max, st.avg()),
+                tailwind::SLATE.c500,
+            )
+            .render(stats_area, buf);
+        }
+
         // Sparkline
         let samples = s.samples.get();
         common::render_sparkline(spark_area, buf, &samples, common::palette::TEMP, [0.0, max]);
@@ -386,8 +433,8 @@ impl Thermal {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        let [rpm_line, gauge_area, info_area, spark_area] =
-            Layout::vertical([Length(1), Length(1), Length(4), Min(0)]).areas(inner);
+        let [rpm_line, gauge_area, info_area, stats_area, spark_area] =
+            Layout::vertical([Length(1), Length(1), Length(4), Length(1), Min(0)]).areas(inner);
 
         // Current RPM + zone
         let zone_str = fan_zone(s.skin_temp, &f.state_levels);
@@ -452,6 +499,22 @@ impl Thermal {
             common::metric_row("Override", limit_str, limit_color),
         ])
         .render(info_area, buf);
+
+        // Session stats
+        let fan_st = f.samples.stats();
+        if fan_st.has_data() {
+            common::metric_row(
+                "Session ",
+                format!(
+                    "Min:{:.0}  Max:{:.0}  Avg:{:.0} RPM",
+                    fan_st.min,
+                    fan_st.max,
+                    fan_st.avg()
+                ),
+                tailwind::SLATE.c500,
+            )
+            .render(stats_area, buf);
+        }
 
         // Sparkline
         let samples = f.samples.get();
