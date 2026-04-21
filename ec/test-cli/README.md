@@ -7,38 +7,31 @@ See [ODP Documentation](https://opendevicepartnership.github.io/documentation/gu
 
 ## Building
 
-Exactly one transport feature must be enabled at build time: `mock`, `acpi`, or `serial`.
-
-### With mock data (no hardware required)
 ```
-cargo build --release --features mock
+cargo build --release
 ```
 
-### With ACPI transport (Windows-only)
+For Windows on ARM (cross-compile):
 ```
-cargo build-win --release --features acpi
+cargo build-win --release
 ```
 
-Note: building with `--features acpi` only enables the ACPI transport in the binary. To use it at runtime on Windows, you must also have the `ectest.sys` KMDF driver built/installed and the required ACPI entries/device instance present. See [ec-test-win/README.md](../ec-test-win/README.md) for the Windows driver/setup requirements.
-
-### With serial transport
-```
-cargo build --release --features serial
-```
+Note: to use the `local` source on Windows, you must have the `ectest.sys` KMDF driver built/installed and the required ACPI entries/device instance present. See [test-win/README.md](../test-win/README.md) for the Windows driver/setup requirements.
 
 ## Usage
 
 ```
-ec-test-cli <COMMAND>
+ec-test-cli --source <mock|serial|local> [OPTIONS] <COMMAND>
 ```
 
-When built with the `serial` feature, transport arguments are available:
-```
-ec-test-cli --port <SERIAL_PORT> [--flow-control <hw|none>] [--baud <RATE>] <COMMAND>
-```
-- `--port` — Required. Path to the serial port (e.g., `/dev/ttyUSB0`, `COM3`)
-- `--flow-control` — Optional. `hw` or `none`. Defaults to `none`
-- `--baud` — Optional. Baud rate. Defaults to `115200`
+- `--source` — The data source to use. Accepts `mock`, `serial`, or `local` (Windows only). Defaults to `serial` on Linux and `local` on Windows.
+- `--sensor-instance` — Sensor instance index. Defaults to `0`.
+- `--fan-instance` — Fan instance index. Defaults to `0`.
+
+The following options only apply when `--source serial`:
+- `--port` — Path to the serial port (e.g., `/dev/ttyUSB0`, `COM3`). Required.
+- `--flow-control` — `hw` or `none`. Defaults to `none`.
+- `--baud` — Baud rate. Defaults to `115200`.
 
 Use `ec-test-cli --help` and `ec-test-cli <COMMAND> --help` to see available commands and options.
 

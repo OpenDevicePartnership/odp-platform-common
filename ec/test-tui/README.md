@@ -1,34 +1,39 @@
 # ec-test-tui
 
 ## Overview
-Ratatui-based TUI application for demoing and testing EC features (thermal, battery, RTC, UCSI).
+Ratatui-based TUI application for demoing and testing EC features (thermal, battery, RTC).
 See [ODP Documentation](https://opendevicepartnership.github.io/documentation/guide/overview.html) for details on EC specification.
 
 ## Building
 
-### With mock data (no hardware required)
 ```
-cargo build --release --features mock
-```
-
-### With ACPI transport (Windows-only)
-```
-cargo build-win --release --features acpi
+cargo build --release
 ```
 
-Note: building with `--features acpi` only enables the ACPI transport in the binary. To use it at runtime on Windows, you must also have the `ectest.sys` KMDF driver built/installed and the required ACPI entries/device instance present. See [ec-test-win/README.md](../ec-test-win/README.md) for the Windows driver/setup requirements.
-
-### With serial transport
+For Windows on ARM (cross-compile):
 ```
-cargo build --release --features serial
+cargo build-win --release
 ```
 
-Usage: `ec-test-tui <serial_port_path> <flow_control> [baud_rate=115200]`
-- `serial_port_path` — Path to the serial port (e.g., `/dev/ttyUSB0`, `COM3`)
-- `flow_control` — `hw` for hardware flow control, `none` to disable
-- `baud_rate` — (Optional) Baud rate as a u32. Defaults to `115200` if not specified
+Note: to use the `local` source on Windows, you must have the `ectest.sys` KMDF driver built/installed and the required ACPI entries/device instance present. See [test-win/README.md](../test-win/README.md) for the Windows driver/setup requirements.
+
+## Usage
+
+```
+ec-test-tui --source <mock|serial|local> [OPTIONS]
+```
+
+- `--source` — The data source to use. Accepts `mock`, `serial`, or `local` (Windows only). Defaults to `serial` on Linux and `local` on Windows.
+- `--log-file` — Optional path to write logs to a file in addition to the in-app log panel.
+- `--sensor-instance` — Sensor instance index. Defaults to `0`.
+- `--fan-instance` — Fan instance index. Defaults to `0`.
+
+The following options only apply when `--source serial`:
+- `--port` — Path to the serial port (e.g., `/dev/ttyUSB0`, `COM3`). Required.
+- `--flow-control` — `hw` or `none`. Defaults to `none`.
+- `--baud` — Baud rate. Defaults to `115200`.
 
 Example:
 ```
-ec-test-tui /dev/ttyUSB0 none 115200
+ec-test-tui --source serial --port /dev/ttyUSB0
 ```
