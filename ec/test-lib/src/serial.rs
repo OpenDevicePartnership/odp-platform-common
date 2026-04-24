@@ -218,7 +218,7 @@ impl Serial {
                 );
                 HEADER_SZ + CMD_CODE_SZ
             } else {
-                // -1 because because non-SOM packets don't have the message type byte
+                // -1 because non-SOM packets don't have the message type byte
                 SMBUS_HEADER_SZ + MCTP_HEADER_SZ - 1
             };
 
