@@ -218,7 +218,8 @@ impl Serial {
                 );
                 HEADER_SZ + CMD_CODE_SZ
             } else {
-                SMBUS_HEADER_SZ + MCTP_HEADER_SZ
+                // -1 because non-SOM packets don't have the message type byte
+                SMBUS_HEADER_SZ + MCTP_HEADER_SZ - 1
             };
 
             // Append the payload to the reassembly buffer
