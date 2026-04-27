@@ -1,0 +1,49 @@
+[package]
+name = "patina_tianocore"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+repository = "https://github.com/OpenDevicePartnership/odp-platform-common"
+homepage = "https://github.com/OpenDevicePartnership/odp-platform-common"
+documentation = "https://docs.rs/patina_tianocore"
+description = """
+Bridge crate that lets a UEFI driver target both TianoCore and Patina through a
+single API surface — write your platform once, ship on TianoCore today, swap to
+Patina native later by changing one line.
+"""
+keywords = ["uefi", "edk2", "tianocore", "patina", "firmware"]
+categories = ["embedded", "no-std"]
+readme = "README.md"
+
+[dependencies]
+log = { version = "0.4", default-features = false }
+r-efi = { version = "5.0.0", default-features = false }
+patina = { version = "21", default-features = false, features = ["alloc"] }
+patina_macro = { version = "21" }
+
+# Used by `logger` for x86_64 serial output, mirroring ODP_RustDxeDemo's
+# choice. Avoids inline assembly per patina conventions.
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+uart_16550 = "0.3.2"
+spin = { version = "0.9.8", default-features = false, features = ["spin_mutex"] }
+
+[dev-dependencies]
+patina = { version = "21", features = ["mockall"] }
+
+[lints.clippy]
+suspicious = "deny"
+correctness = "deny"
+perf = "deny"
+style = "deny"
+
+[features]
+default = ["tianocore"]
+
+# TianoCore (r-efi) backend. The currently implemented runtime — drivers
+# compile and run on TianoCore unchanged.
+#
+# A `patina-native` feature for the Patina-native runtime will be added once
+# the corresponding code paths exist; until then, exposing it would be
+# misleading.
+tianocore = []
