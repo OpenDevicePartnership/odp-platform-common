@@ -1,0 +1,26 @@
+# Cargo manifest for the ODP_PatinaSmbiosDemo UEFI DXE driver.
+#
+# SPDX-License-Identifier: MIT
+#
+
+# Cargo.toml serves a similar role to an EDK II .inf file — it declares the module name, dependencies
+# (equivalent to [Packages] and [LibraryClasses]), and build settings.
+[package]
+name = "ODP_PatinaSmbiosDemo"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+# Demo binary — never published to crates.io.
+publish = false
+
+[[bin]]
+name = "ODP_PatinaSmbiosDemo"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+patina_tianocore = "0.1"
+patina = { version = "21", default-features = false, features = ["alloc"] }
+patina_smbios = { version = "21", default-features = false }
+log = { version = "0.4", default-features = false }

@@ -1,0 +1,4 @@
+# UEFI dependency expressions are compiled bytecode (TRUE/END opcodes etc.),
+# not text. Mark as binary so diff viewers stop rendering raw bytes as
+# garbled glyphs.
+*.depex binary
