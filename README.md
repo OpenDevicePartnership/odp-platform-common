@@ -5,7 +5,14 @@
 [![Workflow: cargo-vet](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/cargo-vet.yml/badge.svg)](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/cargo-vet.yml)
 [![Workflow: check](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/check.yml/badge.svg)](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/check.yml)
 
-This repository contains a collection of common tools, components, and documentation provided by [Open Device Partnership](https://opendevicepartnership.github.io/documentation/guide/overview.html) and intended to be consumed as a git submodule within a parent platform repository.
+This repository contains a collection of common tools, components, and documentation provided by [Open Device Partnership](https://opendevicepartnership.github.io/documentation/guide/overview.html).
+
+Modules in this repo are consumed in one of two ways:
+
+- **Git submodule** — most modules. The parent platform repo adds this repo as a submodule and references modules by path (drivers via `.fdf` includes, libraries via `.dsc` `[LibraryClasses]`).
+- **Crates.io** — Rust crates under `uefi/crates/`. The parent platform repo (or any external OEM tree) adds a single dependency line to its `Cargo.toml` and consumes the crate by name — no submodule required.
+
+See the README inside each module for the consumption model that applies.
 
 ## Folder Structure and Content
 

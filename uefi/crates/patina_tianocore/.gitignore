@@ -1,0 +1,4 @@
+# Libraries don't commit Cargo.lock — downstream binaries pick their own
+# resolved versions. This local ignore prevents accidental commits when
+# `cargo` regenerates the lockfile during local development.
+Cargo.lock
