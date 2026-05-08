@@ -1,3 +1,8 @@
+//! Entry point for the ec-test-cli crate
+//!
+//! SPDX-License-Identifier: MIT
+//!
+
 mod cli;
 mod commands;
 mod debug;

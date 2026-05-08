@@ -1,3 +1,8 @@
+# GitHub Actions: posts cargo-vet results back to the originating pull request.
+#
+# SPDX-License-Identifier: MIT
+#
+
 # This workflow triggers after cargo-vet workflow has run.
 # It adds a comment to the PR with the results of the cargo vet run.
 # It first adds a comment if the cargo vet run fails,

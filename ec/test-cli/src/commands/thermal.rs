@@ -1,3 +1,8 @@
+//! CLI EC Test tool `thermal` subcommand
+//!
+//! SPDX-License-Identifier: MIT
+//!
+
 use crate::cli::ThermalCommand;
 use ec_test_lib::ThermalSource;
 

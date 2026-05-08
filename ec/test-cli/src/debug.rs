@@ -1,3 +1,8 @@
+//! CLI EC Test tool Debug-impl wrappers.
+//!
+//! SPDX-License-Identifier: MIT
+//!
+
 // TODO: Remove these wrapper types once a version of embedded-batteries is published
 // containing `Debug` implementations for these types.
 //

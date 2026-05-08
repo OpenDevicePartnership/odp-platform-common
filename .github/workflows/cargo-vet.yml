@@ -1,3 +1,8 @@
+# GitHub Actions: runs cargo-vet to verify dependencies are audited.
+#
+# SPDX-License-Identifier: MIT
+#
+
 # This workflow runs whenever a PR is opened or updated. It runs cargo vet to check for unvetted dependencies in the Cargo.lock file.
 permissions:
   contents: read

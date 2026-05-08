@@ -1,3 +1,8 @@
+//! CLI tool for EC feature testing.
+//!
+//! SPDX-License-Identifier: MIT
+//!
+
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]

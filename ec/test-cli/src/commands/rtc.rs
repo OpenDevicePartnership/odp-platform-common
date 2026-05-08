@@ -1,3 +1,8 @@
+//! CLI EC Test tool `rtc` subcommand
+//!
+//! SPDX-License-Identifier: MIT
+//!
+
 use crate::cli::RtcCommand;
 use ec_test_lib::RtcSource;
 

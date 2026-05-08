@@ -1,5 +1,7 @@
-
-# cargo-vet audits file
+# cargo-vet local audit records for this workspace.
+#
+# SPDX-License-Identifier: MIT
+#
 
 [[audits.embedded-mcu-hal]]
 who = "Felipe Balbi <febalbi@microsoft.com>"

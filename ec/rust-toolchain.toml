@@ -1,3 +1,8 @@
+# Cargo toolchain for the ec workspace
+#
+# SPDX-License-Identifier: MIT
+#
+
 [toolchain]
 components = ["rustfmt", "clippy"]
 targets = ["aarch64-pc-windows-msvc"]

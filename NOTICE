@@ -1,0 +1,48 @@
+ODP Platform Common
+Copyright (c) Open Device Partnership and Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished
+to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+Third-Party Components
+================================================================================
+
+This repository incorporates material from the project listed below (the
+"Third-Party Component"). The Third-Party Component is provided under its own
+license terms. The original license text and copyright notices are retained
+within the component's source tree (typically in a LICENSE file or per-file
+SPDX-License-Identifier header). The summary below is informational; the
+in-tree license files are authoritative.
+
+The Third-Party Component is incorporated as a Git submodule; refer to the
+.gitmodules file at the root of this repository for the upstream URL and
+pinned revision.
+
+--------------------------------------------------------------------------------
+
+1. Windows Implementation Libraries (WIL)
+   Path:    ec-test-win/dep/wil
+   Upstream: <https://github.com/microsoft/wil>
+   License: MIT (see ec-test-win/dep/wil/LICENSE).
+
+================================================================================
+
+For attribution of additional third-party material that may be present within
+the component above, refer to the LICENSE, NOTICE, and per-file
+SPDX-License-Identifier headers contained in its source tree.

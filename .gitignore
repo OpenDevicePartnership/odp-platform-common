@@ -1,3 +1,8 @@
+# Top-level ignore rules for the ODP Platform firmware repository
+#
+# SPDX-License-Identifier: MIT
+#
+
 # Ignore any component build artifacts
 **/build/
 **/target/

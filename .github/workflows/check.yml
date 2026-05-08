@@ -1,3 +1,8 @@
+# GitHub Actions: rustfmt, clippy, doc, and feature-flag combination checks.
+#
+# SPDX-License-Identifier: MIT
+#
+
 # This workflow runs whenever a PR is opened or updated, or a commit is pushed to main. It runs
 # several checks:
 # - fmt: checks that the code is formatted according to rustfmt

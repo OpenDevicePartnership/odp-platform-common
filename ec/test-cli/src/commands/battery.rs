@@ -1,3 +1,8 @@
+//! CLI EC Test tool `battery` subcommand.
+//!
+//! SPDX-License-Identifier: MIT
+//!
+
 use crate::cli::BatteryCommand;
 use crate::debug::{DebugBixFixedStrings, DebugBstReturn};
 use ec_test_lib::BatterySource;

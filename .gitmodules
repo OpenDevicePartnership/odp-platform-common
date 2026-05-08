@@ -1,3 +1,9 @@
+# Git submodule definitions for the ODP Platform firmware repository
+#
+# SPDX-License-Identifier: MIT
+#
+
+# Microsoft Windows Implementation Libraries (WIL)
 [submodule "wil"]
 	path = ec/test-win/dep/wil
 	url = https://github.com/microsoft/wil
