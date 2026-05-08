@@ -26,8 +26,7 @@ indicate that clearly in your pull request so that the project team can discuss 
 ## PR Etiquette
 
 * Create a draft PR first
-* Make sure that your branch has `.github` folder and all the code linting/sanity check workflows are passing in your
-draft PR before sending it out to code reviewers.
+* Make sure that your branch has `.github` folder and all the code linting/sanity check workflows are passing in your draft PR before sending it out to code reviewers.
 
 ## Regressions
 
