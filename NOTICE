@@ -37,9 +37,9 @@ pinned revision.
 --------------------------------------------------------------------------------
 
 1. Windows Implementation Libraries (WIL)
-   Path:    ec-test-win/dep/wil
+   Path:    ec/test-win/dep/wil
    Upstream: <https://github.com/microsoft/wil>
-   License: MIT (see ec-test-win/dep/wil/LICENSE).
+   License: MIT (see ec/test-win/dep/wil/LICENSE).
 
 ================================================================================
 

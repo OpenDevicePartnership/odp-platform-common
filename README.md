@@ -4,6 +4,7 @@
 
 [![Workflow: cargo-vet](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/cargo-vet.yml/badge.svg)](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/cargo-vet.yml)
 [![Workflow: check](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/check.yml/badge.svg)](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/check.yml)
+[![Workflow: uefi-check](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/uefi-check.yml/badge.svg)](https://github.com/OpenDevicePartnership/odp-platform-common/actions/workflows/uefi-check.yml)
 
 This repository contains a collection of common tools, components, and documentation provided by [Open Device Partnership](https://opendevicepartnership.github.io/documentation/guide/overview.html).
 

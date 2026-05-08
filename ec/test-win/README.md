@@ -42,8 +42,8 @@ After recompiling ACPI and booting your device, install the driver and run valid
 
 Copy the following files to a thumbdrive or location on the target:
 ```
-ec-test-win\exe\arm64\Debug\ectest.exe
-ec-test-win\kmdf\arm64\Debug\ectest_kmdf\*
+ec\test-win\exe\arm64\Debug\ectest.exe
+ec\test-win\kmdf\arm64\Debug\ectest_kmdf\*
 <WDKROOT>\Program Files\Windows Kits\10\Tools\10.0.26100.0\arm64\devcon.exe
 ```
 
