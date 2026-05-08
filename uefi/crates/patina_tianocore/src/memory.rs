@@ -1,5 +1,7 @@
 //! TianoCore-backed `MemoryManager` implementation.
 //!
+//! SPDX-License-Identifier: MIT
+//!
 //! This module adapts UEFI boot services memory allocation into Patina's
 //! `MemoryManager` service trait so that any Patina component requiring
 //! memory (SMBIOS, advanced logger, etc.) works without modification.

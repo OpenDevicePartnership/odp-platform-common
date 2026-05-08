@@ -1,5 +1,7 @@
 //! Integration test: exercises the full dispatch loop on the host target.
 //!
+//! SPDX-License-Identifier: MIT
+//!
 //! Uses `DriverContext::from_storage()` to run without a real UEFI system table.
 //! This proves that `Platform` → `DriverContext::dispatch_platform` works end-to-end.
 

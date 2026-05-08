@@ -1,5 +1,7 @@
 //! Minimal UEFI logger that routes `log` output to ConOut and serial.
 //!
+//! SPDX-License-Identifier: MIT
+//!
 //! Automatically initialised by the `driver_entry!` macro. Writes to both
 //! the UEFI console (ConOut) and COM1 serial port on x86_64 so output is
 //! visible in QEMU's `-nographic` mode and the graphical console.

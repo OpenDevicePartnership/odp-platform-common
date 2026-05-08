@@ -1,5 +1,7 @@
 //! # patina_tianocore
 //!
+//! SPDX-License-Identifier: MIT
+//!
 //! A bridge crate that lets UEFI drivers target **TianoCore** and **Patina**
 //! through a single API surface — write once, run on either.
 //!

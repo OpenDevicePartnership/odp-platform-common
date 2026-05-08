@@ -1,5 +1,7 @@
 //! Re-exports used by the `driver_entry!` macro at expansion sites.
 //!
+//! SPDX-License-Identifier: MIT
+//!
 //! Not part of the public API — the module is `#[doc(hidden)]` and may be
 //! removed or restructured without a semver bump. Consumers should never
 //! reference these paths directly.

@@ -1,3 +1,8 @@
+# Cargo manifest for the patina_tianocore bridge crate.
+#
+# SPDX-License-Identifier: MIT
+#
+
 [package]
 name = "patina_tianocore"
 version = "0.1.0"

@@ -1,3 +1,8 @@
+//! Demonstration UEFI DXE driver written in Rust, loaded by the OdpPkg build.
+//!
+//! SPDX-License-Identifier: MIT
+//!
+
 // no_std: Disables Rust's standard library (similar to how UEFI drivers don't link against a C runtime).
 //         This is behind a cfg_attr to allow the test module to use the standard library, which is not
 //         available in the UEFI environment.

@@ -1,1 +1,6 @@
+# rustfmt configuration for the patina_tianocore crate.
+#
+# SPDX-License-Identifier: MIT
+#
+
 max_width = 120

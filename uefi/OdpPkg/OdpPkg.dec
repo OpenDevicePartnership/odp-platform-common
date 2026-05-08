@@ -1,12 +1,7 @@
-## @file
-#  OdpPkg.dec
+# ODP Package Declaration: ODP-provided code for use in a UEFI build.
 #
-#  Package contains code provided by the ODP group specifically for use in a UEFI build
+# SPDX-License-Identifier: MIT
 #
-#  Copyright (c) Microsoft Corporation
-#
-#  SPDX-License-Identifier: BSD-2-Clause-Patent
-##
 
 [Defines]
   DEC_SPECIFICATION              = 0x0001001B

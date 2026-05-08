@@ -1,5 +1,7 @@
 //! Glob-importable bridge-crate types.
 //!
+//! SPDX-License-Identifier: MIT
+//!
 //! Only types defined by this crate are exposed here. Patina SDK types
 //! (`Storage`, `EfiError`, the component prelude, etc.) must be imported
 //! explicitly from `patina` so the dependency on the SDK is visible at

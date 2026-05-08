@@ -1,5 +1,7 @@
 //! Re-export and helpers for boot services.
 //!
+//! SPDX-License-Identifier: MIT
+//!
 //! When compiled with `tianocore`, this module provides a global allocator
 //! backed by UEFI `AllocatePool`/`FreePool`, so normal `alloc` crates work
 //! inside DXE drivers without extra setup.

@@ -1,5 +1,7 @@
 //! Driver context — the single entry point for accessing platform services.
 //!
+//! SPDX-License-Identifier: MIT
+//!
 //! `DriverContext` wraps the platform-specific initialization (TianoCore system
 //! table or Patina DXE core) and exposes a uniform Patina `Storage` that
 //! drivers use for component registration and service access.

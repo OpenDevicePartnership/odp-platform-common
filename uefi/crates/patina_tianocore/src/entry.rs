@@ -1,5 +1,7 @@
 //! Entry-point macro for TianoCore DXE drivers.
 //!
+//! SPDX-License-Identifier: MIT
+//!
 //! ## Usage
 //!
 //! The macro generates the global allocator, `efi_main` entry point, and

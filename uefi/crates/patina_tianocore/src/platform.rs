@@ -1,5 +1,7 @@
 //! Write-once platform registration that works on TianoCore and Patina native.
 //!
+//! SPDX-License-Identifier: MIT
+//!
 //! The OEM implements [`Platform`] once using the [`ComponentAdder`],
 //! [`ServiceAdder`], and [`ConfigAdder`] traits. The same implementation is
 //! consumed by:
