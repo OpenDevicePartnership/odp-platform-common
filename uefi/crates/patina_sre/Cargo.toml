@@ -1,0 +1,47 @@
+# Cargo manifest for the patina_sre crate.
+#
+# SPDX-License-Identifier: MIT
+#
+
+[package]
+name = "patina_sre"
+version = "0.1.0"
+edition = "2024"
+# A pinned nightly toolchain is required (see rust-toolchain.toml) for #![feature(...)] gates
+# used by patina_boot and SreBootManager; no MSRV is declared because the crate is not
+# buildable on stable.
+license = "MIT"
+repository = "https://github.com/OpenDevicePartnership/odp-platform-common"
+homepage = "https://github.com/OpenDevicePartnership/odp-platform-common"
+documentation = "https://docs.rs/patina_sre"
+description = """
+Reference System Recovery Environment (SRE) boot orchestrator for ODP platforms.
+Implements patina_boot::BootOrchestrator with the BDS-phase sequencing typical of
+devices shipping a recovery image alongside the main OS. OEMs can adopt as-is or
+use as the starting point for vendor-specific recovery flows.
+"""
+keywords = ["uefi", "patina", "sre", "boot", "recovery"]
+categories = ["embedded", "no-std"]
+readme = "README.md"
+
+[dependencies]
+log = { version = "0.4", default-features = false }
+r-efi = { version = "5", default-features = false }
+# patina + patina-components helpers are pulled from git until the corresponding releases
+# land on crates.io. See [patch] block below for cross-dep version unification.
+patina = { git = "https://github.com/kat-perez/patina", branch = "kat-perez/sre-base", default-features = false, features = ["alloc", "unstable-device-path"] }
+patina_boot = { git = "https://github.com/OpenDevicePartnership/patina-components", branch = "main" }
+patina_nvme = { git = "https://github.com/kat-perez/patina-components", branch = "kat-perez/patina-nvme" }
+patina_partition = { git = "https://github.com/kat-perez/patina-components", branch = "kat-perez/patina-partition" }
+patina_ram_disk = { git = "https://github.com/kat-perez/patina-components", branch = "kat-perez/patina-ram-disk" }
+
+[dev-dependencies]
+spin = { version = "0.9", default-features = false, features = ["spin_mutex"] }
+patina = { git = "https://github.com/kat-perez/patina", branch = "kat-perez/sre-base", default-features = false, features = ["alloc", "mockall", "unstable-device-path"] }
+
+# Redirect transitive patina deps that point at upstream's feature/patina-boot (patina_boot,
+# patina_nvme, patina_partition all pull from there) onto the combined branch that includes
+# the EFI_RAM_DISK_PROTOCOL binding from patina#1490 alongside the feature/patina-boot content.
+# Drop once #1490 / feature/patina-boot merge and a patina release ships.
+[patch."https://github.com/OpenDevicePartnership/patina"]
+patina = { git = "https://github.com/kat-perez/patina", branch = "kat-perez/sre-base" }
