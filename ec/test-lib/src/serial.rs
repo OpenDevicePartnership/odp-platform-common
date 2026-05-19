@@ -184,6 +184,8 @@ impl Serial {
             .map_err(|e| Error::Io(format!("{e:?}")))?;
         port.write_all(&buffer[..HEADER_SZ + request_sz])
             .map_err(|e| Error::Io(format!("{e:?}")))?;
+        let pec = smbus_pec::pec(&buffer[..HEADER_SZ + request_sz]);
+        port.write_all(&[pec]).map_err(|e| Error::Io(format!("{e:?}")))?;
         port.flush().map_err(|e| Error::Io(format!("{e:?}")))?;
 
         // Read response packets
@@ -206,6 +208,16 @@ impl Serial {
                 .get_mut(SMBUS_HEADER_SZ..SMBUS_HEADER_SZ + len)
                 .ok_or_else(|| Error::Protocol("Response does not fit in buffer".into()))?;
             port.read_exact(packet_slice).map_err(|e| Error::Io(format!("{e:?}")))?;
+
+            let mut pec_buf = [0u8; 1];
+            port.read_exact(&mut pec_buf).map_err(|e| Error::Io(format!("{e:?}")))?;
+            let computed = smbus_pec::pec(&buffer[..SMBUS_HEADER_SZ + len]);
+            if pec_buf[0] != computed {
+                return Err(Error::Protocol(format!(
+                    "PEC mismatch: received {:#04x}, computed {:#04x}",
+                    pec_buf[0], computed
+                )));
+            }
 
             let flags = buffer[MCTP_FLAGS_IDX];
 
