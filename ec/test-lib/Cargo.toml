@@ -29,6 +29,7 @@ scopeguard = { version = "1.2" }
 
 # Serial specific
 serialport = { version = "4.8.1" }
+smbus-pec = "1.0.1"
 embedded-services = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0" }
 thermal-service-messages = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0" }
 

@@ -491,6 +491,7 @@ dependencies = [
  "num_enum",
  "scopeguard",
  "serialport",
+ "smbus-pec",
  "thermal-service-messages",
  "time-alarm-service-messages",
  "uuid",
