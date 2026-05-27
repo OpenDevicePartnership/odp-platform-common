@@ -1,0 +1,46 @@
+# Cargo manifest for the patina_sre crate.
+#
+# SPDX-License-Identifier: MIT
+#
+
+[package]
+name = "patina_sre"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+repository = "https://github.com/OpenDevicePartnership/odp-platform-common"
+homepage = "https://github.com/OpenDevicePartnership/odp-platform-common"
+description = """
+System Recovery Environment boot orchestrator. Implements
+patina_boot::BootOrchestrator for platforms shipping an SRE alongside the main
+OS — normal boot today; hotkey-to-SRE, WIM RAM-disk boot, and capsule pre-boot
+hook land in follow-up issues.
+"""
+keywords = ["uefi", "patina", "firmware", "recovery", "sre"]
+categories = ["embedded", "no-std"]
+readme = "README.md"
+
+[dependencies]
+log = { version = "0.4", default-features = false }
+r-efi = { version = "5", default-features = false }
+spin = { version = "0.9", default-features = false, features = ["spin_mutex"] }
+
+# patina_boot lives in OpenDevicePartnership/patina-components and is not yet
+# published to crates.io. Pinning to main here; swap to a `version = ...` line
+# once it publishes.
+patina_boot = { git = "https://github.com/OpenDevicePartnership/patina-components", branch = "main" }
+
+# Must match the patina that patina_boot itself uses, or trait/type identity
+# breaks (two distinct `patina::DevicePathBuf` types, mismatched impls).
+patina = { git = "https://github.com/OpenDevicePartnership/patina", branch = "feature/patina-boot", features = ["unstable-device-path"] }
+
+[dev-dependencies]
+patina = { git = "https://github.com/OpenDevicePartnership/patina", branch = "feature/patina-boot", features = ["mockall", "unstable-device-path"] }
+mockall = { version = "0.13" }
+
+[lints.clippy]
+suspicious = "deny"
+correctness = "deny"
+perf = "deny"
+style = "deny"
