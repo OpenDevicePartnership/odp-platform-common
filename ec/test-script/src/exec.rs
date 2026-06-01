@@ -369,7 +369,10 @@ fn apply_value_verb(verb: &Verb, value: &Value, resolve: &dyn Fn(&Operand) -> Re
                 if ok {
                     (true, String::new())
                 } else {
-                    (false, format!("actual={a} not in {lo}..{hi}"))
+                    (
+                        false,
+                        format!("actual={a} not in {lo}{}{hi}", if *inclusive { "..=" } else { ".." }),
+                    )
                 }
             }
         },
@@ -392,7 +395,10 @@ fn apply_value_verb(verb: &Verb, value: &Value, resolve: &dyn Fn(&Operand) -> Re
                 if ok {
                     (true, String::new())
                 } else {
-                    (false, format!("actual={a} not in {lo}..{hi}"))
+                    (
+                        false,
+                        format!("actual={a} not in {lo}{}{hi}", if *inclusive { "..=" } else { ".." }),
+                    )
                 }
             }
         },

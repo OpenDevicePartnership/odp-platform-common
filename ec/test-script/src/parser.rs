@@ -224,7 +224,10 @@ fn parse_call(src: &str) -> Result<Call, String> {
                 cur.push(ch);
             }
             ')' => {
-                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Err(format!("unbalanced parentheses in `{src}`"));
+                }
+                depth -= 1;
                 cur.push(ch);
             }
             '.' if depth == 0 => parts.push(std::mem::take(&mut cur)),
@@ -279,6 +282,9 @@ fn split_call(s: &str) -> Result<(&str, Option<String>), String> {
             let close = s.rfind(')').ok_or_else(|| format!("missing `)` in `{s}`"))?;
             if close < open {
                 return Err(format!("malformed call `{s}`"));
+            }
+            if close + 1 != s.len() {
+                return Err(format!("unexpected trailing characters after `)` in `{s}`"));
             }
             let name = s[..open].trim();
             let arg = s[open + 1..close].trim().to_string();
