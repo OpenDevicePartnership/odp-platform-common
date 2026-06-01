@@ -178,7 +178,11 @@ struct MockThresholds {
 
 impl Default for MockThresholds {
     fn default() -> Self {
-        Self { on: 28.0, ramping: 40.0, max: 44.0 }
+        Self {
+            on: 28.0,
+            ramping: 40.0,
+            max: 44.0,
+        }
     }
 }
 
@@ -421,11 +425,7 @@ impl RtcSource for Mock {
         Ok(())
     }
 
-    fn set_timer_value(
-        &self,
-        timer_id: AcpiTimerId,
-        value: AlarmTimerSeconds,
-    ) -> Result<(), Self::Error> {
+    fn set_timer_value(&self, timer_id: AcpiTimerId, value: AlarmTimerSeconds) -> Result<(), Self::Error> {
         self.rtc.lock().unwrap().timers[timer_id as usize].value = value;
         Ok(())
     }

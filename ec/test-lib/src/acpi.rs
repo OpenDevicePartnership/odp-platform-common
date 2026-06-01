@@ -658,18 +658,11 @@ impl RtcSource for Acpi {
 
     fn set_real_time(&self, timestamp: AcpiTimestamp) -> Result<(), Self::Error> {
         let bytes = timestamp.as_bytes();
-        let _ = self.evaluate(
-            "\\_SB.ECT0._SRT",
-            Some(&[AcpiMethodArgument::Buffer(bytes.to_vec())]),
-        )?;
+        let _ = self.evaluate("\\_SB.ECT0._SRT", Some(&[AcpiMethodArgument::Buffer(bytes.to_vec())]))?;
         Ok(())
     }
 
-    fn set_timer_value(
-        &self,
-        timer_id: AcpiTimerId,
-        value: AlarmTimerSeconds,
-    ) -> Result<(), Self::Error> {
+    fn set_timer_value(&self, timer_id: AcpiTimerId, value: AlarmTimerSeconds) -> Result<(), Self::Error> {
         let _ = self.evaluate(
             "\\_SB.ECT0._STV",
             Some(&[
@@ -696,10 +689,7 @@ impl RtcSource for Acpi {
     }
 
     fn clear_wake_status(&self, timer_id: AcpiTimerId) -> Result<(), Self::Error> {
-        let _ = self.evaluate(
-            "\\_SB.ECT0._CWS",
-            Some(&[AcpiMethodArgument::Int(timer_id.into())]),
-        )?;
+        let _ = self.evaluate("\\_SB.ECT0._CWS", Some(&[AcpiMethodArgument::Int(timer_id.into())]))?;
         Ok(())
     }
 }

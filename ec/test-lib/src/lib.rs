@@ -140,11 +140,7 @@ pub trait RtcSource: ErrorType {
     fn set_real_time(&self, timestamp: AcpiTimestamp) -> Result<(), Self::Error>;
 
     /// Set the timer value (seconds until expiry) - see _STV
-    fn set_timer_value(
-        &self,
-        timer_id: AcpiTimerId,
-        value: AlarmTimerSeconds,
-    ) -> Result<(), Self::Error>;
+    fn set_timer_value(&self, timer_id: AcpiTimerId, value: AlarmTimerSeconds) -> Result<(), Self::Error>;
 
     /// Set the expired-timer wake policy - see _STP
     fn set_expired_timer_wake_policy(
@@ -224,11 +220,7 @@ impl<T: RtcSource> RtcSource for Arc<T> {
     fn set_real_time(&self, timestamp: AcpiTimestamp) -> Result<(), Self::Error> {
         self.as_ref().set_real_time(timestamp)
     }
-    fn set_timer_value(
-        &self,
-        timer_id: AcpiTimerId,
-        value: AlarmTimerSeconds,
-    ) -> Result<(), Self::Error> {
+    fn set_timer_value(&self, timer_id: AcpiTimerId, value: AlarmTimerSeconds) -> Result<(), Self::Error> {
         self.as_ref().set_timer_value(timer_id, value)
     }
     fn set_expired_timer_wake_policy(

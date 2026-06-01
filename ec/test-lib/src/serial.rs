@@ -439,11 +439,7 @@ impl RtcSource for Serial {
         }
     }
 
-    fn set_timer_value(
-        &self,
-        timer_id: AcpiTimerId,
-        value: AlarmTimerSeconds,
-    ) -> Result<(), Self::Error> {
+    fn set_timer_value(&self, timer_id: AcpiTimerId, value: AlarmTimerSeconds) -> Result<(), Self::Error> {
         let response = self.send(
             Destination::TimeAlarm,
             AcpiTimeAlarmRequest::SetTimerValue(timer_id, value),
@@ -472,10 +468,7 @@ impl RtcSource for Serial {
     }
 
     fn clear_wake_status(&self, timer_id: AcpiTimerId) -> Result<(), Self::Error> {
-        let response = self.send(
-            Destination::TimeAlarm,
-            AcpiTimeAlarmRequest::ClearWakeStatus(timer_id),
-        )?;
+        let response = self.send(Destination::TimeAlarm, AcpiTimeAlarmRequest::ClearWakeStatus(timer_id))?;
         if matches!(response, AcpiTimeAlarmResponse::OkNoData) {
             Ok(())
         } else {

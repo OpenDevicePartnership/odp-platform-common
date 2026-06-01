@@ -35,7 +35,6 @@ pub(crate) trait DynSource: Send + Sync {
     fn get_min_rpm(&self) -> Result<f64>;
     fn get_max_rpm(&self) -> Result<f64>;
     fn get_threshold(&self, threshold: Threshold) -> Result<f64>;
-    fn set_threshold(&self, threshold: Threshold, value: f64) -> Result<()>;
     fn set_rpm(&self, rpm: f64) -> Result<()>;
 
     // RTC
@@ -44,14 +43,6 @@ pub(crate) trait DynSource: Send + Sync {
     fn get_wake_status(&self, timer_id: AcpiTimerId) -> Result<TimerStatus>;
     fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy>;
     fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds>;
-    fn set_real_time(&self, timestamp: AcpiTimestamp) -> Result<()>;
-    fn set_timer_value(&self, timer_id: AcpiTimerId, value: AlarmTimerSeconds) -> Result<()>;
-    fn set_expired_timer_wake_policy(
-        &self,
-        timer_id: AcpiTimerId,
-        policy: AlarmExpiredWakePolicy,
-    ) -> Result<()>;
-    fn clear_wake_status(&self, timer_id: AcpiTimerId) -> Result<()>;
 }
 
 // ── Blanket impl ─────────────────────────────────────────────────────────────
@@ -86,9 +77,6 @@ where
     fn get_threshold(&self, threshold: Threshold) -> Result<f64> {
         ec_test_lib::ThermalSource::get_threshold(self, threshold).map_err(Into::into)
     }
-    fn set_threshold(&self, threshold: Threshold, value: f64) -> Result<()> {
-        ec_test_lib::ThermalSource::set_threshold(self, threshold, value).map_err(Into::into)
-    }
     fn set_rpm(&self, rpm: f64) -> Result<()> {
         ec_test_lib::ThermalSource::set_rpm(self, rpm).map_err(Into::into)
     }
@@ -107,22 +95,6 @@ where
     }
     fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds> {
         ec_test_lib::RtcSource::get_timer_value(self, timer_id).map_err(Into::into)
-    }
-    fn set_real_time(&self, timestamp: AcpiTimestamp) -> Result<()> {
-        ec_test_lib::RtcSource::set_real_time(self, timestamp).map_err(Into::into)
-    }
-    fn set_timer_value(&self, timer_id: AcpiTimerId, value: AlarmTimerSeconds) -> Result<()> {
-        ec_test_lib::RtcSource::set_timer_value(self, timer_id, value).map_err(Into::into)
-    }
-    fn set_expired_timer_wake_policy(
-        &self,
-        timer_id: AcpiTimerId,
-        policy: AlarmExpiredWakePolicy,
-    ) -> Result<()> {
-        ec_test_lib::RtcSource::set_expired_timer_wake_policy(self, timer_id, policy).map_err(Into::into)
-    }
-    fn clear_wake_status(&self, timer_id: AcpiTimerId) -> Result<()> {
-        ec_test_lib::RtcSource::clear_wake_status(self, timer_id).map_err(Into::into)
     }
 }
 

@@ -658,8 +658,10 @@ mod tests {
 
     #[test]
     fn sensor_update_clears_temp_success_on_err() {
-        let mut data = SensorData::default();
-        data.skin_temp = 99.9;
+        let mut data = SensorData {
+            skin_temp: 99.9,
+            ..SensorData::default()
+        };
         data.update(&ErrThermal);
         assert!(!data.temp_success);
         assert_eq!(data.skin_temp, 99.9);
@@ -689,8 +691,10 @@ mod tests {
 
     #[test]
     fn fan_update_clears_success_on_err() {
-        let mut data = FanData::default();
-        data.rpm = 1234.0;
+        let mut data = FanData {
+            rpm: 1234.0,
+            ..FanData::default()
+        };
         data.update(&ErrThermal);
         assert!(!data.rpm_success);
         assert!(!data.bounds_success);
