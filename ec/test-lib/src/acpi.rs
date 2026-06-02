@@ -1,9 +1,9 @@
 use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, common};
-use battery_service_messages::{
-    BatteryState, BixFixedStrings, BstReturn, bat_swap_try_from_u32, bat_tech_try_from_u32, power_unit_try_from_u32,
+use battery_service_interface::{
+    BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit,
 };
 use scopeguard::defer;
-use time_alarm_service_messages::{
+use time_alarm_service_interface::{
     AcpiTimerId, AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
 };
 use windows::Win32::Devices::DeviceAndDriverInstallation::*;
@@ -584,10 +584,11 @@ impl BatterySource for Acpi {
         } else {
             Ok(BixFixedStrings {
                 revision: data.arg(0)?.data_32,
-                power_unit: power_unit_try_from_u32(data.arg(1)?.data_32).map_err(|_| Error::InvalidData)?,
+                power_unit: PowerUnit::try_from(data.arg(1)?.data_32).map_err(|_| Error::InvalidData)?,
                 design_capacity: data.arg(2)?.data_32,
                 last_full_charge_capacity: data.arg(3)?.data_32,
-                battery_technology: bat_tech_try_from_u32(data.arg(4)?.data_32).map_err(|_| Error::InvalidData)?,
+                battery_technology: BatteryTechnology::try_from(data.arg(4)?.data_32)
+                    .map_err(|_| Error::InvalidData)?,
                 design_voltage: data.arg(5)?.data_32,
                 design_cap_of_warning: data.arg(6)?.data_32,
                 design_cap_of_low: data.arg(7)?.data_32,
@@ -603,7 +604,7 @@ impl BatterySource for Acpi {
                 serial_number: data.arg(17)?.data.clone().try_into().map_err(|_| Error::InvalidData)?,
                 battery_type: data.arg(18)?.data.clone().try_into().map_err(|_| Error::InvalidData)?,
                 oem_info: data.arg(19)?.data.clone().try_into().map_err(|_| Error::InvalidData)?,
-                battery_swapping_capability: bat_swap_try_from_u32(data.arg(20)?.data_32)
+                battery_swapping_capability: BatterySwapCapability::try_from(data.arg(20)?.data_32)
                     .map_err(|_| Error::InvalidData)?,
             })
         }

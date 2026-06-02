@@ -11,10 +11,10 @@
 
 use std::sync::Arc;
 
-use battery_service_messages::{BixFixedStrings, BstReturn};
+use battery_service_interface::{BixFixedStrings, BstReturn};
 use color_eyre::Result;
 use ec_test_lib::Threshold;
-use time_alarm_service_messages::{
+use time_alarm_service_interface::{
     AcpiTimerId, AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
 };
 

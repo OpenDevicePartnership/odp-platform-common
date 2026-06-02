@@ -6,12 +6,6 @@ who = "Felipe Balbi <febalbi@microsoft.com>"
 criteria = "safe-to-run"
 version = "0.1.0"
 
-[[audits.embedded-mcu-hal]]
-who = "Felipe Balbi <febalbi@microsoft.com>"
-criteria = "safe-to-deploy"
-version = "0.1.0@git:6956ebdaf9d3725959dae2c57c2ab6baefae9330"
-importable = false
-
 [[audits.supports-unicode]]
 who = "Felipe Balbi <febalbi@microsoft.com>"
 criteria = "safe-to-deploy"

@@ -1,11 +1,11 @@
 use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold};
-use battery_service_messages::{
+use battery_service_interface::{
     BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit,
 };
-use embedded_mcu_hal::time::{Datetime, Month, UncheckedDatetime};
+use embedded_mcu_hal::time::{Datetime, DatetimeFields, Month};
 use std::sync::Mutex;
 use std::time::Instant;
-use time_alarm_service_messages::{
+use time_alarm_service_interface::{
     AcpiDaylightSavingsTimeStatus, AcpiTimeZone, AcpiTimeZoneOffset, AcpiTimerId, AcpiTimestamp,
     AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
 };
@@ -372,7 +372,7 @@ impl MockRtc {
     fn new() -> Self {
         Self {
             time: AcpiTimestamp {
-                datetime: Datetime::new(UncheckedDatetime {
+                datetime: Datetime::new(DatetimeFields {
                     year: 2026,
                     month: Month::January,
                     day: 1,

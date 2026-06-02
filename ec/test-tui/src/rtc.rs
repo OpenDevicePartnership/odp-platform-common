@@ -11,7 +11,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Paragraph},
 };
-use time_alarm_service_messages::{
+use time_alarm_service_interface::{
     AcpiDaylightSavingsTimeStatus, AcpiTimeZone, AcpiTimerId, AlarmExpiredWakePolicy, AlarmTimerSeconds,
     TimeAlarmDeviceCapabilities,
 };
@@ -354,11 +354,11 @@ fn format_time(time: Datetime) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use embedded_mcu_hal::time::{Month, UncheckedDatetime};
-    use time_alarm_service_messages::AcpiTimeZoneOffset;
+    use embedded_mcu_hal::time::{DatetimeFields, Month};
+    use time_alarm_service_interface::AcpiTimeZoneOffset;
 
     fn make_datetime(year: u16, month: Month, day: u8, hour: u8, min: u8, sec: u8) -> Datetime {
-        Datetime::new(UncheckedDatetime {
+        Datetime::new(DatetimeFields {
             year,
             month,
             day,

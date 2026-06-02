@@ -17,7 +17,7 @@
 use std::fmt;
 use std::time::Duration;
 
-use time_alarm_service_messages::AcpiTimerId;
+use time_alarm_service_interface::AcpiTimerId;
 
 /// Local mirror of [`ec_test_lib::Threshold`] (which is not `Clone`/`Debug`).
 #[derive(Debug, Clone, Copy)]

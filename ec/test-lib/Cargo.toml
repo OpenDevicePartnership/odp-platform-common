@@ -9,8 +9,10 @@ rust-version.workspace = true
 
 [dependencies]
 uuid = { version = "1.17.0", default-features = false }
-time-alarm-service-messages.workspace = true
-battery-service-messages.workspace = true
+time-alarm-service-interface.workspace = true
+time-alarm-service-relay.workspace = true
+battery-service-interface.workspace = true
+battery-service-relay.workspace = true
 
 embedded-mcu-hal = { workspace = true }
 
@@ -30,8 +32,8 @@ scopeguard = { version = "1.2" }
 # Serial specific
 serialport = { version = "4.8.1" }
 smbus-pec = "1.0.1"
-embedded-services = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0" }
-thermal-service-messages = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0" }
+embedded-services.workspace = true
+thermal-service-relay.workspace = true
 
 [lints]
 workspace = true

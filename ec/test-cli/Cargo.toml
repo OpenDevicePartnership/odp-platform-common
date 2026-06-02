@@ -12,13 +12,18 @@ description = "CLI tool for EC feature testing"
 repository.workspace = true
 rust-version.workspace = true
 
+# Needed to link embassy-time symbols
+[package.metadata.cargo-machete]
+ignored = ["embassy-time"]
+
 [dependencies]
 clap.workspace = true
 critical-section.workspace = true
 ec-test-lib = { path = "../test-lib" }
 ec-test-script = { path = "../test-script" }
-time-alarm-service-messages.workspace = true
-battery-service-messages.workspace = true
+time-alarm-service-interface.workspace = true
+battery-service-interface.workspace = true
+embassy-time.workspace = true
 
 [lints]
 workspace = true

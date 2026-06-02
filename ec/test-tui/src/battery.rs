@@ -2,7 +2,9 @@ use crate::common::{self, SYMBOLS, unicode_enabled};
 use crate::source::DynSource;
 use crate::state::{BatteryCommand, BatteryState};
 use crate::widgets::battery;
-use battery_service_messages::{BatteryState as BatteryStateFlag, BatterySwapCapability, BatteryTechnology, PowerUnit};
+use battery_service_interface::{
+    BatteryState as BatteryStateFlag, BatterySwapCapability, BatteryTechnology, PowerUnit,
+};
 use core::ffi::CStr;
 use std::sync::mpsc;
 use tracing::{debug, instrument, warn};
@@ -556,7 +558,7 @@ impl Battery {
 mod tests {
     use super::*;
     use crate::source::DynSource;
-    use battery_service_messages::{BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit};
+    use battery_service_interface::{BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit};
     use color_eyre::eyre::eyre;
 
     // ── test doubles ─────────────────────────────────────────────────────────
@@ -600,28 +602,28 @@ mod tests {
         fn set_rpm(&self, _: f64) -> color_eyre::Result<()> {
             Err(eyre!("unused"))
         }
-        fn get_capabilities(&self) -> color_eyre::Result<time_alarm_service_messages::TimeAlarmDeviceCapabilities> {
+        fn get_capabilities(&self) -> color_eyre::Result<time_alarm_service_interface::TimeAlarmDeviceCapabilities> {
             Err(eyre!("unused"))
         }
-        fn get_real_time(&self) -> color_eyre::Result<time_alarm_service_messages::AcpiTimestamp> {
+        fn get_real_time(&self) -> color_eyre::Result<time_alarm_service_interface::AcpiTimestamp> {
             Err(eyre!("unused"))
         }
         fn get_wake_status(
             &self,
-            _: time_alarm_service_messages::AcpiTimerId,
-        ) -> color_eyre::Result<time_alarm_service_messages::TimerStatus> {
+            _: time_alarm_service_interface::AcpiTimerId,
+        ) -> color_eyre::Result<time_alarm_service_interface::TimerStatus> {
             Err(eyre!("unused"))
         }
         fn get_expired_timer_wake_policy(
             &self,
-            _: time_alarm_service_messages::AcpiTimerId,
-        ) -> color_eyre::Result<time_alarm_service_messages::AlarmExpiredWakePolicy> {
+            _: time_alarm_service_interface::AcpiTimerId,
+        ) -> color_eyre::Result<time_alarm_service_interface::AlarmExpiredWakePolicy> {
             Err(eyre!("unused"))
         }
         fn get_timer_value(
             &self,
-            _: time_alarm_service_messages::AcpiTimerId,
-        ) -> color_eyre::Result<time_alarm_service_messages::AlarmTimerSeconds> {
+            _: time_alarm_service_interface::AcpiTimerId,
+        ) -> color_eyre::Result<time_alarm_service_interface::AlarmTimerSeconds> {
             Err(eyre!("unused"))
         }
     }
@@ -655,28 +657,28 @@ mod tests {
         fn set_rpm(&self, _: f64) -> color_eyre::Result<()> {
             Err(eyre!("unused"))
         }
-        fn get_capabilities(&self) -> color_eyre::Result<time_alarm_service_messages::TimeAlarmDeviceCapabilities> {
+        fn get_capabilities(&self) -> color_eyre::Result<time_alarm_service_interface::TimeAlarmDeviceCapabilities> {
             Err(eyre!("unused"))
         }
-        fn get_real_time(&self) -> color_eyre::Result<time_alarm_service_messages::AcpiTimestamp> {
+        fn get_real_time(&self) -> color_eyre::Result<time_alarm_service_interface::AcpiTimestamp> {
             Err(eyre!("unused"))
         }
         fn get_wake_status(
             &self,
-            _: time_alarm_service_messages::AcpiTimerId,
-        ) -> color_eyre::Result<time_alarm_service_messages::TimerStatus> {
+            _: time_alarm_service_interface::AcpiTimerId,
+        ) -> color_eyre::Result<time_alarm_service_interface::TimerStatus> {
             Err(eyre!("unused"))
         }
         fn get_expired_timer_wake_policy(
             &self,
-            _: time_alarm_service_messages::AcpiTimerId,
-        ) -> color_eyre::Result<time_alarm_service_messages::AlarmExpiredWakePolicy> {
+            _: time_alarm_service_interface::AcpiTimerId,
+        ) -> color_eyre::Result<time_alarm_service_interface::AlarmExpiredWakePolicy> {
             Err(eyre!("unused"))
         }
         fn get_timer_value(
             &self,
-            _: time_alarm_service_messages::AcpiTimerId,
-        ) -> color_eyre::Result<time_alarm_service_messages::AlarmTimerSeconds> {
+            _: time_alarm_service_interface::AcpiTimerId,
+        ) -> color_eyre::Result<time_alarm_service_interface::AlarmTimerSeconds> {
             Err(eyre!("unused"))
         }
     }
