@@ -1,16 +1,17 @@
 use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, common};
-use battery_service_messages::{AcpiBatteryRequest, AcpiBatteryResponse, BixFixedStrings, BstReturn, Btp};
+use battery_service_interface::{BixFixedStrings, BstReturn, Btp};
+use battery_service_relay::{AcpiBatteryRequest, AcpiBatteryResponse};
 use embedded_services::relay::{MessageSerializationError, SerializableMessage};
 use serialport::SerialPort;
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use thermal_service_messages::{ThermalRequest, ThermalResponse};
-use time_alarm_service_messages::{
-    AcpiTimeAlarmRequest, AcpiTimeAlarmResponse, AcpiTimerId, AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds,
-    TimeAlarmDeviceCapabilities, TimerStatus,
+use thermal_service_relay::{ThermalRequest, ThermalResponse};
+use time_alarm_service_interface::{
+    AcpiTimerId, AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
 };
+use time_alarm_service_relay::{AcpiTimeAlarmRequest, AcpiTimeAlarmResponse};
 
 /// Errors produced by serial data source operations.
 #[derive(Debug)]
@@ -291,7 +292,7 @@ impl ThermalSource for Serial {
         let response = self.send(Destination::Thermal, request)?;
 
         if let ThermalResponse::ThermalGetTmpResponse { temperature } = response {
-            Ok(common::dk_to_c(temperature))
+            Ok(common::dk_to_c(temperature.0))
         } else {
             Err(Error::UnexpectedResponse)
         }
@@ -334,12 +335,12 @@ impl ThermalSource for Serial {
 
 impl BatterySource for Serial {
     fn get_bst(&self) -> Result<BstReturn, Self::Error> {
-        let request = AcpiBatteryRequest::BatteryGetBstRequest {
+        let request = AcpiBatteryRequest::GetBst {
             battery_id: BATTERY_INSTANCE,
         };
         let response = self.send(Destination::Battery, request)?;
 
-        if let AcpiBatteryResponse::BatteryGetBstResponse { bst } = response {
+        if let AcpiBatteryResponse::GetBst { bst } = response {
             Ok(bst)
         } else {
             Err(Error::UnexpectedResponse)
@@ -347,12 +348,12 @@ impl BatterySource for Serial {
     }
 
     fn get_bix(&self) -> Result<BixFixedStrings, Self::Error> {
-        let request = AcpiBatteryRequest::BatteryGetBixRequest {
+        let request = AcpiBatteryRequest::GetBix {
             battery_id: BATTERY_INSTANCE,
         };
         let response = self.send(Destination::Battery, request)?;
 
-        if let AcpiBatteryResponse::BatteryGetBixResponse { bix } = response {
+        if let AcpiBatteryResponse::GetBix { bix } = response {
             Ok(bix)
         } else {
             Err(Error::UnexpectedResponse)
@@ -360,13 +361,13 @@ impl BatterySource for Serial {
     }
 
     fn set_btp(&self, trip_point: u32) -> Result<(), Self::Error> {
-        let request = AcpiBatteryRequest::BatterySetBtpRequest {
+        let request = AcpiBatteryRequest::SetBtp {
             battery_id: BATTERY_INSTANCE,
             btp: Btp { trip_point },
         };
         let response = self.send(Destination::Battery, request)?;
 
-        if matches!(response, AcpiBatteryResponse::BatterySetBtpResponse {}) {
+        if matches!(response, AcpiBatteryResponse::SetBtp {}) {
             Ok(())
         } else {
             Err(Error::UnexpectedResponse)

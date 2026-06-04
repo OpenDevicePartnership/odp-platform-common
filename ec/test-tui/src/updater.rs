@@ -2,7 +2,7 @@ use std::sync::{Arc, RwLock, mpsc};
 use std::time::{Duration, Instant};
 
 use ec_test_lib::Threshold;
-use time_alarm_service_messages::AcpiTimerId;
+use time_alarm_service_interface::AcpiTimerId;
 use tracing::{debug, info, trace, warn};
 
 use crate::battery::{poll_bix, poll_bst};

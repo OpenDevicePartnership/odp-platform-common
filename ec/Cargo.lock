@@ -83,20 +83,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aquamarine"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f50776554130342de4836ba542aa85a4ddb361690d7e8df13774d7284c3d5c2"
-dependencies = [
- "include_dir",
- "itertools 0.10.5",
- "proc-macro-error2",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -127,28 +113,35 @@ dependencies = [
 ]
 
 [[package]]
-name = "battery-service-messages"
+name = "battery-service-interface"
 version = "0.1.0"
-source = "git+https://github.com/OpenDevicePartnership/embedded-services?branch=v0.2.0#5a0ed0d9b2ea8607c8fd45fb11b52ce4864f0808"
+source = "git+https://github.com/OpenDevicePartnership/embedded-services?branch=main#e9687677bcaea31ff9031f615b85b701f5da7db7"
 dependencies = [
  "embedded-batteries-async",
+]
+
+[[package]]
+name = "battery-service-relay"
+version = "0.1.0"
+source = "git+https://github.com/OpenDevicePartnership/embedded-services?branch=main#e9687677bcaea31ff9031f615b85b701f5da7db7"
+dependencies = [
+ "battery-service-interface",
  "embedded-services",
  "num_enum",
 ]
 
 [[package]]
-name = "bincode"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36eaf5d7b090263e8150820482d5d93cd964a81e4019913c972f4edcc6edb740"
+name = "bit-register"
+version = "0.1.0"
+source = "git+https://github.com/OpenDevicePartnership/odp-utilities?tag=v0.1.0#583015c08ad9855f310bdb25d5cf9abff77b5e08"
 dependencies = [
- "unty",
+ "num-traits",
 ]
 
 [[package]]
 name = "bit-register"
 version = "0.1.0"
-source = "git+https://github.com/OpenDevicePartnership/odp-utilities#583015c08ad9855f310bdb25d5cf9abff77b5e08"
+source = "git+https://github.com/OpenDevicePartnership/odp-utilities#ff4829bd16c6d9da609c59c98783b474ab9e3d23"
 dependencies = [
  "num-traits",
 ]
@@ -164,26 +157,6 @@ name = "bitfield"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f798d2d157e547aa99aab0967df39edd0b70307312b6f8bd2848e6abe40896e0"
-
-[[package]]
-name = "bitfield"
-version = "0.19.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21ba6517c6b0f2bf08be60e187ab64b038438f22dd755614d8fe4d4098c46419"
-dependencies = [
- "bitfield-macros",
-]
-
-[[package]]
-name = "bitfield-macros"
-version = "0.19.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f48d6ace212fdf1b45fd6b566bb40808415344642b76c3224c07c8df9da81e97"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
 
 [[package]]
 name = "bitfield-struct"
@@ -207,18 +180,6 @@ name = "bitflags"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
-
-[[package]]
-name = "bitvec"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bc2832c24239b0141d5674bb9174f9d68a8b5b3f2753311927c172ca46f7e9c"
-dependencies = [
- "funty",
- "radium",
- "tap",
- "wyz",
-]
 
 [[package]]
 name = "byteorder"
@@ -474,27 +435,30 @@ dependencies = [
 name = "ec-test-cli"
 version = "0.1.0"
 dependencies = [
- "battery-service-messages",
+ "battery-service-interface",
  "clap",
  "critical-section",
  "ec-test-lib",
  "ec-test-script",
- "time-alarm-service-messages",
+ "embassy-time",
+ "time-alarm-service-interface",
 ]
 
 [[package]]
 name = "ec-test-lib"
 version = "0.1.0"
 dependencies = [
- "battery-service-messages",
+ "battery-service-interface",
+ "battery-service-relay",
  "embedded-mcu-hal",
  "embedded-services",
  "num_enum",
  "scopeguard",
  "serialport",
  "smbus-pec",
- "thermal-service-messages",
- "time-alarm-service-messages",
+ "thermal-service-relay",
+ "time-alarm-service-interface",
+ "time-alarm-service-relay",
  "uuid",
  "windows 0.58.0",
 ]
@@ -503,28 +467,29 @@ dependencies = [
 name = "ec-test-script"
 version = "0.1.0"
 dependencies = [
- "battery-service-messages",
+ "battery-service-interface",
  "critical-section",
  "ec-test-lib",
- "time-alarm-service-messages",
+ "time-alarm-service-interface",
 ]
 
 [[package]]
 name = "ec-test-tui"
 version = "0.1.0"
 dependencies = [
- "battery-service-messages",
+ "battery-service-interface",
  "clap",
  "color-eyre",
  "critical-section",
  "crossterm",
  "ec-test-lib",
+ "embassy-time",
  "embedded-mcu-hal",
  "ratatui",
  "strum 0.27.2",
  "supports-unicode",
  "sysinfo",
- "time-alarm-service-messages",
+ "time-alarm-service-interface",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -538,6 +503,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
+name = "embassy-executor-timer-queue"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fc328bf943af66b80b98755db9106bf7e7471b0cf47dc8559cd9a6be504cc9c"
+
+[[package]]
 name = "embassy-futures"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -545,9 +516,9 @@ checksum = "dc2d050bdc5c21e0862a89256ed8029ae6c290a93aecefc73084b3002cdebb01"
 
 [[package]]
 name = "embassy-sync"
-version = "0.7.2"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73974a3edbd0bd286759b3d483540f0ebef705919a5f56f4fc7709066f71689b"
+checksum = "7bbd85cf5a5ae56bdf26f618364af642d1d0a4e245cdd75cd9aabda382f65a81"
 dependencies = [
  "cfg-if",
  "critical-section",
@@ -567,6 +538,7 @@ dependencies = [
  "critical-section",
  "document-features",
  "embassy-time-driver",
+ "embassy-time-queue-utils",
  "embedded-hal 0.2.7",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -580,6 +552,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ee71af1b3a0deaa53eaf2d39252f83504c853646e472400b763060389b9fcc9"
 dependencies = [
  "document-features",
+]
+
+[[package]]
+name = "embassy-time-queue-utils"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "168297bf80aaf114b3c9ad589bf38b01b3009b9af7f97cd18086c5bbf96f5693"
+dependencies = [
+ "embassy-executor-timer-queue",
+ "heapless",
 ]
 
 [[package]]
@@ -606,18 +588,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "embedded-cfu-protocol"
-version = "0.2.0"
-source = "git+https://github.com/OpenDevicePartnership/embedded-cfu#e0d776017cf34c902c9f2a2be0c75fe73a3a4dda"
-dependencies = [
- "embedded-io-async",
-]
-
-[[package]]
 name = "embedded-crc-macros"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f1c75747a43b086df1a87fb2a889590bc0725e0abf54bba6d0c4bf7bd9e762c"
+
+[[package]]
+name = "embedded-fans"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e5007eb97aabfe3606c0b02823b3120e861c748ed3560756aa4fd231ef9ebf0"
+
+[[package]]
+name = "embedded-fans-async"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bafd19dc3b6aaa5027856818e19ccbfe84ebfb094c8a0ecf84a20e75c3b8e959"
+dependencies = [
+ "embedded-fans",
+]
 
 [[package]]
 name = "embedded-hal"
@@ -646,65 +635,64 @@ dependencies = [
 
 [[package]]
 name = "embedded-io"
-version = "0.6.1"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
+checksum = "9eb1aa714776b75c7e67e1da744b81a129b3ff919c8712b5e1b32252c1f07cc7"
 
 [[package]]
 name = "embedded-io-async"
-version = "0.6.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ff09972d4073aa8c299395be75161d582e7629cd663171d62af73c8d50dba3f"
+checksum = "2564b9f813c544241430e147d8bc454815ef9ac998878d30cc3055449f7fd4c0"
 dependencies = [
  "embedded-io",
 ]
 
 [[package]]
 name = "embedded-mcu-hal"
-version = "0.1.0"
-source = "git+https://github.com/OpenDevicePartnership/embedded-mcu#6956ebdaf9d3725959dae2c57c2ab6baefae9330"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0563f27b8ea59eb57e2c5926db6ee311d0a24ab9912adf82b9f418cc9799b0ff"
 dependencies = [
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "num_enum",
+ "smbus-pec",
+]
+
+[[package]]
+name = "embedded-sensors-hal"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c703756bee31e7aaf55d8fb6dcf7337cfc231cfb4a3ad34b9df509846fd9001"
+dependencies = [
+ "paste",
+]
+
+[[package]]
+name = "embedded-sensors-hal-async"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51c524a78b2804eca0d9ec05154e51d9af948b40cd0a6bbcc4d5832ff7e47b5b"
+dependencies = [
+ "embedded-sensors-hal",
+ "paste",
 ]
 
 [[package]]
 name = "embedded-services"
 version = "0.1.0"
-source = "git+https://github.com/OpenDevicePartnership/embedded-services?branch=v0.2.0#5a0ed0d9b2ea8607c8fd45fb11b52ce4864f0808"
+source = "git+https://github.com/OpenDevicePartnership/embedded-services?branch=main#e9687677bcaea31ff9031f615b85b701f5da7db7"
 dependencies = [
  "bitfield 0.17.0",
- "bitflags 2.11.0",
- "bitvec",
- "cfg-if",
  "cortex-m",
  "critical-section",
- "document-features",
  "embassy-futures",
  "embassy-sync",
- "embassy-time",
- "embedded-cfu-protocol",
- "embedded-hal-async",
- "embedded-io",
- "embedded-io-async",
- "embedded-usb-pd",
- "heapless",
  "mctp-rs",
- "num_enum",
  "paste",
  "portable-atomic",
  "serde",
- "uuid",
-]
-
-[[package]]
-name = "embedded-usb-pd"
-version = "0.1.0"
-source = "git+https://github.com/OpenDevicePartnership/embedded-usb-pd#1a8e79d3a2ac0d2837a34b045087cf0863146f7d"
-dependencies = [
- "aquamarine",
- "bincode",
- "bitfield 0.19.4",
- "embedded-hal-async",
 ]
 
 [[package]]
@@ -726,9 +714,9 @@ dependencies = [
 [[package]]
 name = "espi-device"
 version = "0.1.0"
-source = "git+https://github.com/OpenDevicePartnership/haf-ec-service#79e24eca20cfe0d32b491fd4d0562bc87aa358ca"
+source = "git+https://github.com/OpenDevicePartnership/haf-ec-service#6776d952bbe4e19a175b0b1f0c75ffe38d5b83cc"
 dependencies = [
- "bit-register",
+ "bit-register 0.1.0 (git+https://github.com/OpenDevicePartnership/odp-utilities?tag=v0.1.0)",
  "bitflags 2.11.0",
  "num-traits",
  "num_enum",
@@ -751,12 +739,6 @@ name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
-
-[[package]]
-name = "funty"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
 name = "futures-core"
@@ -798,9 +780,9 @@ dependencies = [
 
 [[package]]
 name = "heapless"
-version = "0.8.0"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
+checksum = "25ba4bd83f9415b58b4ed8dc5714c76e626a105be4646c02630ad730ad3b5aa4"
 dependencies = [
  "hash32",
  "stable_deref_trait",
@@ -817,25 +799,6 @@ name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
-
-[[package]]
-name = "include_dir"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "923d117408f1e49d914f1a379a309cffe4f18c05cf4e3d12e613a15fc81bd0dd"
-dependencies = [
- "include_dir_macros",
-]
-
-[[package]]
-name = "include_dir_macros"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cab85a7ed0bd5f0e76d93846e0147172bed2e2d3f859bcc33a8d9699cad1a75"
-dependencies = [
- "proc-macro2",
- "quote",
-]
 
 [[package]]
 name = "indenter"
@@ -880,15 +843,6 @@ name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
-
-[[package]]
-name = "itertools"
-version = "0.10.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
-dependencies = [
- "either",
-]
 
 [[package]]
 name = "itertools"
@@ -994,9 +948,9 @@ dependencies = [
 [[package]]
 name = "mctp-rs"
 version = "0.1.0"
-source = "git+https://github.com/dymk/mctp-rs#3d941ba5205ca7781bf37e3dc7c5dfdc99a082d6"
+source = "git+https://github.com/OpenDevicePartnership/embedded-services?branch=main#e9687677bcaea31ff9031f615b85b701f5da7db7"
 dependencies = [
- "bit-register",
+ "bit-register 0.1.0 (git+https://github.com/OpenDevicePartnership/odp-utilities)",
  "espi-device",
  "num_enum",
  "smbus-pec",
@@ -1191,27 +1145,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 
 [[package]]
-name = "proc-macro-error-attr2"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5"
-dependencies = [
- "proc-macro2",
- "quote",
-]
-
-[[package]]
-name = "proc-macro-error2"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11ec05c52be0a07b08061f7dd003e7d7092e0472bc731b4af7bb1ef876109802"
-dependencies = [
- "proc-macro-error-attr2",
- "proc-macro2",
- "quote",
-]
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1230,12 +1163,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "radium"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
-
-[[package]]
 name = "ratatui"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1247,7 +1174,7 @@ dependencies = [
  "crossterm",
  "indoc",
  "instability",
- "itertools 0.13.0",
+ "itertools",
  "lru",
  "paste",
  "strum 0.26.3",
@@ -1572,18 +1499,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "tap"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+name = "thermal-service-interface"
+version = "0.1.0"
+source = "git+https://github.com/OpenDevicePartnership/embedded-services?branch=main#e9687677bcaea31ff9031f615b85b701f5da7db7"
+dependencies = [
+ "embassy-time",
+ "embedded-fans-async",
+ "embedded-sensors-hal-async",
+]
 
 [[package]]
-name = "thermal-service-messages"
+name = "thermal-service-relay"
 version = "0.1.0"
-source = "git+https://github.com/OpenDevicePartnership/embedded-services?branch=v0.2.0#5a0ed0d9b2ea8607c8fd45fb11b52ce4864f0808"
+source = "git+https://github.com/OpenDevicePartnership/embedded-services?branch=main#e9687677bcaea31ff9031f615b85b701f5da7db7"
 dependencies = [
  "embedded-services",
  "num_enum",
+ "thermal-service-interface",
  "uuid",
 ]
 
@@ -1632,15 +1564,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "time-alarm-service-messages"
+name = "time-alarm-service-interface"
 version = "0.1.0"
-source = "git+https://github.com/OpenDevicePartnership/embedded-services?branch=v0.2.0#5a0ed0d9b2ea8607c8fd45fb11b52ce4864f0808"
+source = "git+https://github.com/OpenDevicePartnership/embedded-services?branch=main#e9687677bcaea31ff9031f615b85b701f5da7db7"
 dependencies = [
  "bitfield 0.17.0",
  "embedded-mcu-hal",
- "embedded-services",
  "num_enum",
  "zerocopy",
+]
+
+[[package]]
+name = "time-alarm-service-relay"
+version = "0.1.0"
+source = "git+https://github.com/OpenDevicePartnership/embedded-services?branch=main#e9687677bcaea31ff9031f615b85b701f5da7db7"
+dependencies = [
+ "embedded-mcu-hal",
+ "embedded-services",
+ "num_enum",
+ "time-alarm-service-interface",
 ]
 
 [[package]]
@@ -1789,7 +1731,7 @@ version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3644627a5af5fa321c95b9b235a72fd24cd29c648c2c379431e6628655627bf"
 dependencies = [
- "itertools 0.13.0",
+ "itertools",
  "unicode-segmentation",
  "unicode-width 0.1.14",
 ]
@@ -1805,12 +1747,6 @@ name = "unicode-width"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fc81956842c57dac11422a97c3b8195a1ff727f06e85c84ed2e8aa277c9a0fd"
-
-[[package]]
-name = "unty"
-version = "0.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
 
 [[package]]
 name = "utf8parse"
@@ -2092,15 +2028,6 @@ name = "windows_x86_64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
-
-[[package]]
-name = "wyz"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed"
-dependencies = [
- "tap",
-]
 
 [[package]]
 name = "zerocopy"

@@ -158,7 +158,7 @@ pub enum TimerIdArg {
     Dc,
 }
 
-impl From<TimerIdArg> for time_alarm_service_messages::AcpiTimerId {
+impl From<TimerIdArg> for time_alarm_service_interface::AcpiTimerId {
     fn from(arg: TimerIdArg) -> Self {
         match arg {
             TimerIdArg::Ac => Self::AcPower,

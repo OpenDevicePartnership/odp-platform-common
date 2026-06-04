@@ -14,8 +14,8 @@ rust-version.workspace = true
 
 [dependencies]
 ec-test-lib = { path = "../test-lib" }
-time-alarm-service-messages.workspace = true
-battery-service-messages.workspace = true
+time-alarm-service-interface.workspace = true
+battery-service-interface.workspace = true
 
 [dev-dependencies]
 critical-section.workspace = true

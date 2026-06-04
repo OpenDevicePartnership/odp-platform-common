@@ -13,9 +13,9 @@ use crate::parser::{Call, Method, Operand, Stmt, Threshold, Verb};
 use crate::runner::{Outcome, Runner};
 use crate::value::Value;
 use crate::verbs;
-use battery_service_messages::{BixFixedStrings, BstReturn};
+use battery_service_interface::{BixFixedStrings, BstReturn};
 use ec_test_lib::{BatterySource, RtcSource, Source, ThermalSource};
-use time_alarm_service_messages::{
+use time_alarm_service_interface::{
     AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
 };
 
@@ -237,7 +237,7 @@ fn wake_status_to_value(s: TimerStatus) -> Value {
 }
 
 fn timestamp_to_value(t: AcpiTimestamp) -> Value {
-    let unix = t.datetime.to_unix_time_seconds() as f64;
+    let unix = t.datetime.unix_timestamp() as f64;
     Value::Struct(vec![
         (
             "datetime".into(),

@@ -8,6 +8,10 @@ authors = ["Phil Weber <philweber@microsoft.com>"]
 repository.workspace = true
 rust-version.workspace = true
 
+# Needed to link embassy-time symbols
+[package.metadata.cargo-machete]
+ignored = ["embassy-time"]
+
 [dependencies]
 # Async runtime and observability
 tokio = { version = "1", features = [
@@ -31,13 +35,15 @@ strum = { version = "0.27", default-features = false, features = ["derive"] }
 tui-input = "0.14.0"
 
 # Data type dependencies used by TUI widgets
-time-alarm-service-messages.workspace = true
+time-alarm-service-interface.workspace = true
 embedded-mcu-hal.workspace = true
-battery-service-messages.workspace = true
+battery-service-interface.workspace = true
 critical-section.workspace = true
 
 # EC transport library
 ec-test-lib = { path = "../test-lib" }
+
+embassy-time.workspace = true
 
 [lints]
 workspace = true

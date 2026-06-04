@@ -8,7 +8,7 @@
 //
 // They have been upstreamed, but are currently not published to crates.io.
 
-pub struct DebugBstReturn<'a>(pub &'a battery_service_messages::BstReturn);
+pub struct DebugBstReturn<'a>(pub &'a battery_service_interface::BstReturn);
 
 impl std::fmt::Debug for DebugBstReturn<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -21,7 +21,7 @@ impl std::fmt::Debug for DebugBstReturn<'_> {
     }
 }
 
-pub struct DebugBixFixedStrings<'a>(pub &'a battery_service_messages::BixFixedStrings);
+pub struct DebugBixFixedStrings<'a>(pub &'a battery_service_interface::BixFixedStrings);
 
 fn str_from_bytes(bytes: &[u8]) -> &str {
     core::ffi::CStr::from_bytes_until_nul(bytes)

@@ -1,7 +1,7 @@
 // Multiple source features may be enabled simultaneously; the binary selects one at runtime.
 
-use battery_service_messages::{BixFixedStrings, BstReturn};
-use time_alarm_service_messages::{
+use battery_service_interface::{BixFixedStrings, BstReturn};
+use time_alarm_service_interface::{
     AcpiTimerId, AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
 };
 
