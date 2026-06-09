@@ -41,6 +41,8 @@ use patina::{
 use patina_boot::{BootOrchestrator, helpers};
 use r_efi::efi;
 
+use crate::bp_recovery;
+
 fn interleave_connect_and_dispatch<B: BootServices, D: DxeDispatch + ?Sized>(
     boot_services: &B,
     dxe_services: &D,
@@ -102,6 +104,21 @@ impl BootOrchestrator for SreBootManager {
 
         if let Err(e) = helpers::discover_console_devices(boot_services, runtime_services) {
             log::error!("discover_console_devices failed: {:?}", e);
+        }
+
+        // SRE entry: if Vol-Up + Power was held at power-on, read the
+        // recovery payload from NVMe BP1 and chainload it. On success the
+        // chainload transfers control to the recovery image and never
+        // returns. On failure, fall through to the normal boot path.
+        if bp_recovery::detect_sre_hotkey(boot_services) {
+            log::info!("SRE hotkey detected; entering BP recovery flow");
+            if let Err(e) = helpers::signal_ready_to_boot(boot_services) {
+                log::error!("signal_ready_to_boot (SRE) failed: {:?}", e);
+            }
+            match bp_recovery::run_sre_flow(boot_services, image_handle) {
+                Ok(()) => log::warn!("SRE recovery image returned control; falling through to normal boot"),
+                Err(e) => log::warn!("SRE recovery flow failed ({:?}); falling through to normal boot", e),
+            }
         }
 
         // TODO(odp-platform-common#61): boot-partition write-lock helper isn't in

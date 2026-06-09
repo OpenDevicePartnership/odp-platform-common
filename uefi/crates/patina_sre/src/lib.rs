@@ -15,6 +15,7 @@
 
 extern crate alloc;
 
+mod bp_recovery;
 mod sre_boot_manager;
 
 pub use sre_boot_manager::SreBootManager;
