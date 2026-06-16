@@ -1,18 +1,12 @@
 //! SRE recovery boot path: read the recovery payload from NVMe Boot
-//! Partition 1 via Get Log Page LID=0x15, register it as a RAM disk via
-//! EFI_RAM_DISK_PROTOCOL, and chainload \EFI\Boot\bootx64.efi from the
-//! resulting FAT volume.
+//! Partition 1 via Get Log Page LID=0x15, install a synthesized
+//! EFI_BLOCK_IO_PROTOCOL handle backed by the in-memory buffer, and
+//! chainload \EFI\Boot\bootx64.efi from the resulting FAT volume.
 //!
-//! Hotkey detection uses MS_BUTTON_SERVICES_PROTOCOL (Surface platforms
-//! publish this via the SAM button driver). The Vol-Up + Power chord at
-//! power-on selects the SRE path; absence falls through to the normal
-//! boot orchestration.
-//!
-//! This module inlines FFI for three protocols rather than depending on
-//! helpers that may not be published yet:
-//!   - EFI_NVM_EXPRESS_PASS_THRU_PROTOCOL (for Identify + Get Log Page)
-//!   - EFI_RAM_DISK_PROTOCOL (UEFI 2.5+)
-//!   - MS_BUTTON_SERVICES_PROTOCOL (Surface/Microsoft)
+//! This module inlines FFI for EFI_NVM_EXPRESS_PASS_THRU_PROTOCOL (for
+//! Identify + Get Log Page) and EFI_BLOCK_IO_PROTOCOL (the RAM disk
+//! interface synthesized in-Rust) rather than depending on helpers that
+//! may not be published yet.
 //!
 //! ## License
 //!
@@ -24,7 +18,7 @@ extern crate alloc;
 
 use alloc::vec;
 use alloc::vec::Vec;
-use core::{ffi::c_void, mem::MaybeUninit, ptr};
+use core::{ffi::c_void, ptr};
 
 use patina::{boot_services::BootServices, error::EfiError};
 use patina_boot::helpers;
@@ -55,8 +49,14 @@ mod nvme_pass_thru {
     use core::ffi::c_void;
     use r_efi::efi;
 
-    pub const PROTOCOL_GUID: efi::Guid =
-        efi::Guid::from_fields(0x52c78312, 0x8edc, 0x4233, 0x98, 0xf2, &[0x1a, 0x1a, 0xa5, 0xe3, 0x88, 0xa5]);
+    pub const PROTOCOL_GUID: efi::Guid = efi::Guid::from_fields(
+        0x52c78312,
+        0x8edc,
+        0x4233,
+        0x98,
+        0xf2,
+        &[0x1a, 0x1a, 0xa5, 0xe3, 0x88, 0xa5],
+    );
 
     pub const OPCODE_GET_LOG_PAGE: u8 = 0x02;
     pub const OPCODE_IDENTIFY: u8 = 0x06;
@@ -132,108 +132,17 @@ mod nvme_pass_thru {
     }
 }
 
-/// EFI_RAM_DISK_PROTOCOL FFI (UEFI 2.5+).
-mod ram_disk {
-    use core::ffi::c_void;
-    use r_efi::efi;
-
-    /// EFI_RAM_DISK_PROTOCOL_GUID
-    pub const PROTOCOL_GUID: efi::Guid =
-        efi::Guid::from_fields(0xab38a0df, 0x6873, 0x44a9, 0x87, 0xe6, &[0xd4, 0xeb, 0x56, 0x14, 0x86, 0x49]);
-
-    /// EFI_VIRTUAL_DISK_GUID — generic virtual disk type used for raw RAM disks.
-    pub const VIRTUAL_DISK_GUID: efi::Guid =
-        efi::Guid::from_fields(0x77ab535a, 0x45fc, 0x624b, 0x55, 0x60, &[0xf7, 0xb2, 0x81, 0xd1, 0xf9, 0x6e]);
-
-    pub type RegisterFn = extern "efiapi" fn(
-        ram_disk_base: u64,
-        ram_disk_size: u64,
-        ram_disk_type: *const efi::Guid,
-        parent_device_path: *const c_void,
-        device_path: *mut *const c_void,
-    ) -> efi::Status;
-
-    pub type UnregisterFn = extern "efiapi" fn(device_path: *const c_void) -> efi::Status;
-
-    #[repr(C)]
-    pub struct Protocol {
-        pub register: RegisterFn,
-        pub unregister: UnregisterFn,
-    }
-}
-
-/// MS_BUTTON_SERVICES_PROTOCOL FFI (Surface platform button service).
-mod button_services {
-    use core::ffi::c_void;
-    use r_efi::efi;
-
-    /// MS_BUTTON_SERVICES_PROTOCOL_GUID
-    /// {7E057B73-A18D-4B19-86F3-30C5A6F167CE}
-    pub const PROTOCOL_GUID: efi::Guid =
-        efi::Guid::from_fields(0x7e057b73, 0xa18d, 0x4b19, 0x86, 0xf3, &[0x30, 0xc5, 0xa6, 0xf1, 0x67, 0xce]);
-
-    pub type ButtonCheckFn =
-        extern "efiapi" fn(this: *mut Protocol, button_state: *mut efi::Boolean) -> efi::Status;
-    pub type ClearStateFn = extern "efiapi" fn(this: *mut Protocol) -> efi::Status;
-
-    #[repr(C)]
-    pub struct Protocol {
-        pub pre_boot_volume_up_check: ButtonCheckFn,
-        pub pre_boot_volume_down_check: ButtonCheckFn,
-        pub pre_boot_clear_state: ClearStateFn,
-        // Surface adds more entries; we only need these three.
-        pub _reserved: *mut c_void,
-    }
-}
-
-/// Returns `true` if the Vol-Up + Power chord was registered at power-on.
-///
-/// Reads via MS_BUTTON_SERVICES_PROTOCOL. Returns `false` if the protocol is
-/// absent (platform doesn't publish a SAM button service).
-pub fn detect_sre_hotkey<B: BootServices>(boot_services: &B) -> bool {
-    // SAFETY: dereferencing the returned interface only via raw pointer calls below.
-    let protocol = match unsafe {
-        boot_services.locate_protocol_unchecked(&button_services::PROTOCOL_GUID, ptr::null_mut())
-    } {
-        Ok(p) => p as *mut button_services::Protocol,
-        Err(_) => {
-            log::info!("detect_sre_hotkey: MS_BUTTON_SERVICES_PROTOCOL not present");
-            return false;
-        }
-    };
-
-    // SAFETY: protocol pointer returned by locate_protocol for the button service GUID.
-    unsafe { detect_sre_hotkey_via_protocol(protocol) }
-}
-
-/// Inner detect_sre_hotkey that takes a raw protocol pointer. Separated so
-/// tests can pass a synthetic protocol with controlled callbacks.
-///
-/// # Safety
-///
-/// `protocol` must be a valid, non-null pointer to an
-/// `MS_BUTTON_SERVICES_PROTOCOL` instance owned by the platform.
-unsafe fn detect_sre_hotkey_via_protocol(protocol: *mut button_services::Protocol) -> bool {
-    let mut state: efi::Boolean = efi::Boolean::FALSE;
-    // SAFETY: caller guarantees protocol pointer is valid.
-    let status = unsafe { ((*protocol).pre_boot_volume_up_check)(protocol, &mut state) };
-
-    // Clear so other consumers don't double-act on the same press.
-    // SAFETY: caller guarantees protocol pointer is valid.
-    let _ = unsafe { ((*protocol).pre_boot_clear_state)(protocol) };
-
-    status == efi::Status::SUCCESS && bool::from(state)
-}
-
 /// Probe controller MDTS via Identify Controller (CNS=0x01); derive the
 /// largest LID 0x15 chunk size we'll use. Falls back to `READ_CHUNK_DEFAULT`
 /// on probe failure. Clamps to `[READ_CHUNK_MIN, READ_CHUNK_MAX]`.
 fn probe_max_transfer(passthru: *mut nvme_pass_thru::Protocol) -> usize {
     let mut buf = vec![0u8; nvme_pass_thru::IDENTIFY_BUFFER_BYTES];
-    let mut cmd = nvme_pass_thru::Command::default();
-    cmd.cdw0 = nvme_pass_thru::OPCODE_IDENTIFY as u32;
-    cmd.cdw10 = nvme_pass_thru::IDENTIFY_CNS_CONTROLLER;
-    cmd.flags = nvme_pass_thru::CMD_FLAG_CDW10_VALID;
+    let mut cmd = nvme_pass_thru::Command {
+        cdw0: nvme_pass_thru::OPCODE_IDENTIFY as u32,
+        cdw10: nvme_pass_thru::IDENTIFY_CNS_CONTROLLER,
+        flags: nvme_pass_thru::CMD_FLAG_CDW10_VALID,
+        ..Default::default()
+    };
 
     let mut completion = nvme_pass_thru::Completion::default();
 
@@ -252,7 +161,11 @@ fn probe_max_transfer(passthru: *mut nvme_pass_thru::Protocol) -> usize {
     // instance owned by the controller; buffers in `packet` live for the call.
     let status = unsafe { ((*passthru).pass_thru)(passthru, 0, &mut packet, ptr::null_mut()) };
     if status != efi::Status::SUCCESS {
-        log::warn!("Identify Controller failed: {:?}; falling back to {} KiB chunk", status, READ_CHUNK_DEFAULT / 1024);
+        log::warn!(
+            "Identify Controller failed: {:?}; falling back to {} KiB chunk",
+            status,
+            READ_CHUNK_DEFAULT / 1024
+        );
         return READ_CHUNK_DEFAULT;
     }
 
@@ -283,16 +196,18 @@ fn read_bp_via_log_page(
         let lpol = LID_BP_HEADER_BYTES + bp_off;
 
         let numd = ((read_bytes / 4) - 1) as u32;
-        let mut cmd = nvme_pass_thru::Command::default();
-        cmd.cdw0 = nvme_pass_thru::OPCODE_GET_LOG_PAGE as u32;
-        cmd.cdw10 = ((numd & 0xFFFF) << 16) | (((bp_id as u32) & 0x7F) << 8) | nvme_pass_thru::LID_BOOT_PARTITION;
-        cmd.cdw11 = (numd >> 16) & 0xFFFF;
-        cmd.cdw12 = (lpol & 0xFFFFFFFF) as u32;
-        cmd.cdw13 = ((lpol >> 32) & 0xFFFFFFFF) as u32;
-        cmd.flags = nvme_pass_thru::CMD_FLAG_CDW10_VALID
-            | nvme_pass_thru::CMD_FLAG_CDW11_VALID
-            | nvme_pass_thru::CMD_FLAG_CDW12_VALID
-            | nvme_pass_thru::CMD_FLAG_CDW13_VALID;
+        let mut cmd = nvme_pass_thru::Command {
+            cdw0: nvme_pass_thru::OPCODE_GET_LOG_PAGE as u32,
+            cdw10: ((numd & 0xFFFF) << 16) | (((bp_id as u32) & 0x7F) << 8) | nvme_pass_thru::LID_BOOT_PARTITION,
+            cdw11: (numd >> 16) & 0xFFFF,
+            cdw12: (lpol & 0xFFFFFFFF) as u32,
+            cdw13: ((lpol >> 32) & 0xFFFFFFFF) as u32,
+            flags: nvme_pass_thru::CMD_FLAG_CDW10_VALID
+                | nvme_pass_thru::CMD_FLAG_CDW11_VALID
+                | nvme_pass_thru::CMD_FLAG_CDW12_VALID
+                | nvme_pass_thru::CMD_FLAG_CDW13_VALID,
+            ..Default::default()
+        };
 
         let mut completion = nvme_pass_thru::Completion::default();
 
@@ -313,7 +228,9 @@ fn read_bp_via_log_page(
         if status != efi::Status::SUCCESS {
             log::error!(
                 "Get Log Page LID=0x15 at LPOL={} ({} bytes) failed: {:?}",
-                lpol, read_bytes, status
+                lpol,
+                read_bytes,
+                status
             );
             return Err(EfiError::from(status));
         }
@@ -327,59 +244,242 @@ fn read_bp_via_log_page(
     Ok(())
 }
 
-/// Register `dram` (a contiguous allocation of `BPSIZE_BYTES` holding the
-/// BP image) as a RAM disk and return the protocol-issued device path.
-fn register_ram_disk<B: BootServices>(
-    boot_services: &B,
-    dram: &[u8],
-) -> Result<*const c_void, EfiError> {
-    // SAFETY: dereferencing the returned interface only via raw pointer calls below.
-    let protocol = unsafe {
-        boot_services.locate_protocol_unchecked(&ram_disk::PROTOCOL_GUID, ptr::null_mut())
-    }
-    .map_err(|e| {
-        log::error!("LocateProtocol(RamDisk): {:?} (platform missing RamDiskDxe?)", e);
-        EfiError::from(e)
-    })? as *mut ram_disk::Protocol;
+/// EFI_BLOCK_IO_PROTOCOL FFI — we install this directly on a synthesized
+/// handle (no `RamDiskDxe` dependency) so `FatDxe` can bind to the FAT
+/// volume in BP1 without depending on the EDK2 `MdeModulePkg` RAM disk
+/// producer (which has a `[Depex]` on HII Database/Config Routing that
+/// alternate dispatchers like Patina don't reliably satisfy).
+mod block_io {
+    use core::ffi::c_void;
+    use r_efi::efi;
 
-    // SAFETY: protocol non-null; dram lives for the duration of this boot.
-    unsafe { register_ram_disk_via_protocol(protocol, dram) }
+    /// EFI_BLOCK_IO_PROTOCOL_GUID. `static` (not `const`) so that
+    /// `install_protocol_interface_unchecked` can borrow a `&'static`.
+    pub static PROTOCOL_GUID: efi::Guid = efi::Guid::from_fields(
+        0x964e5b21,
+        0x6459,
+        0x11d2,
+        0x8e,
+        0x39,
+        &[0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b],
+    );
+
+    pub const REVISION: u64 = 0x00010000;
+
+    #[repr(C)]
+    pub struct Media {
+        pub media_id: u32,
+        pub removable_media: efi::Boolean,
+        pub media_present: efi::Boolean,
+        pub logical_partition: efi::Boolean,
+        pub read_only: efi::Boolean,
+        pub write_caching: efi::Boolean,
+        pub block_size: u32,
+        pub io_align: u32,
+        pub last_block: u64,
+    }
+
+    pub type ResetFn = extern "efiapi" fn(this: *mut Protocol, extended_verification: efi::Boolean) -> efi::Status;
+    pub type ReadFn = extern "efiapi" fn(
+        this: *mut Protocol,
+        media_id: u32,
+        lba: u64,
+        buffer_size: usize,
+        buffer: *mut c_void,
+    ) -> efi::Status;
+    pub type WriteFn = extern "efiapi" fn(
+        this: *mut Protocol,
+        media_id: u32,
+        lba: u64,
+        buffer_size: usize,
+        buffer: *const c_void,
+    ) -> efi::Status;
+    pub type FlushFn = extern "efiapi" fn(this: *mut Protocol) -> efi::Status;
+
+    #[repr(C)]
+    pub struct Protocol {
+        pub revision: u64,
+        pub media: *mut Media,
+        pub reset: ResetFn,
+        pub read_blocks: ReadFn,
+        pub write_blocks: WriteFn,
+        pub flush_blocks: FlushFn,
+    }
 }
 
-/// Inner register_ram_disk that takes a raw protocol pointer. Separated so
-/// tests can pass a synthetic protocol whose register callback captures the
-/// arguments.
-///
-/// # Safety
-///
-/// `protocol` must be a valid, non-null pointer to an `EFI_RAM_DISK_PROTOCOL`
-/// instance, and `dram` must remain live until the chainloaded OS takes
-/// ownership at ExitBootServices.
-unsafe fn register_ram_disk_via_protocol(
-    protocol: *mut ram_disk::Protocol,
-    dram: &[u8],
-) -> Result<*const c_void, EfiError> {
-    let mut new_dp: *const c_void = ptr::null();
-    // SAFETY: caller guarantees protocol pointer is valid.
-    let status = unsafe {
-        ((*protocol).register)(
-            dram.as_ptr() as u64,
-            dram.len() as u64,
-            &ram_disk::VIRTUAL_DISK_GUID,
-            ptr::null(),
-            &mut new_dp,
-        )
-    };
-    if status != efi::Status::SUCCESS {
-        log::error!("RamDisk->Register: {:?}", status);
-        return Err(EfiError::from(status));
+/// Block-size used when exposing the BP1 buffer as block media. 512 is the
+/// universal lowest common denominator and what `BuildBpFatImage.ps1`
+/// formats against.
+const RAM_DISK_BLOCK_SIZE: u32 = 512;
+
+/// Synthetic backing struct for our `EFI_BLOCK_IO_PROTOCOL` install. The
+/// `protocol` field must come first and have identical layout to
+/// `block_io::Protocol` so a `*mut block_io::Protocol` callback receiver
+/// can be cast back to `*mut RamDiskBlockIo` to reach the extension
+/// fields (buffer pointer/size, owned `Media`).
+#[repr(C)]
+struct RamDiskBlockIo {
+    protocol: block_io::Protocol,
+    media: block_io::Media,
+    buffer_ptr: *const u8,
+    buffer_size: u64,
+}
+
+extern "efiapi" fn ram_disk_reset(_this: *mut block_io::Protocol, _ext: efi::Boolean) -> efi::Status {
+    efi::Status::SUCCESS
+}
+
+extern "efiapi" fn ram_disk_read_blocks(
+    this: *mut block_io::Protocol,
+    media_id: u32,
+    lba: u64,
+    buffer_size: usize,
+    buffer: *mut core::ffi::c_void,
+) -> efi::Status {
+    if this.is_null() || buffer.is_null() {
+        return efi::Status::INVALID_PARAMETER;
     }
-    log::info!("RAM disk registered ({} MiB at {:p})", dram.len() / (1024 * 1024), dram.as_ptr());
-    Ok(new_dp)
+    // SAFETY: `this` was installed by `register_ram_disk` as a pointer to a
+    // leaked `RamDiskBlockIo` whose first field is `protocol`. We cast back
+    // to access the extension fields.
+    let state = unsafe { &*(this as *const RamDiskBlockIo) };
+    if media_id != state.media.media_id {
+        return efi::Status::MEDIA_CHANGED;
+    }
+    let offset = lba.saturating_mul(state.media.block_size as u64);
+    let end = offset.saturating_add(buffer_size as u64);
+    if end > state.buffer_size {
+        return efi::Status::INVALID_PARAMETER;
+    }
+    if !buffer_size.is_multiple_of(state.media.block_size as usize) {
+        return efi::Status::BAD_BUFFER_SIZE;
+    }
+    // SAFETY: bounds checked above; src is the backing buffer (live for the
+    // boot), dst is caller-supplied and non-null.
+    unsafe {
+        core::ptr::copy_nonoverlapping(state.buffer_ptr.add(offset as usize), buffer as *mut u8, buffer_size);
+    }
+    efi::Status::SUCCESS
+}
+
+extern "efiapi" fn ram_disk_write_blocks(
+    _this: *mut block_io::Protocol,
+    _media_id: u32,
+    _lba: u64,
+    _buffer_size: usize,
+    _buffer: *const core::ffi::c_void,
+) -> efi::Status {
+    efi::Status::WRITE_PROTECTED
+}
+
+extern "efiapi" fn ram_disk_flush_blocks(_this: *mut block_io::Protocol) -> efi::Status {
+    efi::Status::SUCCESS
+}
+
+/// Expose `dram` as a Block IO device on a synthesized handle so the
+/// rest of UEFI (PartitionDxe / FatDxe) can bind to it without needing
+/// `MdeModulePkg`'s `RamDiskDxe` (which depexes on HII and doesn't
+/// reliably install under Patina-style dispatchers). Returns the device
+/// path installed on the synthesized handle so the chainload step can
+/// `locate_device_path` it and `LoadImage` from the FAT volume that
+/// `FatDxe` will bind on top.
+fn register_ram_disk<B: BootServices>(boot_services: &B, dram: &[u8]) -> Result<*const c_void, EfiError> {
+    // Allocate state on the heap and leak it so the install survives this
+    // function return. The buffer + state must outlive the firmware's use of
+    // the protocol; for this boot they live until ExitBootServices.
+    let mut state = alloc::boxed::Box::new(RamDiskBlockIo {
+        protocol: block_io::Protocol {
+            revision: block_io::REVISION,
+            media: ptr::null_mut(),
+            reset: ram_disk_reset,
+            read_blocks: ram_disk_read_blocks,
+            write_blocks: ram_disk_write_blocks,
+            flush_blocks: ram_disk_flush_blocks,
+        },
+        media: block_io::Media {
+            media_id: 0,
+            removable_media: efi::Boolean::FALSE,
+            media_present: efi::Boolean::TRUE,
+            // LogicalPartition=TRUE so FatDxe binds directly to our BlockIo
+            // (BP1 holds a raw FAT volume, not a partition table).
+            logical_partition: efi::Boolean::TRUE,
+            read_only: efi::Boolean::TRUE,
+            write_caching: efi::Boolean::FALSE,
+            block_size: RAM_DISK_BLOCK_SIZE,
+            io_align: 0,
+            last_block: (dram.len() as u64 / RAM_DISK_BLOCK_SIZE as u64).saturating_sub(1),
+        },
+        buffer_ptr: dram.as_ptr(),
+        buffer_size: dram.len() as u64,
+    });
+    // Wire the media pointer to the owned Media field after the Box exists
+    // (we need the final heap address).
+    state.protocol.media = &mut state.media as *mut block_io::Media;
+    let state_ptr: *mut RamDiskBlockIo = alloc::boxed::Box::into_raw(state);
+
+    // Build a synthetic device path = Media/Vendor node + EndEntire.
+    // Vendor GUID is arbitrary but unique to this RAM disk install so
+    // callers can distinguish it from any other Block IO device.
+    let dp_bytes: Vec<u8> = vec![
+        // Media Vendor node: type=4, subtype=3, length=20 (4 header + 16 GUID)
+        0x04, 0x03, 0x14, 0x00, // Vendor GUID 5d0b1c7e-8a2f-4e5c-9d3a-7b8e9f1c2d4a (byte-wise)
+        0x7e, 0x1c, 0x0b, 0x5d, 0x2f, 0x8a, 0x5c, 0x4e, 0x9d, 0x3a, 0x7b, 0x8e, 0x9f, 0x1c, 0x2d, 0x4a,
+        // EndEntire node
+        0x7f, 0xff, 0x04, 0x00,
+    ];
+    let leaked_dp: &'static mut [u8] = Vec::leak(dp_bytes);
+    let dp_ptr = leaked_dp.as_mut_ptr() as *mut c_void;
+
+    // Install Block IO first (creates the handle), then add the device path
+    // to the same handle.
+    // SAFETY: state_ptr points at a leaked RamDiskBlockIo whose first field
+    // is the standard Block IO protocol layout. The protocol struct lives
+    // for the rest of this boot.
+    let handle = unsafe {
+        boot_services.install_protocol_interface_unchecked(None, &block_io::PROTOCOL_GUID, state_ptr as *mut c_void)
+    }
+    .map_err(|s| {
+        log::error!("InstallProtocolInterface(BlockIo): {:?}", s);
+        EfiError::from(s)
+    })?;
+
+    // SAFETY: handle returned by install above; device path bytes are leaked
+    // and well-formed (Vendor node + End).
+    unsafe {
+        boot_services.install_protocol_interface_unchecked(
+            Some(handle),
+            &efi::protocols::device_path::PROTOCOL_GUID,
+            dp_ptr,
+        )
+    }
+    .map_err(|s| {
+        log::error!("InstallProtocolInterface(DevicePath): {:?}", s);
+        EfiError::from(s)
+    })?;
+
+    log::info!(
+        "RAM disk Block IO installed on synthesized handle ({} MiB)",
+        dram.len() / (1024 * 1024)
+    );
+
+    // Recursive connect so PartitionDxe + FatDxe (or just FatDxe directly
+    // since LogicalPartition=TRUE) bind. After this, SFS should be on the
+    // same handle so the existing chainload_from_ramdisk path can find it
+    // via locate_device_path.
+    // SAFETY: handle is valid; empty driver list + null remaining_dp +
+    // recursive=true is the standard "let the dispatcher figure it out".
+    if let Err(s) = unsafe { boot_services.connect_controller(handle, Vec::new(), None, true) } {
+        log::warn!(
+            "ConnectController(RamDiskHandle): {:?} (continuing; SFS may still be bound)",
+            s
+        );
+    }
+
+    Ok(dp_ptr as *const c_void)
 }
 
 /// Compute length of a device path in bytes (walks until END_ENTIRE).
-unsafe fn device_path_size(dp: *const u8) -> usize {
+pub(crate) unsafe fn device_path_size(dp: *const u8) -> usize {
     let mut p = dp;
     loop {
         // SAFETY: caller guarantees `dp` is a valid UEFI device-path.
@@ -396,7 +496,7 @@ unsafe fn device_path_size(dp: *const u8) -> usize {
 /// Build a MEDIA_DEVICE_PATH/MEDIA_FILEPATH_DP node followed by END_ENTIRE.
 /// Returns the raw bytes; caller is responsible for prepending the parent
 /// device-path bytes when constructing a full path.
-fn build_file_path_node(path: &str) -> Vec<u8> {
+pub(crate) fn build_file_path_node(path: &str) -> Vec<u8> {
     // UTF-16 + null terminator.
     let mut utf16: Vec<u16> = path.encode_utf16().collect();
     utf16.push(0);
@@ -428,49 +528,84 @@ fn chainload_from_ramdisk<B: BootServices>(
     image_handle: efi::Handle,
     parent_dp: *const c_void,
 ) -> Result<(), EfiError> {
+    use patina::boot_services::protocol_handler::HandleSearchType;
+    use r_efi::protocols::simple_file_system;
+
     // Connect the RAM disk handle so PartitionDxe + FAT bind.
     let mut remaining_dp = parent_dp as *mut efi::protocols::device_path::Protocol;
-    let ram_handle = unsafe {
-        boot_services.locate_device_path(&efi::protocols::device_path::PROTOCOL_GUID, &mut remaining_dp)
-    }
-    .map_err(EfiError::from)?;
+    let ram_handle =
+        unsafe { boot_services.locate_device_path(&efi::protocols::device_path::PROTOCOL_GUID, &mut remaining_dp) }
+            .map_err(EfiError::from)?;
     // SAFETY: ram_handle was just returned by locate_device_path; an empty
     // driver_image_handles list is permitted per the trait contract.
-    let _ = unsafe { boot_services.connect_controller(ram_handle, Vec::new(), ptr::null_mut(), true) };
+    let _ = unsafe { boot_services.connect_controller(ram_handle, Vec::new(), None, true) };
 
-    // Build full boot device path: parent (RAM disk) + FilePath node + END.
-    // SAFETY: parent_dp is a valid UEFI device path returned by the RAM disk
-    // protocol; its size is bounded by the END node walk.
+    // Patina's LoadImage doesn't walk a parent-path + FilePath through the
+    // dynamically-bound filesystem stack the way EDK2 DxeCore does. Find
+    // the SFS handle that descended from our parent_dp explicitly, then
+    // build the LoadImage path off THAT handle's device path. Same
+    // workaround pattern used for USB SFS dispatch.
     let parent_size = unsafe { device_path_size(parent_dp as *const u8) };
-    // Strip the parent's END node (last 4 bytes) before appending the file
-    // path node + new END.
-    let parent_payload_size = parent_size - 4;
+    let parent_payload_size = parent_size - 4; // strip END_ENTIRE
+    let parent_prefix = unsafe { core::slice::from_raw_parts(parent_dp as *const u8, parent_payload_size) };
+
+    let sfs_handles = boot_services
+        .locate_handle_buffer(HandleSearchType::ByProtocol(&simple_file_system::PROTOCOL_GUID))
+        .map_err(EfiError::from)?;
+
+    let mut chosen_sfs_dp: Option<*const u8> = None;
+    for &h in sfs_handles.iter() {
+        // SAFETY: handle returned by locate_handle_buffer for the SFS GUID.
+        let dp_ptr =
+            match unsafe { boot_services.handle_protocol_unchecked(h, &efi::protocols::device_path::PROTOCOL_GUID) } {
+                Ok(p) if !p.is_null() => p as *const u8,
+                _ => continue,
+            };
+        let dp_total = unsafe { device_path_size(dp_ptr) };
+        if dp_total < parent_payload_size {
+            continue;
+        }
+        // SAFETY: dp_ptr valid for dp_total bytes.
+        let candidate_prefix = unsafe { core::slice::from_raw_parts(dp_ptr, parent_payload_size) };
+        if candidate_prefix == parent_prefix {
+            log::info!("Found descendant SFS handle for RAM disk (path prefix matches)");
+            chosen_sfs_dp = Some(dp_ptr);
+            break;
+        }
+    }
+
+    let sfs_dp = chosen_sfs_dp.ok_or_else(|| {
+        log::error!(
+            "No SimpleFileSystem handle found whose device path descends from the RAM disk (FatDxe may not have bound)"
+        );
+        EfiError::NotFound
+    })?;
+
+    // Build chainload path: <sfs_handle_dp> (less END) + FilePath + END.
+    let sfs_total = unsafe { device_path_size(sfs_dp) };
+    let sfs_payload_size = sfs_total - 4;
     let file_node = build_file_path_node(CHAINLOAD_FILE_PATH);
 
-    let mut full_path = Vec::with_capacity(parent_payload_size + file_node.len());
-    // SAFETY: parent_dp + parent_payload_size is in-bounds per device_path_size.
-    let parent_slice = unsafe { core::slice::from_raw_parts(parent_dp as *const u8, parent_payload_size) };
-    full_path.extend_from_slice(parent_slice);
+    let mut full_path = Vec::with_capacity(sfs_payload_size + file_node.len());
+    // SAFETY: sfs_dp + sfs_payload_size in-bounds per device_path_size.
+    let sfs_payload = unsafe { core::slice::from_raw_parts(sfs_dp, sfs_payload_size) };
+    full_path.extend_from_slice(sfs_payload);
     full_path.extend_from_slice(&file_node);
 
-    // Hand to boot_from_device_path via a DevicePathBuf reinterpretation.
-    // patina's DevicePathBuf wraps the raw bytes with the END node terminator
-    // already included; safe to construct from our well-formed sequence.
     let device_path_ptr = full_path.as_ptr() as *mut efi::protocols::device_path::Protocol;
+    let device_path_opt = core::ptr::NonNull::new(device_path_ptr);
     let new_image = boot_services
-        .load_image(true, image_handle, device_path_ptr, None)
+        .load_image(true, image_handle, device_path_opt, None)
         .map_err(|status| {
             log::error!("LoadImage({}): {:?}", CHAINLOAD_FILE_PATH, status);
             EfiError::from(status)
         })?;
 
     log::info!("LoadImage OK; StartImage...");
-    boot_services
-        .start_image(new_image)
-        .map_err(|(status, _exit_data)| {
-            log::error!("StartImage: {:?}", status);
-            EfiError::from(status)
-        })
+    boot_services.start_image(new_image).map_err(|(status, _exit_data)| {
+        log::error!("StartImage: {:?}", status);
+        EfiError::from(status)
+    })
 }
 
 /// Run the SRE recovery flow end-to-end on Vol-Up hotkey:
@@ -484,17 +619,12 @@ fn chainload_from_ramdisk<B: BootServices>(
 ///
 /// BP write protection (lock/unlock) is owned by the FMP capsule flow;
 /// SRE boot is read-only against BPWPS.
-pub fn run_sre_flow<B: BootServices>(
-    boot_services: &B,
-    image_handle: efi::Handle,
-) -> Result<(), EfiError> {
+pub fn run_sre_flow<B: BootServices>(boot_services: &B, image_handle: efi::Handle) -> Result<(), EfiError> {
     helpers::connect_all(boot_services).ok();
 
     // SAFETY: dereferencing the returned interface only via raw pointer calls below.
-    let passthru = unsafe {
-        boot_services.locate_protocol_unchecked(&nvme_pass_thru::PROTOCOL_GUID, ptr::null_mut())
-    }
-    .map_err(|e| {
+    let passthru = unsafe { boot_services.locate_protocol_unchecked(&nvme_pass_thru::PROTOCOL_GUID, ptr::null_mut()) }
+        .map_err(|e| {
         log::error!("LocateProtocol(NvmExpressPassThru): {:?}", e);
         EfiError::from(e)
     })? as *mut nvme_pass_thru::Protocol;
@@ -507,8 +637,19 @@ pub fn run_sre_flow<B: BootServices>(
     // SAFETY note: handing a non-static-lifetime allocation to a UEFI
     // protocol is a deliberate hand-off; the chainloaded OS takes over
     // memory ownership when ExitBootServices fires.
-    let mut buf: Vec<u8> = vec![0u8; BPSIZE_BYTES];
-    log::info!("BP read: {} MiB via LID 0x15, chunk={} KiB", BPSIZE_BYTES / (1024 * 1024), chunk / 1024);
+    //
+    // Fallible alloc so we can surface OUT_OF_RESOURCES rather than panic.
+    let mut buf: Vec<u8> = Vec::new();
+    buf.try_reserve_exact(BPSIZE_BYTES).map_err(|_| {
+        log::error!("BP buffer allocation failed ({} MiB)", BPSIZE_BYTES / (1024 * 1024));
+        EfiError::from(efi::Status::OUT_OF_RESOURCES)
+    })?;
+    buf.resize(BPSIZE_BYTES, 0);
+    log::info!(
+        "BP read: {} MiB via LID 0x15, chunk={} KiB",
+        BPSIZE_BYTES / (1024 * 1024),
+        chunk / 1024
+    );
     read_bp_via_log_page(passthru, TARGET_BPID, chunk, &mut buf)?;
     log::info!("BP read complete ({} bytes)", buf.len());
 
@@ -517,10 +658,70 @@ pub fn run_sre_flow<B: BootServices>(
     // The buffer's lifetime now belongs to the RAM disk + chainloaded OS.
     // Leak it so the Vec destructor doesn't free the backing pages out
     // from under the RAM disk before ExitBootServices.
-    let _leaked = MaybeUninit::new(buf);
-    core::mem::forget(_leaked);
+    core::mem::forget(buf);
 
     chainload_from_ramdisk(boot_services, image_handle, ram_dp)
+}
+
+/// True if BP1 contains a FAT volume at offset 0 — the production-correct
+/// SRE payload layout produced by `Stage-SreflashUsb.ps1 -WrapWim` and the
+/// only layout `bp_recovery::run_sre_flow` can chainload from.
+///
+/// Check criterion:
+///   - bytes 510-511 are the FAT/MBR boot signature `0x55 0xAA`
+///
+/// The BPB jump opcode at byte 0 is NOT checked. Standard FAT images
+/// use `0xEB`/`0xE9`/`0x90` there, but the FAT image produced by
+/// `BuildBpFatImage.ps1` (called from `-WrapWim`) writes custom boot
+/// code that starts with `0x33` (`XOR EAX, EAX`). Trusting just the
+/// 0x55AA signature avoids false negatives while keeping the
+/// false-positive probability vanishingly small (1 in 65 536 for a
+/// random sector).
+///
+/// Used by the SreBootManager fallback path to decide between "boot SRE
+/// from BP1" and "give up" when normal boot has exhausted all options
+/// (or when a USB Boot#### entry would just re-run the flashing tool that
+/// put the payload there).
+///
+/// Returns `false` on any error (no NvmExpressPassThru protocol, BP1
+/// inaccessible, signature mismatch). Caller should treat as "no SRE
+/// payload present, fall through to default failure handling".
+///
+/// Raw-WIM payloads (no `-WrapWim`) are intentionally NOT recognized
+/// here: `run_sre_flow` cannot chainload from a raw-WIM BP1 (no FAT
+/// volume → no `\EFI\Boot\bootx64.efi` to load), so accepting them would
+/// trigger a fallback that immediately fails. The staging flow must
+/// always use `-WrapWim`.
+///
+/// Cost: one 512-byte LID 0x15 head read of BP1.
+pub fn bp_has_sre_payload<B: BootServices>(boot_services: &B) -> bool {
+    helpers::connect_all(boot_services).ok();
+
+    // SAFETY: dereferencing the returned interface only via raw pointer calls below.
+    let passthru =
+        match unsafe { boot_services.locate_protocol_unchecked(&nvme_pass_thru::PROTOCOL_GUID, ptr::null_mut()) } {
+            Ok(p) => p as *mut nvme_pass_thru::Protocol,
+            Err(e) => {
+                log::warn!("bp_has_sre_payload: NvmExpressPassThru not available: {:?}", e);
+                return false;
+            }
+        };
+
+    let mut head = [0u8; 512];
+    if let Err(e) = read_bp_via_log_page(passthru, TARGET_BPID, head.len(), &mut head) {
+        log::warn!("bp_has_sre_payload: BP1 head read failed: {:?}", e);
+        return false;
+    }
+
+    let is_fat = head[510] == 0x55 && head[511] == 0xAA;
+    log::info!(
+        "bp_has_sre_payload: FAT match = {} (head[0]={:#x}, head[510..512]=[{:#x},{:#x}])",
+        is_fat,
+        head[0],
+        head[510],
+        head[511]
+    );
+    is_fat
 }
 
 #[cfg(test)]
@@ -528,8 +729,7 @@ mod tests {
     extern crate alloc;
 
     use super::*;
-    use core::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
-    use patina::boot_services::MockBootServices;
+    use core::sync::atomic::{AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
     // === Pure function tests ===
 
@@ -578,91 +778,6 @@ mod tests {
         // SAFETY: dp is a valid synthetic UEFI device path terminated by END_ENTIRE.
         let size = unsafe { device_path_size(dp.as_ptr()) };
         assert_eq!(size, 4);
-    }
-
-    // === detect_sre_hotkey ===
-
-    #[test]
-    fn test_detect_sre_hotkey_returns_false_when_protocol_absent() {
-        let mut mock = MockBootServices::new();
-        mock.expect_locate_protocol_unchecked().returning(|_, _| Err(efi::Status::NOT_FOUND));
-
-        assert!(!detect_sre_hotkey(&mock), "absent button service must produce false");
-    }
-
-    // Inner-function tests use synthetic protocols whose function pointers
-    // capture/control behavior, mirroring patina_boot::partition's pattern.
-
-    static BUTTON_CHECK_CALLED: AtomicUsize = AtomicUsize::new(0);
-    static BUTTON_CLEAR_CALLED: AtomicUsize = AtomicUsize::new(0);
-
-    extern "efiapi" fn mock_button_check_returns_true(
-        _this: *mut button_services::Protocol,
-        state: *mut efi::Boolean,
-    ) -> efi::Status {
-        BUTTON_CHECK_CALLED.fetch_add(1, Ordering::SeqCst);
-        // SAFETY: caller passes a valid &mut Boolean.
-        unsafe { *state = efi::Boolean::TRUE };
-        efi::Status::SUCCESS
-    }
-
-    extern "efiapi" fn mock_button_check_returns_false(
-        _this: *mut button_services::Protocol,
-        state: *mut efi::Boolean,
-    ) -> efi::Status {
-        // SAFETY: caller passes a valid &mut Boolean.
-        unsafe { *state = efi::Boolean::FALSE };
-        efi::Status::SUCCESS
-    }
-
-    extern "efiapi" fn mock_button_check_errors(
-        _this: *mut button_services::Protocol,
-        _state: *mut efi::Boolean,
-    ) -> efi::Status {
-        efi::Status::DEVICE_ERROR
-    }
-
-    extern "efiapi" fn mock_clear_state(_this: *mut button_services::Protocol) -> efi::Status {
-        BUTTON_CLEAR_CALLED.fetch_add(1, Ordering::SeqCst);
-        efi::Status::SUCCESS
-    }
-
-    fn make_button_protocol(
-        check: button_services::ButtonCheckFn,
-    ) -> button_services::Protocol {
-        button_services::Protocol {
-            pre_boot_volume_up_check: check,
-            pre_boot_volume_down_check: check,
-            pre_boot_clear_state: mock_clear_state,
-            _reserved: ptr::null_mut(),
-        }
-    }
-
-    #[test]
-    fn test_detect_sre_hotkey_inner_pressed() {
-        BUTTON_CHECK_CALLED.store(0, Ordering::SeqCst);
-        BUTTON_CLEAR_CALLED.store(0, Ordering::SeqCst);
-
-        let mut protocol = make_button_protocol(mock_button_check_returns_true);
-        // SAFETY: protocol is alive on the test stack.
-        let pressed = unsafe { detect_sre_hotkey_via_protocol(&mut protocol) };
-        assert!(pressed, "TRUE state must surface as pressed");
-        assert_eq!(BUTTON_CHECK_CALLED.load(Ordering::SeqCst), 1);
-        assert_eq!(BUTTON_CLEAR_CALLED.load(Ordering::SeqCst), 1, "clear must run even on success");
-    }
-
-    #[test]
-    fn test_detect_sre_hotkey_inner_not_pressed() {
-        let mut protocol = make_button_protocol(mock_button_check_returns_false);
-        // SAFETY: protocol is alive on the test stack.
-        assert!(!unsafe { detect_sre_hotkey_via_protocol(&mut protocol) });
-    }
-
-    #[test]
-    fn test_detect_sre_hotkey_inner_check_errors_returns_false() {
-        let mut protocol = make_button_protocol(mock_button_check_errors);
-        // SAFETY: protocol is alive on the test stack.
-        assert!(!unsafe { detect_sre_hotkey_via_protocol(&mut protocol) });
     }
 
     // === probe_max_transfer ===
@@ -718,8 +833,14 @@ mod tests {
         // MDTS=7 -> 128 * 4096 = 512 KiB; equals READ_CHUNK_MAX, returned as-is.
         assert_eq!(chunk, 512 * 1024);
         // CDW0 opcode + CDW10 CNS=1 must match Identify Controller request.
-        assert_eq!(IDENTIFY_CDW0.load(Ordering::SeqCst) & 0xFF, nvme_pass_thru::OPCODE_IDENTIFY as u32);
-        assert_eq!(IDENTIFY_CDW10.load(Ordering::SeqCst), nvme_pass_thru::IDENTIFY_CNS_CONTROLLER);
+        assert_eq!(
+            IDENTIFY_CDW0.load(Ordering::SeqCst) & 0xFF,
+            nvme_pass_thru::OPCODE_IDENTIFY as u32
+        );
+        assert_eq!(
+            IDENTIFY_CDW10.load(Ordering::SeqCst),
+            nvme_pass_thru::IDENTIFY_CNS_CONTROLLER
+        );
     }
 
     #[test]
@@ -728,7 +849,10 @@ mod tests {
         let mut protocol = make_nvme_protocol(mock_identify_with_mdts);
         // SAFETY: protocol alive on stack.
         let chunk = probe_max_transfer(&mut protocol);
-        assert_eq!(chunk, READ_CHUNK_MAX, "MDTS=0 (no limit) clamps to self-imposed ceiling");
+        assert_eq!(
+            chunk, READ_CHUNK_MAX,
+            "MDTS=0 (no limit) clamps to self-imposed ceiling"
+        );
     }
 
     #[test]
@@ -806,77 +930,4 @@ mod tests {
         let result = read_bp_via_log_page(&mut protocol, 1, 64 * 1024, &mut dest);
         assert!(result.is_err());
     }
-
-    // === register_ram_disk ===
-
-    static RAM_DISK_BASE: AtomicU64 = AtomicU64::new(0);
-    static RAM_DISK_SIZE: AtomicU64 = AtomicU64::new(0);
-    static RAM_DISK_OUT_DP: AtomicUsize = AtomicUsize::new(0);
-
-    extern "efiapi" fn mock_ram_disk_register(
-        ram_disk_base: u64,
-        ram_disk_size: u64,
-        _ram_disk_type: *const efi::Guid,
-        _parent_device_path: *const c_void,
-        device_path: *mut *const c_void,
-    ) -> efi::Status {
-        RAM_DISK_BASE.store(ram_disk_base, Ordering::SeqCst);
-        RAM_DISK_SIZE.store(ram_disk_size, Ordering::SeqCst);
-        // Return a sentinel non-null device path pointer.
-        let sentinel: usize = 0xDEAD_BEEF;
-        // SAFETY: caller passes a valid &mut *const c_void.
-        unsafe { *device_path = sentinel as *const c_void };
-        RAM_DISK_OUT_DP.store(sentinel, Ordering::SeqCst);
-        efi::Status::SUCCESS
-    }
-
-    extern "efiapi" fn mock_ram_disk_register_fails(
-        _ram_disk_base: u64,
-        _ram_disk_size: u64,
-        _ram_disk_type: *const efi::Guid,
-        _parent_device_path: *const c_void,
-        _device_path: *mut *const c_void,
-    ) -> efi::Status {
-        efi::Status::OUT_OF_RESOURCES
-    }
-
-    extern "efiapi" fn mock_ram_disk_unregister(_dp: *const c_void) -> efi::Status {
-        efi::Status::SUCCESS
-    }
-
-    fn make_ram_disk_protocol(register: ram_disk::RegisterFn) -> ram_disk::Protocol {
-        ram_disk::Protocol { register, unregister: mock_ram_disk_unregister }
-    }
-
-    #[test]
-    fn test_register_ram_disk_inner_success_returns_dp() {
-        let mut protocol = make_ram_disk_protocol(mock_ram_disk_register);
-        let dram = [0xCDu8; 4096];
-        // SAFETY: protocol alive on stack; dram alive for the call.
-        let dp = unsafe { register_ram_disk_via_protocol(&mut protocol, &dram) }
-            .expect("register should succeed");
-        assert_eq!(dp as usize, 0xDEAD_BEEF);
-        assert_eq!(RAM_DISK_BASE.load(Ordering::SeqCst), dram.as_ptr() as u64);
-        assert_eq!(RAM_DISK_SIZE.load(Ordering::SeqCst), 4096);
-    }
-
-    #[test]
-    fn test_register_ram_disk_inner_propagates_failure() {
-        let mut protocol = make_ram_disk_protocol(mock_ram_disk_register_fails);
-        let dram = [0u8; 4096];
-        // SAFETY: protocol alive on stack; dram alive for the call.
-        let result = unsafe { register_ram_disk_via_protocol(&mut protocol, &dram) };
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_register_ram_disk_outer_locate_failure() {
-        let mut mock = MockBootServices::new();
-        mock.expect_locate_protocol_unchecked().returning(|_, _| Err(efi::Status::NOT_FOUND));
-
-        let dram = [0u8; 4096];
-        let result = register_ram_disk(&mock, &dram);
-        assert!(result.is_err());
-    }
 }
-

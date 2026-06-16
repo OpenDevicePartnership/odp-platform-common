@@ -18,7 +18,7 @@ extern crate alloc;
 mod bp_recovery;
 mod sre_boot_manager;
 
-pub use sre_boot_manager::SreBootManager;
+pub use sre_boot_manager::{SreBootManager, SreHotkey, fv_file_device_path, fv_volume_file_device_path};
 
 // Re-export the patina device-path types SreBootManager::new consumes, so callers
 // (e.g. surface_patina_intel/patina_bin) don't need to depend on the same patina

@@ -3,24 +3,29 @@
 System Recovery Environment boot orchestrator for Patina firmware.
 
 `SreBootManager` implements [`patina_boot::BootOrchestrator`] for platforms that
-ship a System Recovery Environment alongside the main OS. The current crate is
-a **skeleton** implementing the normal boot path only:
+ship a System Recovery Environment alongside the main OS. The flow:
 
 1. Interleave controller connection with DXE driver dispatch
 2. Extra `connect_all` pass before EndOfDxe so platforms whose driver-binding
    runs only in the open window get a chance to bind (e.g. `PartitionDxe`
    creating GPT child handles)
 3. Signal `EndOfDxe` (security lockdown)
-4. Discover console devices
-5. Write-lock the NVMe boot partition *(pending — TODO referencing
+4. Signal start-of-BDS event groups
+5. Discover console devices
+6. Probe the hotkey provider; on a recovery chord, dispatch the configured
+   SRE app or fall back to the in-Rust BP recovery flow (NVMe LID read → RAM
+   disk → chainload); on a frontpage chord, try USB via live
+   `SimpleFileSystem` enumeration, then fall back to the configured frontpage
+   app
+7. Write-lock the NVMe boot partition *(pending — TODO referencing
    [odp-platform-common#61](https://github.com/OpenDevicePartnership/odp-platform-common/issues/61))*
-6. Enumerate firmware `Boot####` EFI variables via `discover_boot_options`
+8. Enumerate firmware `Boot####` EFI variables via `discover_boot_options`
    and try each in order
-7. Fall back to the constructor-provided `main_os_path` if discovery yields
+9. Fall back to the constructor-provided `main_os_path` if discovery yields
    nothing (or fails)
 
-Follow-ups (tracked separately): Power+Vol-Up hotkey to enter SRE, SRE WIM
-RAM-disk boot, capsule-update pre-boot hook.
+Follow-ups (tracked separately): capsule-update pre-boot hook,
+`HotkeyProvider` trait for OEM-specific button mechanisms.
 
 ## Use
 
