@@ -1,0 +1,41 @@
+# Cargo manifest for the patina_boot crate.
+#
+# SPDX-License-Identifier: MIT
+#
+
+[package]
+name = "patina_boot"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+repository = "https://github.com/OpenDevicePartnership/odp-platform-common"
+homepage = "https://github.com/OpenDevicePartnership/odp-platform-common"
+description = "Boot orchestration components for Patina firmware."
+keywords = ["uefi", "edk2", "patina", "boot", "firmware"]
+categories = ["embedded", "no-std"]
+readme = "README.md"
+
+[dependencies]
+log = { version = "0.4", default-features = false }
+# patina/patina_macro are pulled from the patina-boot-base branch, which carries
+# the APIs this crate requires (HardDrive::try_from_node, create_event_ex_unchecked
+# Option<fn>, etc.) until those are published to crates.io.
+patina = { git = "https://github.com/kat-perez/patina", branch = "patina-boot-base", features = ["unstable-device-path"] }
+patina_macro = { git = "https://github.com/kat-perez/patina", branch = "patina-boot-base" }
+r-efi = { version = "5", default-features = false }
+spin = { version = "0.9", default-features = false, features = ["spin_mutex"] }
+zerocopy = { version = "0.8", default-features = false }
+zerocopy-derive = { version = "0.8" }
+
+[dev-dependencies]
+patina = { git = "https://github.com/kat-perez/patina", branch = "patina-boot-base", features = ["mockall", "unstable-device-path"] }
+mockall = { version = "0.14" }
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+
+[features]
+default = []
+doc = []
+std = []
