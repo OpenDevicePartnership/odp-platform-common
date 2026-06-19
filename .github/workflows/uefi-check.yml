@@ -10,7 +10,13 @@ permissions:
 on:
   push:
     branches: [main]
+    paths:
+      - 'uefi/crates/**'
+      - '.github/workflows/uefi-check.yml'
   pull_request:
+    paths:
+      - 'uefi/crates/**'
+      - '.github/workflows/uefi-check.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
