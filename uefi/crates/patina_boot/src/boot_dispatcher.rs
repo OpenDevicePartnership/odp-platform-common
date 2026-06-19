@@ -143,7 +143,9 @@ impl BootDispatcher {
 #[coverage(off)] // Extern "efiapi" callback — tested via integration tests
 extern "efiapi" fn bds_entry_point(_this: *mut bds::Protocol) {
     let Some(context) = BDS_CONTEXT.get() else {
-        panic!("BDS context not initialized — BootDispatcher entry_point was not called");
+        bds_fatal(format_args!(
+            "BDS context not initialized — BootDispatcher entry_point was not called"
+        ));
     };
 
     let Err(e) = context.orchestrator.execute(
@@ -152,7 +154,24 @@ extern "efiapi" fn bds_entry_point(_this: *mut bds::Protocol) {
         context.dxe_dispatch,
         context.image_handle,
     );
-    panic!("BootOrchestrator::execute() failed: {e:?}");
+    bds_fatal(format_args!("BootOrchestrator::execute() failed: {e:?}"));
+}
+
+/// Handle an unrecoverable BDS failure uniformly.
+///
+/// Logs the failure, trips a `debug_assert` so debug and test builds fail loudly
+/// (making the bug easy to catch), then parks the CPU. The BDS entry point must
+/// never return to the DXE core, and parking keeps the failure deterministic
+/// rather than depending on a platform panic handler that may halt silently
+/// without emitting anything.
+#[coverage(off)]
+#[allow(clippy::assertions_on_constants)] // debug_assert!(false) is an intentional debug-only trap.
+fn bds_fatal(args: core::fmt::Arguments) -> ! {
+    log::error!("{args}");
+    debug_assert!(false, "{args}");
+    loop {
+        core::hint::spin_loop();
+    }
 }
 
 #[cfg(test)]

@@ -179,6 +179,7 @@ pub fn connect_all<B: BootServices>(boot_services: &B) -> Result<()> {
     // handles, etc.
     const MAX_ITERATIONS: usize = 10;
     let mut prev_handle_count = 0;
+    let mut stabilized = false;
 
     for _iteration in 0..MAX_ITERATIONS {
         // Get all handles in the system
@@ -187,7 +188,10 @@ pub fn connect_all<B: BootServices>(boot_services: &B) -> Result<()> {
             .map_err(EfiError::from)?;
         let current_handle_count = handles.len();
 
-        // Connect each handle recursively
+        // Connect each handle recursively. Per-handle failures are expected and
+        // intentionally ignored: most handles have no matching driver (or are
+        // already connected), mirroring EDK2's connect-all behavior. An individual
+        // failure does not mean overall enumeration failed.
         for &handle in handles.iter() {
             // SAFETY: Empty driver handle list and null device path are valid per UEFI spec
             let _ = unsafe { boot_services.connect_controller(handle, Vec::new(), ptr::null_mut(), true) };
@@ -195,10 +199,17 @@ pub fn connect_all<B: BootServices>(boot_services: &B) -> Result<()> {
 
         // Check if handle count has stabilized
         if current_handle_count == prev_handle_count {
+            stabilized = true;
             break;
         }
 
         prev_handle_count = current_handle_count;
+    }
+
+    if !stabilized {
+        log::warn!(
+            "connect_all: handle count did not stabilize within {MAX_ITERATIONS} iterations; device enumeration may be incomplete"
+        );
     }
 
     Ok(())
@@ -462,6 +473,19 @@ pub fn is_partial_device_path(device_path: &DevicePath) -> bool {
 /// - FilePath-only paths (require filesystem enumeration)
 /// - Messaging node paths without root
 pub fn expand_device_path<B: BootServices>(boot_services: &B, partial_path: &DevicePath) -> Result<DevicePathBuf> {
+    // Reject empty or End-only paths up front, as the doc contract promises:
+    // there is nothing to expand or boot from. Without this they fall through
+    // `is_partial_device_path` (which treats them as "not partial") and would be
+    // returned unchanged to callers such as `boot_from_device_path`.
+    let has_real_node = partial_path
+        .iter()
+        .next()
+        .is_some_and(|node| node.header.r#type != DevicePathType::End as u8);
+    if !has_real_node {
+        log::error!("expand_device_path: empty device path");
+        return Err(EfiError::InvalidParameter);
+    }
+
     // Return unchanged if already a full path
     if !is_partial_device_path(partial_path) {
         return Ok(partial_path.into());
@@ -1030,6 +1054,18 @@ mod tests {
         let result = expand_device_path(&mock, &full);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), full);
+    }
+
+    #[test]
+    fn test_expand_empty_path_returns_invalid_parameter() {
+        let empty = DevicePathBuf::from_device_path_node_iter([EndEntire].into_iter());
+
+        // No mock setup needed: the empty/End-only guard returns before any
+        // boot services call.
+        let mock = MockBootServices::new();
+
+        let result = expand_device_path(&mock, &empty);
+        assert!(matches!(result, Err(EfiError::InvalidParameter)));
     }
 
     #[test]
