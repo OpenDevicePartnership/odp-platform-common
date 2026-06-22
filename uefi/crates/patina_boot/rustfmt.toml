@@ -1,0 +1,6 @@
+# rustfmt configuration for the patina_boot crate.
+#
+# SPDX-License-Identifier: MIT
+#
+
+max_width = 120

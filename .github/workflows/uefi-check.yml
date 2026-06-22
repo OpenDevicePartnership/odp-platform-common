@@ -10,7 +10,13 @@ permissions:
 on:
   push:
     branches: [main]
+    paths:
+      - 'uefi/crates/**'
+      - '.github/workflows/uefi-check.yml'
   pull_request:
+    paths:
+      - 'uefi/crates/**'
+      - '.github/workflows/uefi-check.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -40,6 +46,53 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2025-12-12
+          components: rust-src,clippy,rustfmt
+          targets: x86_64-unknown-uefi,aarch64-unknown-uefi
+
+      - name: cargo fmt --check
+        if: matrix.task == 'fmt'
+        run: cargo fmt --check
+
+      - name: cargo clippy (host + UEFI)
+        if: matrix.task == 'clippy'
+        run: |
+          cargo clippy --all-features -- -D warnings
+          cargo clippy --all-features --target x86_64-unknown-uefi -- -D warnings
+          cargo clippy --all-features --target aarch64-unknown-uefi -- -D warnings
+
+      - name: cargo doc
+        if: matrix.task == 'doc'
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      - name: cargo build (UEFI targets)
+        if: matrix.task == 'build-uefi'
+        run: |
+          cargo build --target x86_64-unknown-uefi
+          cargo build --target aarch64-unknown-uefi
+
+  patina-boot:
+    runs-on: ubuntu-latest
+    name: ${{ matrix.task }} / patina_boot
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [fmt, clippy, doc, build-uefi]
+    defaults:
+      run:
+        working-directory: uefi/crates/patina_boot
+    steps:
+      - uses: actions/checkout@v4
+
+      # `rust-toolchain.toml` pins the channel + components + targets, but
+      # `rustup show` doesn't reliably install missing pieces in CI. Install
+      # them explicitly. Update the channel here whenever rust-toolchain.toml
+      # is bumped.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-02-27
           components: rust-src,clippy,rustfmt
           targets: x86_64-unknown-uefi,aarch64-unknown-uefi
 
