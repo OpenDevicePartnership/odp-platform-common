@@ -18,13 +18,12 @@ readme = "README.md"
 
 [dependencies]
 log = { version = "0.4", default-features = false }
-# patina/patina_macro are pulled from the patina-boot-base branch, which carries
-# the APIs this crate requires (HardDrive::try_from_node, create_event_ex_unchecked
-# Option<fn>, etc.) until those are published to crates.io.
+# patina/patina_macro are pulled from the patina-boot-base branch (kat-perez fork),
+# which tracks upstream patina/main + the r-efi 7 bump, until that bump lands upstream.
 patina = { git = "https://github.com/kat-perez/patina", branch = "patina-boot-base", features = ["unstable-device-path"] }
 patina_macro = { git = "https://github.com/kat-perez/patina", branch = "patina-boot-base" }
-r-efi = { version = "5", default-features = false }
-spin = { version = "0.9", default-features = false, features = ["spin_mutex"] }
+r-efi = { version = "7", default-features = false }
+spin = { version = "0.9", default-features = false, features = ["spin_mutex", "once"] }
 zerocopy = { version = "0.8", default-features = false }
 zerocopy-derive = { version = "0.8" }
 

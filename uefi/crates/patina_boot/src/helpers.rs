@@ -22,13 +22,16 @@ use patina::{
         paths::{DevicePath, DevicePathBuf},
     },
     error::{EfiError, Result},
-    guids::{EFI_GLOBAL_VARIABLE, EVENT_GROUP_END_OF_DXE},
+    guids::EVENT_GROUP_END_OF_DXE,
     runtime_services::RuntimeServices,
 };
 use r_efi::{
     efi,
     protocols::simple_text_input,
-    system::{EVENT_GROUP_READY_TO_BOOT, VARIABLE_BOOTSERVICE_ACCESS, VARIABLE_NON_VOLATILE, VARIABLE_RUNTIME_ACCESS},
+    system::{
+        EVENT_GROUP_READY_TO_BOOT, GLOBAL_VARIABLE as EFI_GLOBAL_VARIABLE, VARIABLE_BOOTSERVICE_ACCESS,
+        VARIABLE_NON_VOLATILE, VARIABLE_RUNTIME_ACCESS,
+    },
 };
 
 /// Watchdog timeout in seconds per UEFI Specification Section 3.1.2.
@@ -88,7 +91,10 @@ unsafe fn detect_hotkey_from_handles<B: BootServices>(
         // The protocol will return NOT_READY if no key is available
         loop {
             let mut key = simple_text_input::InputKey::default();
-            let status = (protocol_ptr.read_key_stroke)(protocol_ptr, &mut key);
+            // SAFETY: r-efi v6+ marks the FFI function pointer as `unsafe fn`. Caller of
+            // `detect_hotkey_from_handles` (itself `unsafe`) guarantees `protocol_ptr`
+            // points at a valid SimpleTextInput interface.
+            let status = unsafe { (protocol_ptr.read_key_stroke)(protocol_ptr, &mut key) };
 
             if status == efi::Status::SUCCESS {
                 if key.scan_code == hotkey_scancode {
@@ -134,7 +140,8 @@ pub fn boot_from_device_path<B: BootServices>(
 
     // Load the image
     let device_path_ptr = full_path.as_ref() as *const _ as *mut efi::protocols::device_path::Protocol;
-    let image_handle = match boot_services.load_image(true, parent_handle, device_path_ptr, None) {
+    let device_path_opt = core::ptr::NonNull::new(device_path_ptr);
+    let image_handle = match boot_services.load_image(true, parent_handle, device_path_opt, None) {
         Ok(handle) => handle,
         Err(status) => {
             log::error!("LoadImage failed with status: {:?}", status);
@@ -194,7 +201,7 @@ pub fn connect_all<B: BootServices>(boot_services: &B) -> Result<()> {
         // failure does not mean overall enumeration failed.
         for &handle in handles.iter() {
             // SAFETY: Empty driver handle list and null device path are valid per UEFI spec
-            let _ = unsafe { boot_services.connect_controller(handle, Vec::new(), ptr::null_mut(), true) };
+            let _ = unsafe { boot_services.connect_controller(handle, Vec::new(), None, true) };
         }
 
         // Check if handle count has stabilized
@@ -597,7 +604,7 @@ struct LoadOptionHeader {
 /// Returns a [`BootConfig`](crate::config::BootConfig) populated with the discovered device paths, or
 /// an error if `BootOrder` cannot be read.
 pub fn discover_boot_options<R: RuntimeServices>(runtime_services: &R) -> Result<super::config::BootConfig> {
-    let namespace = EFI_GLOBAL_VARIABLE.into_inner();
+    let namespace = EFI_GLOBAL_VARIABLE;
 
     let boot_order_name: Vec<u16> = "BootOrder\0".encode_utf16().collect();
     let boot_order_name = boot_order_name.as_slice();
