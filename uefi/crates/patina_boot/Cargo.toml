@@ -30,6 +30,7 @@ zerocopy-derive = { version = "0.8" }
 [dev-dependencies]
 patina = { git = "https://github.com/kat-perez/patina", branch = "patina-boot-base", features = ["mockall", "unstable-device-path"] }
 mockall = { version = "0.14" }
+criterion = "0.5"
 
 [lints.clippy]
 undocumented_unsafe_blocks = "warn"
@@ -38,3 +39,7 @@ undocumented_unsafe_blocks = "warn"
 default = []
 doc = []
 std = []
+
+[[bench]]
+name = "orchestrator"
+harness = false
