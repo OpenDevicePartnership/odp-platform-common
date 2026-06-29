@@ -1,7 +1,11 @@
 use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, common};
 use battery_service_interface::{BixFixedStrings, BstReturn, Btp};
 use battery_service_relay::{AcpiBatteryRequest, AcpiBatteryResponse};
-use embedded_services::relay::{MessageSerializationError, SerializableMessage};
+use embedded_services::relay::SerializableMessage;
+use mctp_rs::{
+    EC_EID, MctpMedium, MctpMessageHeaderTrait, MctpMessageTag, MctpMessageTrait, MctpPacketContext, MctpPacketError,
+    MctpPacketResult, MctpReplyContext, MctpSequenceNumber, MctpSerialMedium, SP_EID,
+};
 use serialport::SerialPort;
 use std::{
     sync::{Arc, Mutex},
@@ -53,15 +57,21 @@ impl crate::Error for Error {
 // If it took longer than a second to receive a response, something is definitely wrong
 const READ_TIMEOUT: Duration = Duration::from_millis(1000);
 
-const SMBUS_HEADER_SZ: usize = 4;
-const SMBUS_LEN_IDX: usize = 2;
-const MCTP_FLAGS_IDX: usize = 7;
-const MCTP_HEADER_SZ: usize = 5;
-const ODP_HEADER_SZ: usize = 2; // This does not include the 2 byte command code
-const HEADER_SZ: usize = SMBUS_HEADER_SZ + MCTP_HEADER_SZ + ODP_HEADER_SZ;
-const CMD_CODE_SZ: usize = 2;
+/// MCTP message-type byte for ODP relay traffic (matches the EC decoder in
+/// `embedded_services::relay` and the SP encoder in `ec_relay.rs`).
+const ODP_MESSAGE_TYPE: u8 = 0x7D;
+
+/// DSP0253 serial framing END flag — one terminates each framed packet.
+const SERIAL_END_FLAG: u8 = 0x7E;
+
+/// Length of the 4-byte big-endian OdpHeader prefixed to each ODP body.
+const ODP_HEADER_SZ: usize = 4;
+
+/// Buffer size for request serialization, wire framing, and response
+/// reassembly. Matches the EC uart-service `BUF_SIZE` (256): the EC rejects
+/// any frame larger than this rather than emitting it, so a received frame can
+/// never exceed it.
 const BUFFER_SZ: usize = 256;
-const MCTP_MAX_PACKET_LEN: usize = 69;
 
 const THERMAL_VAR_LEN: u16 = 4;
 const BATTERY_INSTANCE: u8 = 0;
@@ -83,39 +93,108 @@ impl From<Destination> for u8 {
     }
 }
 
-fn prepend_headers(buffer: &mut [u8], dst: Destination, payload_sz: usize) -> Result<(), Error> {
-    let packet_len = MCTP_HEADER_SZ + ODP_HEADER_SZ + payload_sz;
-    let packet_len_u8: u8 = packet_len
-        .try_into()
-        .map_err(|_| Error::Protocol(format!("Packet length {packet_len} exceeds u8 maximum")))?;
+/// 4 big-endian bytes of an OdpHeader, wrapped so
+/// [`MctpPacketContext::serialize_packet`] frames them without a full
+/// `SerializableMessage` impl. Mirrors the SP's shim in `ec_relay.rs`.
+struct OdpRawHeader([u8; 4]);
 
-    // SMBUS
-    buffer[0] = 0x2;
-    buffer[1] = 0xF;
-    buffer[2] = packet_len_u8;
-    buffer[3] = 0x1;
+impl MctpMessageHeaderTrait for OdpRawHeader {
+    fn serialize<M: MctpMedium>(self, buffer: &mut [u8]) -> MctpPacketResult<usize, M> {
+        if buffer.len() < ODP_HEADER_SZ {
+            return Err(MctpPacketError::SerializeError("buffer too small for odp raw header"));
+        }
+        buffer[..ODP_HEADER_SZ].copy_from_slice(&self.0);
+        Ok(ODP_HEADER_SZ)
+    }
 
-    // MCTP
-    buffer[4] = 0x1;
-    buffer[5] = dst.into();
-    buffer[6] = 0x80;
-    buffer[7] = 0xD3;
-    buffer[8] = 0x7D; // Additional MCTP message type header byte
-
-    // ODP
-    buffer[9] = 1 << 1;
-    buffer[10] = dst.into();
-    Ok(())
+    fn deserialize<M: MctpMedium>(buffer: &[u8]) -> MctpPacketResult<(Self, &[u8]), M> {
+        if buffer.len() < ODP_HEADER_SZ {
+            return Err(MctpPacketError::HeaderParseError("buffer too small for odp raw header"));
+        }
+        let mut h = [0u8; 4];
+        h.copy_from_slice(&buffer[..ODP_HEADER_SZ]);
+        Ok((OdpRawHeader(h), &buffer[ODP_HEADER_SZ..]))
+    }
 }
 
-fn append_cmd(
-    to: &mut [u8],
-    from: impl SerializableMessage,
-    cmd_code: u16,
-) -> Result<usize, MessageSerializationError> {
-    to[HEADER_SZ..HEADER_SZ + CMD_CODE_SZ].copy_from_slice(&cmd_code.to_be_bytes());
-    let payload_sz = from.serialize(&mut to[HEADER_SZ + CMD_CODE_SZ..])?;
-    Ok(payload_sz + CMD_CODE_SZ)
+/// ODP message body — the bytes following the OdpHeader.
+struct OdpRawMessage<'b>(&'b [u8]);
+
+impl<'buf> MctpMessageTrait<'buf> for OdpRawMessage<'buf> {
+    type Header = OdpRawHeader;
+    const MESSAGE_TYPE: u8 = ODP_MESSAGE_TYPE;
+
+    fn serialize<M: MctpMedium>(self, buffer: &mut [u8]) -> MctpPacketResult<usize, M> {
+        let n = self.0.len();
+        if buffer.len() < n {
+            return Err(MctpPacketError::SerializeError("buffer too small for odp raw body"));
+        }
+        buffer[..n].copy_from_slice(self.0);
+        Ok(n)
+    }
+
+    fn deserialize<M: MctpMedium>(_h: &OdpRawHeader, buffer: &'buf [u8]) -> MctpPacketResult<Self, M> {
+        Ok(OdpRawMessage(buffer))
+    }
+}
+
+/// Build a 4-byte BE OdpHeader: bit 25 = is_request, bits 23..16 = service_id,
+/// bit 15 = is_error (0 here), bits 14..0 = message_id. The command
+/// discriminant rides in `message_id`; there is no separate command-code field.
+fn build_odp_header(is_request: bool, service_id: u8, message_id: u16) -> [u8; 4] {
+    let mut raw: u32 = 0;
+    if is_request {
+        raw |= 1 << 25;
+    }
+    raw |= (service_id as u32) << 16;
+    raw |= (message_id as u32) & 0x7FFF;
+    raw.to_be_bytes()
+}
+
+/// Parse a 4-byte BE OdpHeader into `(is_request, service_id, is_error, message_id)`.
+fn parse_odp_header(bytes: &[u8]) -> Result<(bool, u8, bool, u16), Error> {
+    if bytes.len() < ODP_HEADER_SZ {
+        return Err(Error::Protocol("OdpHeader buffer < 4 bytes".into()));
+    }
+    let raw = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    Ok((
+        (raw & (1 << 25)) != 0,
+        ((raw >> 16) & 0xFF) as u8,
+        (raw & (1 << 15)) != 0,
+        (raw & 0x7FFF) as u16,
+    ))
+}
+
+/// `MctpReplyContext` for a host→EC serial request. `MctpSerialMedium` has no
+/// per-medium addressing; ec-test-cli drives the EC exactly as the SP does, so
+/// it reuses the SP's `(SP_EID → EC_EID)` framing.
+fn serial_reply_context() -> MctpReplyContext<MctpSerialMedium> {
+    MctpReplyContext {
+        source_endpoint_id: SP_EID,
+        destination_endpoint_id: EC_EID,
+        packet_sequence_number: MctpSequenceNumber::new(0),
+        message_tag: MctpMessageTag::try_from(0).expect("tag 0 always valid"),
+        medium_context: (),
+    }
+}
+
+/// Read one DSP0253-framed packet (up to and including the next
+/// [`SERIAL_END_FLAG`]) into `buf`; returns the number of bytes read.
+/// Byte-stuffing guarantees the only unescaped `0x7E` is the frame terminator.
+fn read_framed_packet(port: &mut dyn SerialPort, buf: &mut [u8]) -> Result<usize, Error> {
+    let mut filled = 0usize;
+    loop {
+        if filled >= buf.len() {
+            return Err(Error::Protocol("framed packet exceeds buffer".into()));
+        }
+        let mut byte = [0u8; 1];
+        port.read_exact(&mut byte).map_err(|e| Error::Io(format!("{e}")))?;
+        buf[filled] = byte[0];
+        filled += 1;
+        if byte[0] == SERIAL_END_FLAG {
+            return Ok(filled);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -161,91 +240,80 @@ impl Serial {
         dst: Destination,
         request: REQ,
     ) -> Result<RESP, Error> {
-        let mut buffer = [0u8; BUFFER_SZ];
-
-        // Serialize command into buffer
-        let request_sz = append_cmd(&mut buffer, request, request.discriminant())
+        // Serialize the ODP request body (the bytes after the 4-byte OdpHeader).
+        let mut body_buf = [0u8; BUFFER_SZ];
+        let body_len = request
+            .serialize(&mut body_buf)
             .map_err(|e| Error::Serialization(format!("{e:?}")))?;
-
-        // NOTE: The `mctp-rs` crate does not appear to support serializing requests and deserializing
-        // responses (only the opposite), so we have to do manual serialization until that is changed.
-
-        // And now that we know request size, serialize headers into beginning of buffer
-        prepend_headers(&mut buffer, dst, request_sz)?;
+        let odp_header = build_odp_header(true, dst.into(), request.discriminant());
 
         let mut port = self
             .port
             .lock()
             .map_err(|_| Error::Io("serial port mutex poisoned".into()))?;
 
-        // Write entire request packet
-        // We first clear the input buffer in case there's anything left over if we had to bail out
-        // early on previous call due to error
+        // Clear any stale bytes left over if a previous call bailed mid-frame.
         port.clear(serialport::ClearBuffer::Input)
-            .map_err(|e| Error::Io(format!("{e:?}")))?;
-        port.write_all(&buffer[..HEADER_SZ + request_sz])
-            .map_err(|e| Error::Io(format!("{e:?}")))?;
-        let pec = smbus_pec::pec(&buffer[..HEADER_SZ + request_sz]);
-        port.write_all(&[pec]).map_err(|e| Error::Io(format!("{e:?}")))?;
-        port.flush().map_err(|e| Error::Io(format!("{e:?}")))?;
+            .map_err(|e| Error::Io(format!("{e}")))?;
 
-        // Read response packets
-        let mut response_buf = Vec::new();
-        let mut cmd_code = 0;
-        loop {
-            // Wait for SMBUS header from response packet
-            let mut buffer = [0u8; BUFFER_SZ];
-            port.read_exact(&mut buffer[..SMBUS_HEADER_SZ])
-                .map_err(|e| Error::Io(format!("{e:?}")))?;
-
-            // Get the length of the response and do a sanity check on it
-            let len = buffer[SMBUS_LEN_IDX] as usize;
-            if !(MCTP_HEADER_SZ..=MCTP_MAX_PACKET_LEN).contains(&len) {
-                return Err(Error::Protocol(format!("Invalid MCTP packet length {len}")));
-            }
-
-            // Then read rest of packet
-            let packet_slice = buffer
-                .get_mut(SMBUS_HEADER_SZ..SMBUS_HEADER_SZ + len)
-                .ok_or_else(|| Error::Protocol("Response does not fit in buffer".into()))?;
-            port.read_exact(packet_slice).map_err(|e| Error::Io(format!("{e:?}")))?;
-
-            let mut pec_buf = [0u8; 1];
-            port.read_exact(&mut pec_buf).map_err(|e| Error::Io(format!("{e:?}")))?;
-            let computed = smbus_pec::pec(&buffer[..SMBUS_HEADER_SZ + len]);
-            if pec_buf[0] != computed {
-                return Err(Error::Protocol(format!(
-                    "PEC mismatch: received {:#04x}, computed {:#04x}",
-                    pec_buf[0], computed
-                )));
-            }
-
-            let flags = buffer[MCTP_FLAGS_IDX];
-
-            // If this is a SOM packet, skip ODP header (we don't use it) and grab the command code/discriminant
-            let payload_start_idx = if flags & 0x80 != 0 {
-                cmd_code = u16::from_be_bytes(
-                    buffer[HEADER_SZ..HEADER_SZ + CMD_CODE_SZ]
-                        .try_into()
-                        .expect("CMD_CODE_SZ must equal 2"),
-                );
-                HEADER_SZ + CMD_CODE_SZ
-            } else {
-                // -1 because non-SOM packets don't have the message type byte
-                SMBUS_HEADER_SZ + MCTP_HEADER_SZ - 1
-            };
-
-            // Append the payload to the reassembly buffer
-            let data_slice = &buffer[payload_start_idx..SMBUS_HEADER_SZ + len];
-            response_buf.extend_from_slice(data_slice);
-
-            // If this is EOM packet, we are done
-            if flags & 0x40 != 0 {
-                break;
+        // Serialize + DSP0253-frame the request via MctpPacketContext, writing
+        // each emitted packet out the port. A dedicated TX buffer/context keeps
+        // the response assembly buffer free.
+        {
+            let mut tx_buf = [0u8; BUFFER_SZ];
+            let mut tx_ctx = MctpPacketContext::<MctpSerialMedium>::new(MctpSerialMedium, &mut tx_buf);
+            let mut state = tx_ctx
+                .serialize_packet(
+                    serial_reply_context(),
+                    (OdpRawHeader(odp_header), OdpRawMessage(&body_buf[..body_len])),
+                )
+                .map_err(|e| Error::Serialization(format!("{e:?}")))?;
+            while let Some(pkt) = state.next() {
+                let pkt = pkt.map_err(|e| Error::Serialization(format!("{e:?}")))?;
+                port.write_all(pkt).map_err(|e| Error::Io(format!("{e}")))?;
             }
         }
+        port.flush().map_err(|e| Error::Io(format!("{e}")))?;
 
-        RESP::deserialize(cmd_code, &response_buf).map_err(|e| Error::Serialization(format!("deserialization: {e:?}")))
+        // Read framed packets until MctpPacketContext reassembles a complete
+        // message — multi-packet responses return `None` until the EOM packet —
+        // then parse the ODP response header and hand the payload to RESP.
+        let mut assembly = [0u8; BUFFER_SZ];
+        let mut rx_ctx = MctpPacketContext::<MctpSerialMedium>::new(MctpSerialMedium, &mut assembly);
+        let response = loop {
+            let mut rx_packet = [0u8; BUFFER_SZ];
+            let n = read_framed_packet(&mut **port, &mut rx_packet)?;
+            // Intermediate packets of a multi-packet response return `None`; keep
+            // reading until the EOM packet yields the reassembled message.
+            let Some(message) = rx_ctx
+                .deserialize_packet(&rx_packet[..n])
+                .map_err(|e| Error::Protocol(format!("{e:?}")))?
+            else {
+                continue;
+            };
+            if message.message_buffer.message_type() != ODP_MESSAGE_TYPE {
+                return Err(Error::UnexpectedResponse);
+            }
+            let body = message.message_buffer.body();
+            let (is_request, service_id, is_error, message_id) = parse_odp_header(body)?;
+            // A reply must come back from the addressed service flagged as a
+            // (non-error) response; otherwise the stream is desynced or the
+            // EC reported a failure whose error payload we don't decode here.
+            if is_request || service_id != u8::from(dst) {
+                return Err(Error::UnexpectedResponse);
+            }
+            if is_error {
+                return Err(Error::Protocol(format!(
+                    "EC returned an error response (service {service_id:#04x}, message {message_id})"
+                )));
+            }
+            // Deserialize while `body` still borrows the assembly buffer, so no
+            // owned copy of the payload is needed.
+            break RESP::deserialize(message_id, &body[ODP_HEADER_SZ..])
+                .map_err(|e| Error::Serialization(format!("deserialization: {e:?}")))?;
+        };
+
+        Ok(response)
     }
 
     fn thermal_get_var(&self, guid: uuid::Uuid) -> Result<f64, Error> {
