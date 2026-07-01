@@ -470,6 +470,7 @@ dependencies = [
  "battery-service-interface",
  "critical-section",
  "ec-test-lib",
+ "embassy-time",
  "time-alarm-service-interface",
 ]
 

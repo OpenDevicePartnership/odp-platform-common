@@ -19,6 +19,10 @@ battery-service-interface.workspace = true
 
 [dev-dependencies]
 critical-section.workspace = true
+# embassy-time is pulled transitively (via the service-relay crates) with no
+# time driver; the test binaries reference one. Activate the workspace std
+# driver so the host test build links (`std` => embassy-time's driver_std).
+embassy-time.workspace = true
 
 [lints]
 workspace = true
