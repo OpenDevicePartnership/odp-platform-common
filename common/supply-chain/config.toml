@@ -102,6 +102,14 @@ criteria = "safe-to-deploy"
 version = "0.10.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.crc]]
+version = "3.4.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.crc-catalog]]
+version = "2.5.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.crossbeam-deque]]
 version = "0.8.6"
 criteria = "safe-to-deploy"

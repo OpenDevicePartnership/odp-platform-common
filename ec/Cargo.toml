@@ -26,6 +26,7 @@ battery-service-interface = { git = "https://github.com/OpenDevicePartnership/em
 battery-service-relay = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "main" }
 thermal-service-relay = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "main" }
 embedded-services = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "main" }
+mctp-rs = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "main", features = ["serial"] }
 embedded-mcu-hal = "0.3.0"
 clap = { version = "4.6.0", features = ["derive"] }
 

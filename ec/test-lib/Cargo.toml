@@ -31,8 +31,8 @@ scopeguard = { version = "1.2" }
 
 # Serial specific
 serialport = { version = "4.8.1" }
-smbus-pec = "1.0.1"
 embedded-services.workspace = true
+mctp-rs.workspace = true
 thermal-service-relay.workspace = true
 
 [lints]
