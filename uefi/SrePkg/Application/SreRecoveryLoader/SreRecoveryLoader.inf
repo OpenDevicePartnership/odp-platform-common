@@ -1,0 +1,52 @@
+## @file
+#  SreRecoveryLoader - first iteration of the SRE recovery boot path.
+#  Reads \ValidationOS.wim from ESP into DRAM and registers it as a
+#  RAM disk via EFI_RAM_DISK_PROTOCOL. Foundation for a recovery flow
+#  that does not depend on writing the WIM into the NVMe Boot Partition.
+#
+#  Local-build tool. NOT committed to ADO.
+#
+#  Copyright (c) Microsoft Corporation. All rights reserved.
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+
+[Defines]
+  INF_VERSION                    = 0x00010006
+  BASE_NAME                      = SreRecoveryLoader
+  FILE_GUID                      = 9E47AD12-5C8F-4BE0-91D6-7A2B45F31C8E
+  MODULE_TYPE                    = UEFI_APPLICATION
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = EntryPoint
+
+#
+#  VALID_ARCHITECTURES           = IA32 X64 AARCH64
+#
+
+[Sources]
+  SreRecoveryLoader.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  DebugLib
+  MemoryAllocationLib
+  PrintLib
+  UefiApplicationEntryPoint
+  UefiBootServicesTableLib
+  UefiRuntimeServicesTableLib
+  UefiLib
+
+[Protocols]
+  gEfiLoadedImageProtocolGuid           ## CONSUMES
+  gEfiSimpleFileSystemProtocolGuid      ## CONSUMES
+  gEfiRamDiskProtocolGuid               ## CONSUMES
+  gEfiDevicePathProtocolGuid            ## CONSUMES
+
+[Guids]
+  gEfiGlobalVariableGuid                ## CONSUMES
+  gEfiFileInfoGuid                      ## CONSUMES
+  gEfiVirtualDiskGuid                   ## CONSUMES

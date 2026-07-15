@@ -1,0 +1,63 @@
+## @file
+#  Secure Recovery Environment (SRE) FMP Device Library.
+#
+#  Shell instance of FmpDeviceLib used by FmpDevicePkg/FmpDxe/FmpDxe.inf to
+#  publish the Firmware Management Protocol for the SRE firmware device. The
+#  apply path streams the staged WIM from the EFI System Partition to NVMe
+#  Boot Partition 1, verifying it against the signed descriptor's SHA-256.
+#
+#  Copyright (c) Microsoft Corporation. All rights reserved.<BR>
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = SreNvmeFmpDeviceLib
+  FILE_GUID      = D9E2C740-1A6B-4F5C-B832-8AC1D04E6F07
+  MODULE_TYPE    = DXE_DRIVER
+  VERSION_STRING = 1.0
+  LIBRARY_CLASS  = SreNvmeFmpDeviceLib|DXE_DRIVER UEFI_DRIVER
+
+#
+# The following information is for reference only and not required by the build tools.
+#
+#  VALID_ARCHITECTURES = IA32 X64 ARM AARCH64
+#
+
+[Sources]
+  SreFmpDeviceLib.c
+  SreImageSupport.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  CryptoPkg/CryptoPkg.dec
+  FmpDevicePkg/FmpDevicePkg.dec
+  SrePkg/SrePkg.dec
+
+[LibraryClasses]
+  BaseCryptLib
+  BaseLib
+  BaseMemoryLib
+  DebugLib
+  MemoryAllocationLib
+  PcdLib
+  PrintLib
+  SreStorageLib
+  UefiBootServicesTableLib
+  UefiRuntimeServicesTableLib
+
+[Guids]
+  gEfiFileInfoGuid                        ## CONSUMES
+  gEfiPartTypeSystemPartGuid              ## SOMETIMES_CONSUMES ## GUID # ESP selection
+  gOdpPkgTokenSpaceGuid                   ## CONSUMES
+
+[Protocols]
+  gEfiSimpleFileSystemProtocolGuid        ## CONSUMES
+
+[Pcd]
+  gFmpDevicePkgTokenSpaceGuid.PcdFmpDeviceBuildTimeLowestSupportedVersion    ## CONSUMES
+  gOdpPkgTokenSpaceGuid.PcdSreStagingPath       ## CONSUMES
+
+[Depex]
+  gEfiPciEnumerationCompleteProtocolGuid

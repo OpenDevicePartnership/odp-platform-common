@@ -1,0 +1,53 @@
+## @file
+#  BpRecoveryLoaderApp - SRE entry application. Dispatched as a BootOption
+#  by DeviceBootManagerPriorityBoot when PcdSreHotkeyRoutingEnabled=TRUE
+#  and Vol-Up+Power is latched at boot. Reads the SRE WIM from NVMe Boot
+#  Partition 1, locks BPs against further writes, registers the payload
+#  as a RAM disk via EFI_RAM_DISK_PROTOCOL, and chainloads
+#  \EFI\Boot\bootx64.efi from the resulting FAT volume.
+#
+#  Also usable via ESP + firmware boot entry for dev iteration without
+#  reflashing - AppEntry is unconditional and assumes the dispatcher
+#  already gated on hotkey state.
+#
+#  Copyright (c) Microsoft Corporation. All rights reserved.
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+
+[Defines]
+  INF_VERSION                    = 0x00010006
+  BASE_NAME                      = BpRecoveryLoaderApp
+  FILE_GUID                      = 5A98F2C1-7D3B-4E8F-A124-B6E891D45C03
+  MODULE_TYPE                    = UEFI_APPLICATION
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = AppEntry
+
+#
+#  VALID_ARCHITECTURES           = IA32 X64 AARCH64
+#
+
+[Sources]
+  BpRecoveryLoader.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  DebugLib
+  DevicePathLib
+  MemoryAllocationLib
+  UefiApplicationEntryPoint
+  UefiBootServicesTableLib
+  UefiRuntimeServicesTableLib
+
+[Protocols]
+  gEfiNvmExpressPassThruProtocolGuid    ## CONSUMES
+  gEfiRamDiskProtocolGuid               ## CONSUMES
+  gEfiDevicePathProtocolGuid            ## CONSUMES
+  gEfiSimpleFileSystemProtocolGuid      ## CONSUMES
+
+[Guids]
+  gEfiVirtualDiskGuid                   ## CONSUMES

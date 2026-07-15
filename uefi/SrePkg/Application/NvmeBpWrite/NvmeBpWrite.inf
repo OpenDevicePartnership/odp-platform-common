@@ -1,0 +1,56 @@
+## @file
+#  NvmeBpWrite - UEFI shell application that writes a host-supplied image
+#  to the NVMe Boot Partition. Issues Set Features FID=0x85 BPWPS=001b to
+#  unlock BP for write, then Firmware Image Download (opcode 0x11) +
+#  Firmware Commit (opcode 0x10, CA=110b Download to BP) to deliver the
+#  payload. Verifies via BPMBL/BPRSEL MMIO and Get Log Page LID=0x15.
+#  Two-mode state machine (WRITE / VERIFY / NOOP) persisted in the
+#  NvmeBpResult NVRAM variable lets the full cycle be driven from the
+#  host OS across two reboots.
+#
+#  BP write protection (lock/unlock) is otherwise owned by the FMP capsule
+#  update flow; this tool only unlocks for its own write and leaves the
+#  lock state for FMP to manage.
+#
+#  Copyright (c) Microsoft Corporation. All rights reserved.
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+
+[Defines]
+  INF_VERSION                    = 0x00010006
+  BASE_NAME                      = NvmeBpWrite
+  FILE_GUID                      = B7D8F211-3A6E-4C9D-A8E3-7F4B2A19D5C8
+  MODULE_TYPE                    = UEFI_APPLICATION
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = EntryPoint
+
+#
+#  VALID_ARCHITECTURES           = IA32 X64 AARCH64
+#
+
+[Sources]
+  NvmeBpWrite.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  DebugLib
+  MemoryAllocationLib
+  PrintLib
+  UefiApplicationEntryPoint
+  UefiBootServicesTableLib
+  UefiRuntimeServicesTableLib
+  UefiLib
+
+[Protocols]
+  gEfiNvmExpressPassThruProtocolGuid    ## CONSUMES
+  gEfiPciIoProtocolGuid                 ## CONSUMES   # BPMBL/BPRSEL/BPINFO MMIO read of BP1
+  gEfiLoadedImageProtocolGuid           ## CONSUMES
+  gEfiSimpleFileSystemProtocolGuid      ## CONSUMES
+
+[Guids]
+  gEfiGlobalVariableGuid                ## CONSUMES
+  gEfiFileInfoGuid                      ## CONSUMES

@@ -1,0 +1,52 @@
+## @file
+#  Secure Recovery Environment (SRE) Storage Library.
+#
+#  Stand-alone library that abstracts the SRE mass-storage device. This
+#  instance targets NVMe Boot Partitions: it locates the SRE NVMe controller
+#  from PcdSreDevicePathString and exposes size/read/lock and sequential
+#  write-session primitives (SreStorageRead, SreStorageWriteOpen,
+#  SreStorageWriteBlock, SreStorageWriteClose, SreStorageLock) declared in
+#  Include/Library/SreStorage.h.
+#
+#  Copyright (c) Microsoft Corporation. All rights reserved.<BR>
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = SreStorageNvmeLib
+  FILE_GUID      = 1B4F8E2A-6D93-4C71-9F0A-2E5C7A1D3B84
+  MODULE_TYPE    = DXE_DRIVER
+  VERSION_STRING = 1.0
+  CONSTRUCTOR    = SreStorageLibConstructor
+  LIBRARY_CLASS  = SreStorageLib|DXE_DRIVER UEFI_DRIVER
+
+#
+# The following information is for reference only and not required by the build tools.
+#
+#  VALID_ARCHITECTURES = IA32 X64 ARM AARCH64
+#
+
+[Sources]
+  SreStorageNvmeLib.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  SrePkg/SrePkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  DebugLib
+  DevicePathLib
+  MemoryAllocationLib
+  PcdLib
+  UefiBootServicesTableLib
+
+[Protocols]
+  gEfiNvmExpressPassThruProtocolGuid      ## CONSUMES
+  gEfiPciIoProtocolGuid                   ## CONSUMES
+
+[Pcd]
+  gOdpPkgTokenSpaceGuid.PcdSreDevicePathString  ## CONSUMES
