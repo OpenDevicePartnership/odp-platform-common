@@ -60,7 +60,7 @@ ConnectStorageDevice(
     // LocateDevicePath returns a handle to the target device or its closest parent if not found.  If successful but
     // the handle returned is the same as the previous handle, it means the device could not be located.
     RemainingPath = TargetPath;
-    Status = gBS->LocateDevicePath (&gEfiDevicePathProtocolGuid, &RemainingPath, *Handle);
+    Status = gBS->LocateDevicePath (&gEfiDevicePathProtocolGuid, &RemainingPath, Handle);
     if (!EFI_ERROR(Status) && PreviousHandle == *Handle) {
       Status = EFI_NOT_FOUND;
     }
