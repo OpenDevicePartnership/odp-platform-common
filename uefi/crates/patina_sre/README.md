@@ -24,8 +24,10 @@ ship a System Recovery Environment alongside the main OS. The flow:
 9. Fall back to the constructor-provided `main_os_path` if discovery yields
    nothing (or fails)
 
-The `with_dfci_bds_signal` builder opts into signalling the DFCI/SEMM
-device-setting stack at BDS entry.
+Opt-in builders add work at BDS entry: `with_capsule_processing` signals the
+platform capsule processor before EndOfDxe (drawing the boot logo first so
+firmware-update progress can render), and `with_dfci_bds_signal` drives the
+DFCI/SEMM device-setting stack.
 
 Follow-ups (tracked separately): a `HotkeyProvider` trait for OEM-specific
 button mechanisms, and a storage-backend abstraction so the recovery read works

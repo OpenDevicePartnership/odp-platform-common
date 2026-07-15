@@ -39,7 +39,7 @@ use patina::{
     error::EfiError,
     runtime_services::StandardRuntimeServices,
 };
-use patina_boot::{BootOrchestrator, helpers};
+use patina_boot::{BootOrchestrator, helpers, proxy};
 use r_efi::efi;
 
 use crate::bp_recovery;
@@ -191,6 +191,22 @@ static DFCI_START_OF_BDS_NOTIFY_GUID: efi::Guid = efi::Guid::from_fields(
     &[0x78, 0x12, 0xb0, 0x29, 0x9c, 0x45],
 );
 
+/// `gMuReadyToProcessCapsulesNotifyGuid` from `MsCorePkg.dec`. The C
+/// `PlatformBootManagerLib` signals this after `ConnectAll` in the
+/// `BOOT_ON_FLASH_UPDATE` path; the MU capsule processor
+/// (`SecuredCoreCapsuleProcessorDxe`) arms a callback on it only when its
+/// capsule queue is non-empty, drains the queue (applying FMP capsules),
+/// and cold-resets. Safe to signal unconditionally: with an empty queue no
+/// callback is registered, so it is a no-op.
+static MU_READY_TO_PROCESS_CAPSULES_NOTIFY_GUID: efi::Guid = efi::Guid::from_fields(
+    0x2ab1c860,
+    0xe697,
+    0x4ede,
+    0x8c,
+    0x0f,
+    &[0x65, 0xcd, 0x6e, 0x44, 0x44, 0x35],
+);
+
 /// Equivalent of the C `EfiEventGroupSignal(&group_guid)` macro: create a
 /// one-shot NOTIFY_SIGNAL event tied to `group_guid`, fire it, then close
 /// it. Used to broadcast a start-of-BDS-style notification to whichever
@@ -274,6 +290,15 @@ pub struct SreBootManager {
     /// DFCI/SEMM mailbox processing runs at BDS entry. Default `false`; platforms
     /// that ship the DFCI/SEMM stack opt in via [`Self::with_dfci_bds_signal`].
     dfci_bds_signal: bool,
+    /// When `true`, `execute()` signals `gMuReadyToProcessCapsulesNotifyGuid`
+    /// after connecting controllers (so FMP protocols are present) and before
+    /// EndOfDxe/flash lockdown. On a `BOOT_ON_FLASH_UPDATE` boot the MU capsule
+    /// processor drains its queue and cold-resets; on a normal boot the queue is
+    /// empty and the signal is a no-op. Without it, a staged capsule leaves the
+    /// PEI-set `BOOT_ON_FLASH_UPDATE` boot mode uncleared and the platform loops.
+    /// Default `false`. Platforms with the MU capsule queue opt in via
+    /// [`Self::with_capsule_processing`].
+    capsule_processing: bool,
 }
 
 impl SreBootManager {
@@ -285,6 +310,7 @@ impl SreBootManager {
             frontpage_app_path: None,
             bp_sre_fallback: false,
             dfci_bds_signal: false,
+            capsule_processing: false,
         }
     }
 
@@ -338,6 +364,18 @@ impl SreBootManager {
     /// entry. Default off; enable on platforms that ship the DFCI/SEMM drivers.
     pub fn with_dfci_bds_signal(mut self) -> Self {
         self.dfci_bds_signal = true;
+        self
+    }
+
+    /// Opt into MU capsule-queue processing during [`Self::execute`]. Signals
+    /// `gMuReadyToProcessCapsulesNotifyGuid` after connecting controllers and
+    /// before EndOfDxe, reproducing the C `PlatformBootManagerLib`
+    /// `BOOT_ON_FLASH_UPDATE` handoff to `SecuredCoreCapsuleProcessorDxe` that
+    /// the SRE boot manager otherwise omits. Required on platforms using the MU
+    /// capsule queue so a staged capsule is applied and the `BOOT_ON_FLASH_UPDATE`
+    /// boot mode is cleared; a no-op when nothing is queued. Default off.
+    pub fn with_capsule_processing(mut self) -> Self {
+        self.capsule_processing = true;
         self
     }
 }
@@ -523,6 +561,29 @@ impl BootOrchestrator for SreBootManager {
         // driver bindings can run during the open window.
         if let Err(e) = helpers::connect_all(boot_services) {
             log::error!("connect_all (pre-EndOfDxe) failed: {:?}", e);
+        }
+
+        // Drive MU capsule-queue processing before EndOfDxe. Controllers are
+        // connected (FMP protocols present) and the flash is still writable
+        // (SMM lockdown is skipped in BOOT_ON_FLASH_UPDATE mode). On a capsule
+        // boot the MU processor drains its queue and cold-resets from inside
+        // this signal, so execute() does not return; on a normal boot the queue
+        // is empty and this is a no-op. Mirrors the C PlatformBootManagerLib
+        // BOOT_ON_FLASH_UPDATE path that SreBootManager replaces.
+        if self.capsule_processing {
+            // Draw + register the OEM boot logo first (GOP is up after
+            // connect_all) so the MU capsule processor's DisplayUpdateProgress
+            // can render the firmware-update progress bar instead of a black
+            // screen. The C logo-draw sites (MsBootPolicy/DeviceBootManagerLib)
+            // are bypassed on the SRE path. Best-effort: a missing proxy or no
+            // GOP just means no bar, not a failed update.
+            if let Err(e) = proxy::display_boot_logo(boot_services) {
+                log::warn!("proxy::display_boot_logo failed (no progress bar): {:?}", e);
+            }
+
+            if let Err(e) = signal_event_group(boot_services, &MU_READY_TO_PROCESS_CAPSULES_NOTIFY_GUID) {
+                log::error!("signal gMuReadyToProcessCapsulesNotifyGuid failed: {:?}", e);
+            }
         }
 
         if let Err(e) = helpers::signal_bds_phase_entry(boot_services) {

@@ -36,6 +36,7 @@ pub mod config;
 pub mod connect_controller;
 pub mod helpers;
 pub mod orchestrators;
+pub mod proxy;
 pub mod strategies;
 
 pub use boot_dispatcher::BootDispatcher;
