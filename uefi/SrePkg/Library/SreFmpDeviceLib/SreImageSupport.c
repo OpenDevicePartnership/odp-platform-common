@@ -273,9 +273,17 @@ ApplyWimToSreStorage(
       RemainingToHash -= HashAmt;
     }
 
-    // If the WIM has no more data, pad the rest of the buffer with zeros and add descriptor
+    // Zero-pad any short read (the WIM ends before the partition does).
     if (ReadAmt < BlockSize) {
       ZeroMem(&((UINT8*)Chunk)[ReadAmt], BlockSize - ReadAmt);
+    }
+
+    // Stamp the signed descriptor into the tail of the FINAL partition block
+    // only. CheckImage guarantees WimSize + sizeof (SRE_WIM_DESCRIPTOR) <= BpSize,
+    // so the last block's trailing descriptor bytes always land in the
+    // zero-padded region past the WIM -- never over real (already-hashed) WIM
+    // data, which would silently commit an image that fails to match WimHash.
+    if (BlockIndex == BlockCount - 1) {
       CopyMem(&((UINT8*)Chunk)[BlockSize - sizeof (SRE_WIM_DESCRIPTOR)], Descriptor, sizeof (SRE_WIM_DESCRIPTOR));
     }
 

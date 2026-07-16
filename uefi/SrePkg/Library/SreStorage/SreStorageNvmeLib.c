@@ -501,13 +501,7 @@ SreStorageWriteOpen (
     return Status;
   }
 
-  // Unlock the partition so blocks can be written.
-  Status = NvmeSetLockState (PartitionIndex, WriteUnlocked);
-  if (EFI_ERROR (Status)) {
-    return Status;
-  }
-
-  // Record state and return
+  // Record state and return values
   mSreWriteSession.PartitionIndex = PartitionIndex;
   mSreWriteSession.BlockSize      = (UINTN)PageGranularity * EFI_PAGE_SIZE;
   mSreWriteSession.BlockCount     = (PartitionSize + mSreWriteSession.BlockSize - 1) / mSreWriteSession.BlockSize;
@@ -516,8 +510,13 @@ SreStorageWriteOpen (
   *BlockSize  = mSreWriteSession.BlockSize;
   *BlockCount = mSreWriteSession.BlockCount;
   *BlockBuffer = AllocateAlignedPages(EFI_SIZE_TO_PAGES(mSreWriteSession.BlockSize), mNvmePassThru->Mode->IoAlign);
-  
-  return EFI_SUCCESS;
+
+  if (*BlockBuffer == NULL) {
+    return EFI_OUT_OF_RESOURCES;
+  }
+
+  // Unlocking the partition puts the chip into the state where the temporary write location is available
+  return NvmeSetLockState (PartitionIndex, WriteUnlocked);
 }
 
 EFI_STATUS
@@ -579,7 +578,7 @@ SreStorageWriteClose (
 
     EFI_NVM_EXPRESS_COMMAND  Cmd = {
       .Cdw0.Opcode = NVME_ADMIN_FW_COMMIT_CMD,
-      .Cdw10       = ((UINT32)mSreWriteSession.BlockCount << SRE_NVME_FW_COMMIT_BPID_SHIFT) |
+      .Cdw10       = ((UINT32)mSreWriteSession.PartitionIndex << SRE_NVME_FW_COMMIT_BPID_SHIFT) |
                     ((UINT32)SRE_NVME_FW_COMMIT_ACTION_DOWNLOAD_BP << SRE_NVME_FW_COMMIT_ACTION_SHIFT),
       .Flags       = CDW10_VALID
     };
