@@ -1,0 +1,47 @@
+# Cargo manifest for the patina_sre crate.
+#
+# SPDX-License-Identifier: MIT
+#
+
+[package]
+name = "patina_sre"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+repository = "https://github.com/OpenDevicePartnership/odp-platform-common"
+homepage = "https://github.com/OpenDevicePartnership/odp-platform-common"
+description = """
+System Recovery Environment boot orchestrator. Implements
+patina_boot::BootOrchestrator for platforms shipping an SRE alongside the main
+OS: Boot#### dispatch, hotkey-routed SRE/frontpage/USB boot, WIM RAM-disk
+recovery from an NVMe boot partition, and MU capsule-queue processing.
+"""
+keywords = ["uefi", "patina", "firmware", "recovery", "sre"]
+categories = ["embedded", "no-std"]
+readme = "README.md"
+
+[dependencies]
+log = { version = "0.4", default-features = false }
+r-efi = { version = "7", default-features = false }
+spin = { version = "0.9", default-features = false, features = ["spin_mutex"] }
+
+# patina_boot lives at uefi/crates/patina_boot/ in this same repo. Use a path
+# dependency so patina_boot and patina_sre build and change together in one PR,
+# and so both share a single patina_boot (and its pinned patina) for trait/type
+# identity. Swap to a `version = ...` line once patina_boot publishes to crates.io.
+patina_boot = { path = "../patina_boot" }
+
+# Must match the patina that patina_boot itself uses, or trait/type identity
+# breaks (two distinct `patina::DevicePathBuf` types, mismatched impls).
+patina = { version = "22", features = ["unstable-device-path"] }
+
+[dev-dependencies]
+patina = { version = "22", features = ["mockall", "unstable-device-path"] }
+mockall = { version = "0.13" }
+
+[lints.clippy]
+suspicious = "deny"
+correctness = "deny"
+perf = "deny"
+style = "deny"
