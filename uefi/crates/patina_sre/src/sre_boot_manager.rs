@@ -349,9 +349,9 @@ impl SreBootManager {
     /// performs a one-time LID 0x15 head read of BP1 before iterating
     /// `Boot####` entries:
     ///
-    /// - If BP1 contains a valid WIM magic, USB `Boot####` entries are
+    /// - If BP1 contains a valid wrapped SRE payload (FAT signature `0x55AA`), USB `Boot####` entries are
     ///   skipped (they typically point at the SRE flashing tool whose
-    ///   `\EFI\Boot\bootx64.efi` would re-run and re-flash the same WIM,
+    ///   [`bp_recovery::DEFAULT_BOOT_FILE_PATH`] would re-run and re-flash the same payload,
     ///   creating a reflash loop on Windows-less devices).
     /// - After all non-USB `Boot####` and `main_os_path` fall through
     ///   without booting, [`bp_recovery::run_sre_flow`] is dispatched
