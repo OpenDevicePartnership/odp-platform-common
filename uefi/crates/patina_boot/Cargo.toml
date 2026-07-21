@@ -18,17 +18,15 @@ readme = "README.md"
 
 [dependencies]
 log = { version = "0.4", default-features = false }
-# patina/patina_macro are pinned from the kat-perez fork, which carries the
-# r-efi 7 bump until that change lands upstream.
-patina = { git = "https://github.com/kat-perez/patina", rev = "bfe2a4b877f7ff7ba60d8b94c42150a118fe8499", features = ["unstable-device-path"] }
-patina_macro = { git = "https://github.com/kat-perez/patina", rev = "bfe2a4b877f7ff7ba60d8b94c42150a118fe8499" }
+patina = { version = "22", features = ["unstable-device-path"] }
+patina_macro = { version = "22" }
 r-efi = { version = "7", default-features = false }
 spin = { version = "0.9", default-features = false, features = ["spin_mutex", "once"] }
 zerocopy = { version = "0.8", default-features = false }
 zerocopy-derive = { version = "0.8" }
 
 [dev-dependencies]
-patina = { git = "https://github.com/kat-perez/patina", rev = "bfe2a4b877f7ff7ba60d8b94c42150a118fe8499", features = ["mockall", "unstable-device-path"] }
+patina = { version = "22", features = ["mockall", "unstable-device-path"] }
 mockall = { version = "0.14" }
 
 [lints.clippy]
