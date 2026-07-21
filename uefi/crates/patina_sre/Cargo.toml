@@ -14,8 +14,8 @@ homepage = "https://github.com/OpenDevicePartnership/odp-platform-common"
 description = """
 System Recovery Environment boot orchestrator. Implements
 patina_boot::BootOrchestrator for platforms shipping an SRE alongside the main
-OS — normal boot today; hotkey-to-SRE, WIM RAM-disk boot, and capsule pre-boot
-hook land in follow-up issues.
+OS: Boot#### dispatch, hotkey-routed SRE/frontpage/USB boot, WIM RAM-disk
+recovery from an NVMe boot partition, and MU capsule-queue processing.
 """
 keywords = ["uefi", "patina", "firmware", "recovery", "sre"]
 categories = ["embedded", "no-std"]

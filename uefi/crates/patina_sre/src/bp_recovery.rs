@@ -1,7 +1,8 @@
 //! SRE recovery boot path: read the recovery payload from NVMe Boot
 //! Partition 1 via Get Log Page LID=0x15, install a synthesized
 //! EFI_BLOCK_IO_PROTOCOL handle backed by the in-memory buffer, and
-//! chainload \EFI\Boot\bootx64.efi from the resulting FAT volume.
+//! chainload the architecture's default bootloader
+//! ([`DEFAULT_BOOT_FILE_PATH`]) from the resulting FAT volume.
 //!
 //! This module inlines FFI for EFI_NVM_EXPRESS_PASS_THRU_PROTOCOL (for
 //! Identify + Get Log Page) and EFI_BLOCK_IO_PROTOCOL (the RAM disk
@@ -41,8 +42,13 @@ const READ_CHUNK_MAX: usize = 512 * 1024;
 /// Used when the MDTS probe fails.
 const READ_CHUNK_DEFAULT: usize = 64 * 1024;
 
-/// Path chainloaded from the registered RAM disk's FAT volume.
-const CHAINLOAD_FILE_PATH: &str = "\\EFI\\Boot\\bootx64.efi";
+/// Removable-media default bootloader path for the target architecture
+/// (UEFI spec §3.5.1.1). Chainloaded from the registered RAM disk's FAT
+/// volume, and appended to USB SimpleFileSystem paths by the boot manager.
+#[cfg(target_arch = "aarch64")]
+pub(crate) const DEFAULT_BOOT_FILE_PATH: &str = "\\EFI\\Boot\\bootaa64.efi";
+#[cfg(not(target_arch = "aarch64"))]
+pub(crate) const DEFAULT_BOOT_FILE_PATH: &str = "\\EFI\\Boot\\bootx64.efi";
 
 /// EFI_NVM_EXPRESS_PASS_THRU_PROTOCOL FFI.
 mod nvme_pass_thru {
@@ -195,6 +201,16 @@ fn read_bp_via_log_page(
     chunk_bytes: usize,
     dest: &mut [u8],
 ) -> Result<(), EfiError> {
+    // Reads are issued in whole dwords (NUMD is a 0-based dword count); a
+    // zero or unaligned size would underflow `numd` or stall the loop.
+    if chunk_bytes < 4 || !chunk_bytes.is_multiple_of(4) || !dest.len().is_multiple_of(4) {
+        log::error!(
+            "read_bp_via_log_page: sizes must be dword-aligned and non-zero (chunk={}, dest={})",
+            chunk_bytes,
+            dest.len()
+        );
+        return Err(EfiError::from(efi::Status::INVALID_PARAMETER));
+    }
     let mut bp_off: u64 = 0;
     while (bp_off as usize) < dest.len() {
         let remaining = dest.len() - bp_off as usize;
@@ -382,17 +398,66 @@ extern "efiapi" fn ram_disk_flush_blocks(_this: *mut block_io::Protocol) -> efi:
     efi::Status::SUCCESS
 }
 
+/// A registered RAM disk install: the synthesized handle, the device path
+/// installed on it, and the leaked protocol state. Returned by
+/// [`register_ram_disk`] so the caller can `locate_device_path` the RAM disk
+/// for chainloading and tear the install down if control returns.
+struct RamDiskInstall {
+    handle: efi::Handle,
+    device_path: *const c_void,
+    state: *mut RamDiskBlockIo,
+}
+
+impl RamDiskInstall {
+    /// Disconnect bound drivers and uninstall both protocols, then free the
+    /// protocol state. Returns `Err` without freeing the state if an
+    /// uninstall is refused (e.g. a driver still holds the interface open);
+    /// in that case the backing buffer must also stay live.
+    ///
+    /// The 24-byte leaked device-path allocation is not reclaimed: consumers
+    /// may retain the pointer, and the size is negligible.
+    fn teardown<B: BootServices>(self, boot_services: &B) -> Result<(), EfiError> {
+        // Best-effort: close driver opens (FatDxe/PartitionDxe) so the
+        // uninstalls below are not refused with ACCESS_DENIED.
+        // SAFETY: handle is the RAM disk handle created by register_ram_disk;
+        // its driver bindings are live for the duration of the call.
+        let _ = unsafe { boot_services.disconnect_controller(self.handle, None, None) };
+        // SAFETY: both interfaces were installed on `handle` with exactly
+        // these pointers by register_ram_disk.
+        unsafe {
+            boot_services.uninstall_protocol_interface_unchecked(
+                self.handle,
+                &efi::protocols::device_path::PROTOCOL_GUID,
+                self.device_path as *mut c_void,
+            )
+        }
+        .map_err(EfiError::from)?;
+        // SAFETY: as above.
+        unsafe {
+            boot_services.uninstall_protocol_interface_unchecked(
+                self.handle,
+                &block_io::PROTOCOL_GUID,
+                self.state as *mut c_void,
+            )
+        }
+        .map_err(EfiError::from)?;
+        // SAFETY: no protocol references the state after the uninstalls.
+        drop(unsafe { alloc::boxed::Box::from_raw(self.state) });
+        Ok(())
+    }
+}
+
 /// Expose `dram` as a Block IO device on a synthesized handle so the
 /// rest of UEFI (PartitionDxe / FatDxe) can bind to it without needing
 /// `MdeModulePkg`'s `RamDiskDxe` (which depexes on HII and doesn't
-/// reliably install under Patina-style dispatchers). Returns the device
-/// path installed on the synthesized handle so the chainload step can
-/// `locate_device_path` it and `LoadImage` from the FAT volume that
+/// reliably install under Patina-style dispatchers). Returns a
+/// [`RamDiskInstall`] whose device path the chainload step can
+/// `locate_device_path` and `LoadImage` from the FAT volume that
 /// `FatDxe` will bind on top.
-fn register_ram_disk<B: BootServices>(boot_services: &B, dram: &[u8]) -> Result<*const c_void, EfiError> {
+fn register_ram_disk<B: BootServices>(boot_services: &B, dram: &[u8]) -> Result<RamDiskInstall, EfiError> {
     // Allocate state on the heap and leak it so the install survives this
     // function return. The buffer + state must outlive the firmware's use of
-    // the protocol; for this boot they live until ExitBootServices.
+    // the protocol; they stay live until teardown or ExitBootServices.
     let mut state = alloc::boxed::Box::new(RamDiskBlockIo {
         protocol: block_io::Protocol {
             revision: block_io::REVISION,
@@ -451,17 +516,25 @@ fn register_ram_disk<B: BootServices>(boot_services: &B, dram: &[u8]) -> Result<
 
     // SAFETY: handle returned by install above; device path bytes are leaked
     // and well-formed (Vendor node + End).
-    unsafe {
+    if let Err(s) = unsafe {
         boot_services.install_protocol_interface_unchecked(
             Some(handle),
             &efi::protocols::device_path::PROTOCOL_GUID,
             dp_ptr,
         )
-    }
-    .map_err(|s| {
+    } {
         log::error!("InstallProtocolInterface(DevicePath): {:?}", s);
-        EfiError::from(s)
-    })?;
+        // Roll back the BlockIo install so no half-registered handle remains.
+        // SAFETY: block_io was installed on `handle` with `state_ptr` above.
+        let rollback = unsafe {
+            boot_services.uninstall_protocol_interface_unchecked(handle, &block_io::PROTOCOL_GUID, state_ptr as *mut c_void)
+        };
+        if rollback.is_ok() {
+            // SAFETY: no protocol references the state after the uninstall.
+            drop(unsafe { alloc::boxed::Box::from_raw(state_ptr) });
+        }
+        return Err(EfiError::from(s));
+    }
 
     log::info!(
         "RAM disk Block IO installed on synthesized handle ({} MiB)",
@@ -481,20 +554,37 @@ fn register_ram_disk<B: BootServices>(boot_services: &B, dram: &[u8]) -> Result<
         );
     }
 
-    Ok(dp_ptr as *const c_void)
+    Ok(RamDiskInstall { handle, device_path: dp_ptr as *const c_void, state: state_ptr })
 }
 
 /// Compute length of a device path in bytes (walks until END_ENTIRE).
+///
+/// Returns 0 on malformed input — a node length below the 4-byte header
+/// minimum, or a total size above the sanity cap — so callers can fail
+/// cleanly instead of hanging or slicing out of bounds.
 pub(crate) unsafe fn device_path_size(dp: *const u8) -> usize {
+    /// Sanity cap for the walk; real device paths are well under this.
+    const DEVICE_PATH_MAX_BYTES: usize = 64 * 1024;
     let mut p = dp;
     loop {
-        // SAFETY: caller guarantees `dp` is a valid UEFI device-path.
+        // SAFETY: caller guarantees `dp` points at a device path; the length
+        // and total-size checks below stop the walk on malformed input
+        // instead of reading arbitrary memory.
         let dp_type = unsafe { *p };
         let dp_subtype = unsafe { *p.add(1) };
         let length = unsafe { (*p.add(2) as u16) | ((*p.add(3) as u16) << 8) } as usize;
+        // A node length below the 4-byte header minimum can't be walked
+        // (length 0 would spin forever). Return 0 so callers fail cleanly.
+        if length < 4 {
+            return 0;
+        }
         p = unsafe { p.add(length) };
+        let total = (p as usize) - (dp as usize);
+        if total > DEVICE_PATH_MAX_BYTES {
+            return 0;
+        }
         if dp_type == 0x7F && dp_subtype == 0xFF {
-            return (p as usize) - (dp as usize);
+            return total;
         }
     }
 }
@@ -552,7 +642,12 @@ fn chainload_from_ramdisk<B: BootServices>(
     // build the LoadImage path off THAT handle's device path. Same
     // workaround pattern used for USB SFS dispatch.
     let parent_size = unsafe { device_path_size(parent_dp as *const u8) };
-    let parent_payload_size = parent_size - 4; // strip END_ENTIRE
+    // Strip END_ENTIRE; checked_sub guards against a malformed path
+    // (device_path_size returns 0) underflowing into a huge slice.
+    let Some(parent_payload_size) = parent_size.checked_sub(4) else {
+        log::error!("RAM disk device path malformed (size={})", parent_size);
+        return Err(EfiError::from(efi::Status::INVALID_PARAMETER));
+    };
     let parent_prefix = unsafe { core::slice::from_raw_parts(parent_dp as *const u8, parent_payload_size) };
 
     let sfs_handles = boot_services
@@ -589,8 +684,12 @@ fn chainload_from_ramdisk<B: BootServices>(
 
     // Build chainload path: <sfs_handle_dp> (less END) + FilePath + END.
     let sfs_total = unsafe { device_path_size(sfs_dp) };
-    let sfs_payload_size = sfs_total - 4;
-    let file_node = build_file_path_node(CHAINLOAD_FILE_PATH);
+    // Same malformed-path guard as the parent-path calculation above.
+    let Some(sfs_payload_size) = sfs_total.checked_sub(4) else {
+        log::error!("SFS device path malformed (size={})", sfs_total);
+        return Err(EfiError::from(efi::Status::INVALID_PARAMETER));
+    };
+    let file_node = build_file_path_node(DEFAULT_BOOT_FILE_PATH);
 
     let mut full_path = Vec::with_capacity(sfs_payload_size + file_node.len());
     // SAFETY: sfs_dp + sfs_payload_size in-bounds per device_path_size.
@@ -603,7 +702,7 @@ fn chainload_from_ramdisk<B: BootServices>(
     let new_image = boot_services
         .load_image(true, image_handle, device_path_opt, None)
         .map_err(|status| {
-            log::error!("LoadImage({}): {:?}", CHAINLOAD_FILE_PATH, status);
+            log::error!("LoadImage({}): {:?}", DEFAULT_BOOT_FILE_PATH, status);
             EfiError::from(status)
         })?;
 
@@ -621,7 +720,7 @@ fn chainload_from_ramdisk<B: BootServices>(
 ///   3. Probe MDTS, pick chunk size
 ///   4. Read BP1 via chunked LID 0x15 into a fresh DRAM allocation
 ///   5. Register the allocation as a RAM disk
-///   6. Chainload \EFI\Boot\bootx64.efi from the FAT volume on the RAM disk
+///   6. Chainload [`DEFAULT_BOOT_FILE_PATH`] from the FAT volume on the RAM disk
 ///
 /// BP write protection (lock/unlock) is owned by the FMP capsule flow;
 /// SRE boot is read-only against BPWPS.
@@ -637,12 +736,11 @@ pub fn run_sre_flow<B: BootServices>(boot_services: &B, image_handle: efi::Handl
 
     let chunk = probe_max_transfer(passthru);
 
-    // 1 GiB DRAM allocation for BP image. Vec keeps the lifetime tied to
-    // this function's scope; the RAM-disk protocol borrows the pointer
-    // and keeps the region live via its own bookkeeping while registered.
-    // SAFETY note: handing a non-static-lifetime allocation to a UEFI
-    // protocol is a deliberate hand-off; the chainloaded OS takes over
-    // memory ownership when ExitBootServices fires.
+    // 1 GiB DRAM allocation for BP image. The RAM-disk protocol borrows the
+    // pointer while registered; this frame retains ownership and frees the
+    // buffer after a successful teardown when the chainload returns control.
+    // On a successful boot the chainloaded OS takes over memory ownership at
+    // ExitBootServices and this frame never resumes.
     //
     // Fallible alloc so we can surface OUT_OF_RESOURCES rather than panic.
     let mut buf: Vec<u8> = Vec::new();
@@ -659,14 +757,27 @@ pub fn run_sre_flow<B: BootServices>(boot_services: &B, image_handle: efi::Handl
     read_bp_via_log_page(passthru, TARGET_BPID, chunk, &mut buf)?;
     log::info!("BP read complete ({} bytes)", buf.len());
 
-    let ram_dp = register_ram_disk(boot_services, &buf)?;
+    let install = register_ram_disk(boot_services, &buf)?;
 
-    // The buffer's lifetime now belongs to the RAM disk + chainloaded OS.
-    // Leak it so the Vec destructor doesn't free the backing pages out
-    // from under the RAM disk before ExitBootServices.
-    core::mem::forget(buf);
+    let result = chainload_from_ramdisk(boot_services, image_handle, install.device_path);
 
-    chainload_from_ramdisk(boot_services, image_handle, ram_dp)
+    // Control only reaches here if the load failed or the chainloaded image
+    // exited; a successful boot calls ExitBootServices and never returns.
+    // Tear the RAM disk down so later boot attempts in this same boot don't
+    // dispatch against a BlockIo backed by a freed buffer, and reclaim the
+    // BP allocation.
+    match install.teardown(boot_services) {
+        Ok(()) => drop(buf),
+        Err(e) => {
+            // An interface is still open somewhere; keep the buffer live for
+            // the rest of this boot rather than free memory a driver may
+            // still read through the protocol.
+            log::warn!("RAM disk teardown failed ({:?}); BP buffer stays allocated", e);
+            core::mem::forget(buf);
+        }
+    }
+
+    result
 }
 
 /// True if BP1 contains a FAT volume at offset 0 — the production-correct
@@ -754,7 +865,7 @@ mod tests {
 
     #[test]
     fn test_build_file_path_node_chainload_default() {
-        let bytes = build_file_path_node(CHAINLOAD_FILE_PATH);
+        let bytes = build_file_path_node(DEFAULT_BOOT_FILE_PATH);
         // First two bytes must always be the FilePath node type/subtype.
         assert_eq!(bytes[0], 0x04, "MEDIA_DEVICE_PATH type");
         assert_eq!(bytes[1], 0x04, "MEDIA_FILEPATH_DP subtype");
@@ -935,5 +1046,38 @@ mod tests {
         // SAFETY: protocol alive on stack.
         let result = read_bp_via_log_page(&mut protocol, 1, 64 * 1024, &mut dest);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_bp_via_log_page_rejects_unaligned_sizes() {
+        let mut protocol = make_nvme_protocol(mock_get_log_page_fails);
+        let mut dest = [0u8; 64];
+        // Zero and non-dword chunk sizes must be rejected before any command
+        // is issued (the mock would fail the call if one were issued).
+        assert!(read_bp_via_log_page(&mut protocol, 1, 0, &mut dest).is_err());
+        assert!(read_bp_via_log_page(&mut protocol, 1, 6, &mut dest).is_err());
+    }
+
+    #[test]
+    fn test_device_path_size_walks_and_rejects_malformed() {
+        // Well-formed: single END_ENTIRE node.
+        let end_only = [0x7Fu8, 0xFF, 0x04, 0x00];
+        // SAFETY: well-formed, END-terminated byte stream.
+        assert_eq!(unsafe { device_path_size(end_only.as_ptr()) }, 4);
+
+        // Well-formed: one 6-byte node + END_ENTIRE.
+        let usb = [0x03u8, 0x05, 0x06, 0x00, 0, 0, 0x7F, 0xFF, 0x04, 0x00];
+        // SAFETY: as above.
+        assert_eq!(unsafe { device_path_size(usb.as_ptr()) }, 10);
+
+        // Malformed: node length 0 would never advance the walk.
+        let zero_len = [0x01u8, 0x01, 0x00, 0x00, 0x7F, 0xFF, 0x04, 0x00];
+        // SAFETY: the length guard returns before advancing past the node.
+        assert_eq!(unsafe { device_path_size(zero_len.as_ptr()) }, 0);
+
+        // Malformed: node length below the 4-byte header minimum.
+        let short_len = [0x01u8, 0x01, 0x03, 0x00, 0x7F, 0xFF, 0x04, 0x00];
+        // SAFETY: as above.
+        assert_eq!(unsafe { device_path_size(short_len.as_ptr()) }, 0);
     }
 }

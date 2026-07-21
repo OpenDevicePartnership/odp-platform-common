@@ -21,8 +21,11 @@
 //!    constructor-provided `main_os_path`
 //! 9. Return `EfiError::NotFound` if every boot attempt has been exhausted
 //!
-//! Capsule-update orchestration is tracked separately and will layer on without
-//! changing the public constructor surface.
+//! Optional platform hooks, all default-off and builder-enabled: MU
+//! capsule-queue processing before EndOfDxe
+//! ([`SreBootManager::with_capsule_processing`]), a DFCI start-of-BDS signal
+//! ([`SreBootManager::with_dfci_bds_signal`]), and BP1 SRE recovery fallback
+//! ([`SreBootManager::with_bp_sre_fallback`]).
 //!
 //! ## License
 //!
@@ -256,17 +259,22 @@ fn interleave_connect_and_dispatch<B: BootServices, D: DxeDispatch + ?Sized>(
         }
     }
 
-    log::warn!("connect-dispatch interleaving did not converge after {MAX_ROUNDS} rounds");
+    // Expected on platforms where dispatch reports remaining work: stopping
+    // after MAX_ROUNDS is by design, and the pre-EndOfDxe `connect_all` pass
+    // in `execute` covers late-binding drivers.
+    log::debug!("DXE dispatch reports remaining work after {MAX_ROUNDS} round(s); continuing by design");
 
     Ok(())
 }
 
 /// SRE boot manager implementing [`BootOrchestrator`].
 ///
-/// Skeleton — normal boot path plus hotkey dispatch when paths are
-/// configured via the `with_*_path` builder methods. WIM-to-RAM-disk boot
-/// and capsule-update pre-boot hook will land in subsequent issues and
-/// extend this orchestrator without changing the public constructor surface.
+/// Normal boot path plus hotkey dispatch when paths are configured via the
+/// `with_*_path` builder methods, with optional builder-enabled hooks:
+/// WIM RAM-disk recovery via [`bp_recovery::run_sre_flow`]
+/// ([`Self::with_bp_sre_fallback`]), MU capsule-queue processing
+/// ([`Self::with_capsule_processing`]), and a DFCI start-of-BDS signal
+/// ([`Self::with_dfci_bds_signal`]).
 pub struct SreBootManager {
     main_os_path: DevicePathBuf,
     /// Optional FwFile device path for the SRE recovery app — dispatched
@@ -398,7 +406,7 @@ fn device_path_has_fw_file_node(dp: &patina::device_path::paths::DevicePath) -> 
 }
 
 /// True if any node in `dp` is a USB messaging node (Usb, UsbClass, or
-/// UsbWwid sub-types). Used by [`find_first_usb_block_io_device_path`] to
+/// UsbWwid sub-types). Used by [`find_first_usb_sfs_device_path`] to
 /// filter enumerated `SimpleFileSystem` handles.
 fn device_path_has_usb_node(dp: &patina::device_path::paths::DevicePath) -> bool {
     use patina::device_path::node_defs::{DevicePathType, MessagingSubType};
@@ -420,11 +428,12 @@ fn device_path_has_usb_node(dp: &patina::device_path::paths::DevicePath) -> bool
 /// because: (1) SFS handles only exist on mounted FAT filesystems —
 /// `PartitionDxe` and `FatDxe` cooperate to install SFS specifically on
 /// the partition hosting a recognizable volume; (2) `LoadImage` on a
-/// path terminating in an SFS handle auto-resolves `\EFI\Boot\BOOTX64.EFI`.
-/// Picking a whole-device `BlockIo` handle instead gives a path that
-/// terminates at the USB messaging node, and `LoadImage` returns
-/// `NotFound` because there's no filesystem at that level.
-fn find_first_usb_block_io_device_path<B: BootServices>(boot_services: &B) -> Option<DevicePathBuf> {
+/// path terminating in an SFS handle auto-resolves the arch default
+/// bootloader ([`bp_recovery::DEFAULT_BOOT_FILE_PATH`]). Picking a
+/// whole-device `BlockIo` handle instead gives a path that terminates at
+/// the USB messaging node, and `LoadImage` returns `NotFound` because
+/// there's no filesystem at that level.
+fn find_first_usb_sfs_device_path<B: BootServices>(boot_services: &B) -> Option<DevicePathBuf> {
     use patina::boot_services::protocol_handler::HandleSearchType;
     use patina::device_path::paths::DevicePath;
     use r_efi::protocols::{device_path, simple_file_system};
@@ -451,12 +460,12 @@ fn find_first_usb_block_io_device_path<B: BootServices>(boot_services: &B) -> Op
         };
 
         if device_path_has_usb_node(dp_ref) {
-            // Append `\EFI\Boot\BOOTX64.EFI` as a FilePath node. Patina's
-            // `LoadImage` does not apply the UEFI removable-media auto-resolve
-            // rule (which would otherwise pick up the default fallback
-            // bootloader when handed a bare SFS-handle path), so we must
-            // construct the explicit path ourselves or `LoadImage` returns
-            // `NotFound`.
+            // Append the arch default bootloader path as a FilePath node.
+            // Patina's `LoadImage` does not apply the UEFI removable-media
+            // auto-resolve rule (which would otherwise pick up the default
+            // fallback bootloader when handed a bare SFS-handle path), so we
+            // must construct the explicit path ourselves or `LoadImage`
+            // returns `NotFound`.
             //
             // SAFETY: dp_ptr is a valid device path terminated by END_ENTIRE.
             let base_total = unsafe { bp_recovery::device_path_size(dp_ptr as *const u8) };
@@ -469,7 +478,7 @@ fn find_first_usb_block_io_device_path<B: BootServices>(boot_services: &B) -> Op
             let prefix = unsafe { core::slice::from_raw_parts(dp_ptr as *const u8, prefix_size) };
             let mut bytes = alloc::vec::Vec::<u8>::with_capacity(base_total + 32);
             bytes.extend_from_slice(prefix);
-            bytes.extend_from_slice(&bp_recovery::build_file_path_node("\\EFI\\Boot\\BOOTX64.EFI"));
+            bytes.extend_from_slice(&bp_recovery::build_file_path_node(bp_recovery::DEFAULT_BOOT_FILE_PATH));
             // SAFETY: `bytes` is well-formed (prefix nodes + FilePath node +
             // END_ENTIRE, in that order).
             let full = match unsafe { DevicePath::try_from_ptr(bytes.as_ptr()) } {
@@ -665,7 +674,7 @@ impl BootOrchestrator for SreBootManager {
                 }
             },
             SreHotkey::VolumeDown => {
-                if let Some(usb_path) = find_first_usb_block_io_device_path(boot_services) {
+                if let Some(usb_path) = find_first_usb_sfs_device_path(boot_services) {
                     log::info!(
                         "SRE hotkey: Vol-Down + USB present -> dispatching USB boot at {:?}",
                         usb_path
@@ -892,5 +901,80 @@ mod tests {
     #[test]
     fn test_arc_dyn_construction() {
         let _: Arc<dyn BootOrchestrator> = Arc::new(SreBootManager::new(test_device_path()));
+    }
+
+    // === Device-path classification helper tests ===
+    //
+    // Raw node byte streams (header = [type, sub_type, len_lo, len_hi]),
+    // matching the UEFI spec node layouts.
+
+    /// ACPI PciRoot node: type 2 (ACPI), sub 1, len 12.
+    const NODE_PCI_ROOT: [u8; 12] = [0x02, 0x01, 0x0C, 0x00, 0xD0, 0x41, 0x03, 0x0A, 0x00, 0x00, 0x00, 0x00];
+    /// Messaging/Usb node: type 3, sub 5, len 6.
+    const NODE_USB: [u8; 6] = [0x03, 0x05, 0x06, 0x00, 0x00, 0x00];
+    /// Messaging/UsbClass node: type 3, sub 15, len 11.
+    const NODE_USB_CLASS: [u8; 11] = [0x03, 0x0F, 0x0B, 0x00, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF];
+    /// Messaging/UsbWwid node: type 3, sub 16, len 10.
+    const NODE_USB_WWID: [u8; 10] = [0x03, 0x10, 0x0A, 0x00, 0, 0, 0, 0, 0, 0];
+    /// Messaging/Sata node: type 3, sub 18, len 10.
+    const NODE_SATA: [u8; 10] = [0x03, 0x12, 0x0A, 0x00, 0, 0, 0xFF, 0xFF, 0, 0];
+    /// Media/PiwgFirmwareFile node: type 4, sub 6, len 20 (header + GUID).
+    const NODE_FW_FILE: [u8; 20] = [0x04, 0x06, 0x14, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    /// Media/PiwgFirmwareVolume node: type 4, sub 7, len 20.
+    const NODE_FW_VOL: [u8; 20] = [0x04, 0x07, 0x14, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    /// Media/Vendor node: type 4, sub 3, len 20. Media type with a non-FW
+    /// sub-type — exercises the sub-type check in the FW-file classifier.
+    const NODE_MEDIA_VENDOR: [u8; 20] = [0x04, 0x03, 0x14, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    /// Media node whose sub-type collides with Messaging/Usb (type 4, sub 5) —
+    /// exercises the type check in the USB classifier.
+    const NODE_MEDIA_SUB5: [u8; 20] = [0x04, 0x05, 0x14, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    /// EndEntire node.
+    const NODE_END: [u8; 4] = [0x7F, 0xFF, 0x04, 0x00];
+
+    /// Concatenate `nodes` and terminate with EndEntire.
+    fn synth_path(nodes: &[&[u8]]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for node in nodes {
+            bytes.extend_from_slice(node);
+        }
+        bytes.extend_from_slice(&NODE_END);
+        bytes
+    }
+
+    fn classify<F: Fn(&patina::device_path::paths::DevicePath) -> bool>(bytes: &[u8], f: F) -> bool {
+        // SAFETY: synth_path produces well-formed, EndEntire-terminated node
+        // streams; the reference does not outlive `bytes`.
+        f(unsafe { patina::device_path::paths::DevicePath::try_from_ptr(bytes.as_ptr()) }.unwrap())
+    }
+
+    #[test]
+    fn test_device_path_has_usb_node_classification() {
+        let cases: &[(&str, Vec<u8>, bool)] = &[
+            ("pci_root + usb", synth_path(&[&NODE_PCI_ROOT, &NODE_USB]), true),
+            ("usb_class", synth_path(&[&NODE_PCI_ROOT, &NODE_USB_CLASS]), true),
+            ("usb_wwid", synth_path(&[&NODE_USB_WWID]), true),
+            ("sata only", synth_path(&[&NODE_PCI_ROOT, &NODE_SATA]), false),
+            ("end only", synth_path(&[]), false),
+            ("media node with usb sub-type value", synth_path(&[&NODE_MEDIA_SUB5]), false),
+            ("usb after media", synth_path(&[&NODE_MEDIA_VENDOR, &NODE_USB]), true),
+        ];
+        for (name, bytes, expected) in cases {
+            assert_eq!(classify(bytes, device_path_has_usb_node), *expected, "case: {name}");
+        }
+    }
+
+    #[test]
+    fn test_device_path_has_fw_file_node_classification() {
+        let cases: &[(&str, Vec<u8>, bool)] = &[
+            ("fw_vol + fw_file", synth_path(&[&NODE_FW_VOL, &NODE_FW_FILE]), true),
+            ("fw_vol only", synth_path(&[&NODE_FW_VOL]), true),
+            ("fw_file only", synth_path(&[&NODE_FW_FILE]), true),
+            ("media vendor only", synth_path(&[&NODE_MEDIA_VENDOR]), false),
+            ("messaging only", synth_path(&[&NODE_PCI_ROOT, &NODE_USB]), false),
+            ("end only", synth_path(&[]), false),
+        ];
+        for (name, bytes, expected) in cases {
+            assert_eq!(classify(bytes, device_path_has_fw_file_node), *expected, "case: {name}");
+        }
     }
 }
