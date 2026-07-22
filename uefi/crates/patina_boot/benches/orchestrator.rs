@@ -47,16 +47,19 @@ fn build_mock() -> &'static MockBootServices {
     let mut m = MockBootServices::new();
     m.expect_free_pool().returning(|_| Ok(()));
 
-    // locate_handle_buffer: return a single synthetic handle each call.
+    // locate_handle_buffer: return a single synthetic handle each call,
+    // backed by a one-time leaked array so per-iteration memory use stays
+    // flat across the run.
+    let handles: &'static mut [efi::Handle] = Vec::leak(alloc::vec![handle_addr as efi::Handle]);
+    let handles_ptr = handles.as_mut_ptr() as usize;
+    let handles_len = handles.len();
     m.expect_locate_handle_buffer().returning(move |_| {
-        let handles: Vec<efi::Handle> = alloc::vec![handle_addr as efi::Handle];
-        let leaked = handles.leak();
-        // SAFETY: `leaked` is valid memory from `Vec::leak`, with `len`
-        // elements of `efi::Handle`. `inner_mock_for_box` outlives the
-        // returned `BootServicesBox`. Each call leaks — acceptable in
-        // a benchmark process which is short-lived.
+        // SAFETY: the pointer/len name the one-time leaked array above,
+        // which is never freed (the mock `free_pool` is a no-op), and each
+        // returned `BootServicesBox` only reads from it within the call.
+        // `inner_mock_for_box` outlives the returned box.
         let bx = unsafe {
-            BootServicesBox::from_raw_parts_mut(leaked.as_mut_ptr(), leaked.len(), inner_mock_for_box)
+            BootServicesBox::from_raw_parts_mut(handles_ptr as *mut efi::Handle, handles_len, inner_mock_for_box)
         };
         Ok(bx)
     });
@@ -66,10 +69,9 @@ fn build_mock() -> &'static MockBootServices {
     // `signal_bds_phase_entry` and `signal_ready_to_boot` actually call:
     // a null `T` context for signal-only events.
     m.expect_create_event_ex_unchecked::<()>()
-        .returning(|_, _, _, _, _| Ok(core::ptr::null_mut()));
+        .returning(move |_, _, _, _, _| Ok(event_addr as efi::Event));
     m.expect_signal_event().returning(|_| Ok(()));
     m.expect_close_event().returning(|_| Ok(()));
-    let _ = event_addr;
 
     Box::leak(Box::new(m))
 }
@@ -89,9 +91,11 @@ fn bds_phase_composite(c: &mut Criterion) {
 
     c.bench_function("bds_phase_composite", |b| {
         b.iter(|| {
-            let _ = helpers::connect_all(mock);
-            let _ = helpers::signal_bds_phase_entry(mock);
-            let _ = helpers::signal_ready_to_boot(mock);
+            // Assert the happy path so the numbers can't silently become a
+            // measurement of an error/early-return path.
+            helpers::connect_all(mock).expect("connect_all");
+            helpers::signal_bds_phase_entry(mock).expect("signal_bds_phase_entry");
+            helpers::signal_ready_to_boot(mock).expect("signal_ready_to_boot");
             black_box(iter_count.fetch_add(1, Ordering::Relaxed));
         })
     });
