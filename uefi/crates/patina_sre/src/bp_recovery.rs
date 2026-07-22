@@ -24,9 +24,23 @@ use core::{ffi::c_void, ptr};
 use patina::{boot_services::BootServices, error::EfiError};
 use patina_boot::helpers;
 use r_efi::efi;
+use zerocopy::FromBytes as _;
+use zerocopy_derive::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 /// Target boot partition for the SRE WIM payload.
 const TARGET_BPID: u8 = 1;
+
+/// UEFI device-path node header: Type, SubType, little-endian Length.
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout)]
+#[repr(C)]
+struct DevicePathNodeHdr {
+    r#type: u8,
+    sub_type: u8,
+    length: zerocopy::little_endian::U16,
+}
+
+/// Byte size of a device-path node header.
+const NODE_HDR_BYTES: usize = core::mem::size_of::<DevicePathNodeHdr>();
 
 /// Fixed BP size on platforms in scope (BPINFO.BPSZ * 128 KiB = 1 GiB).
 const BPSIZE_BYTES: usize = 1024 * 1024 * 1024;
@@ -563,27 +577,36 @@ fn register_ram_disk<B: BootServices>(boot_services: &B, dram: &[u8]) -> Result<
 /// minimum, or a total size above the sanity cap — so callers can fail
 /// cleanly instead of hanging or slicing out of bounds.
 pub(crate) unsafe fn device_path_size(dp: *const u8) -> usize {
-    /// Sanity cap for the walk; real device paths are well under this.
+    /// Sanity cap for the walk; real device paths are well under this. A
+    /// walk that would pass the cap is rejected before the next header read,
+    /// bounding how far a malformed path can carry it (the walk cannot
+    /// verify the caller's allocation).
     const DEVICE_PATH_MAX_BYTES: usize = 64 * 1024;
     let mut p = dp;
     loop {
-        // SAFETY: caller guarantees `dp` points at a device path; the length
-        // and total-size checks below stop the walk on malformed input
-        // instead of reading arbitrary memory.
-        let dp_type = unsafe { *p };
-        let dp_subtype = unsafe { *p.add(1) };
-        let length = unsafe { (*p.add(2) as u16) | ((*p.add(3) as u16) << 8) } as usize;
-        // A node length below the 4-byte header minimum can't be walked
-        // (length 0 would spin forever). Return 0 so callers fail cleanly.
-        if length < 4 {
+        // SAFETY: caller guarantees `dp` points at a device path; the header
+        // is copied out before parsing, and the length and total-size checks
+        // below stop the walk on malformed input instead of reading
+        // arbitrary memory.
+        let hdr_bytes = unsafe { ptr::read_unaligned(p as *const [u8; NODE_HDR_BYTES]) };
+        let Ok(hdr) = DevicePathNodeHdr::read_from_bytes(&hdr_bytes) else {
+            // Unreachable: the input is exactly header-sized.
+            return 0;
+        };
+        let length = hdr.length.get() as usize;
+        // A node length below the header minimum can't be walked (length 0
+        // would spin forever). Return 0 so callers fail cleanly.
+        if length < NODE_HDR_BYTES {
             return 0;
         }
-        p = unsafe { p.add(length) };
-        let total = (p as usize) - (dp as usize);
+        // wrapping_add: a garbage length must not produce an out-of-bounds
+        // pointer-arithmetic result before the sanity cap rejects it.
+        p = p.wrapping_add(length);
+        let total = (p as usize).wrapping_sub(dp as usize);
         if total > DEVICE_PATH_MAX_BYTES {
             return 0;
         }
-        if dp_type == 0x7F && dp_subtype == 0xFF {
+        if hdr.r#type == 0x7F && hdr.sub_type == 0xFF {
             return total;
         }
     }
@@ -597,23 +620,39 @@ pub(crate) fn build_file_path_node(path: &str) -> Vec<u8> {
     let mut utf16: Vec<u16> = path.encode_utf16().collect();
     utf16.push(0);
     let path_bytes = utf16.len() * 2;
-    let node_len = 4 + path_bytes;
+    let node_len = NODE_HDR_BYTES + path_bytes;
 
-    let mut out = Vec::with_capacity(node_len + 4);
-    // FilePath node: type=4 (MEDIA), subtype=4 (FILEPATH), length=node_len
-    out.push(0x04);
-    out.push(0x04);
-    out.push((node_len & 0xFF) as u8);
-    out.push(((node_len >> 8) & 0xFF) as u8);
-    for w in &utf16 {
-        out.push((w & 0xFF) as u8);
-        out.push(((w >> 8) & 0xFF) as u8);
+    use zerocopy::IntoBytes;
+
+    // END_ENTIRE: type=0x7F, subtype=0xFF, length=4.
+    let end_hdr = DevicePathNodeHdr {
+        r#type: 0x7F,
+        sub_type: 0xFF,
+        length: zerocopy::little_endian::U16::new(NODE_HDR_BYTES as u16),
+    };
+
+    // The node length field is 16-bit; a path long enough to overflow it
+    // would produce a header that misdescribes the appended bytes. Fail
+    // safely with a bare END_ENTIRE node, which parses cleanly and makes
+    // the subsequent LoadImage return NotFound.
+    if node_len > u16::MAX as usize {
+        log::error!("build_file_path_node: path too long for a FilePath node ({node_len} bytes)");
+        return end_hdr.as_bytes().to_vec();
     }
-    // END_ENTIRE: type=0x7F, subtype=0xFF, length=4
-    out.push(0x7F);
-    out.push(0xFF);
-    out.push(0x04);
-    out.push(0x00);
+
+    // FilePath node: type=4 (MEDIA), subtype=4 (FILEPATH), length=node_len.
+    let file_hdr = DevicePathNodeHdr {
+        r#type: 0x04,
+        sub_type: 0x04,
+        length: zerocopy::little_endian::U16::new(node_len as u16),
+    };
+
+    let mut out = Vec::with_capacity(node_len + NODE_HDR_BYTES);
+    out.extend_from_slice(file_hdr.as_bytes());
+    for w in &utf16 {
+        out.extend_from_slice(&w.to_le_bytes());
+    }
+    out.extend_from_slice(end_hdr.as_bytes());
     out
 }
 
@@ -861,6 +900,36 @@ mod tests {
             0x7F, 0xFF, 0x04, 0x00, // END_ENTIRE
         ];
         assert_eq!(bytes.as_slice(), expected);
+    }
+
+    #[test]
+    fn test_build_file_path_node_overlong_path_falls_back_to_end_node() {
+        // A path whose UTF-16 encoding overflows the 16-bit node length must
+        // not emit a header that misdescribes the appended bytes; the
+        // fallback is a bare END_ENTIRE node.
+        let long_path = alloc::string::String::from_utf8(alloc::vec![b'a'; 40 * 1024]).unwrap();
+        let bytes = build_file_path_node(&long_path);
+        assert_eq!(bytes.as_slice(), &[0x7F, 0xFF, 0x04, 0x00]);
+    }
+
+    #[test]
+    fn test_device_path_size_over_cap_returns_zero() {
+        // A chain of valid nodes with no END_ENTIRE inside the 64 KiB cap
+        // must be rejected via the cap. The buffer is real and larger than
+        // the cap, so every header read the walk performs stays in-bounds.
+        const NODE_LEN: usize = 1024;
+        let mut path = alloc::vec![0u8; 72 * 1024];
+        let mut off = 0;
+        while off + NODE_LEN <= path.len() {
+            path[off] = 0x01; // Hardware, arbitrary non-END type
+            path[off + 1] = 0x01;
+            path[off + 2] = (NODE_LEN & 0xFF) as u8;
+            path[off + 3] = (NODE_LEN >> 8) as u8;
+            off += NODE_LEN;
+        }
+        // SAFETY: the buffer outlives the call and exceeds the walk cap, so
+        // all reads are in-bounds until the cap rejects the walk.
+        assert_eq!(unsafe { device_path_size(path.as_ptr()) }, 0);
     }
 
     #[test]
