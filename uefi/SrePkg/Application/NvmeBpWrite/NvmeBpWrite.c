@@ -54,10 +54,10 @@
   Firmware Commit CA=110b returns EFI_WARN_RESET_REQUIRED per spec; BP
   contents become host-visible after the cold reset.
 
-  Logs to ConOut for live observation. The previous NvmeBpResult NVRAM
-  variable is no longer written; its definitions are kept compiled (in
-  the BP_RESULT struct + gResult global + WriteResultToNvRam stub) only
-  so the WRITE-path code in WriteBpTestPattern can remain unchanged.
+  Logs to ConOut for live observation, and writes the BP_RESULT struct to
+  the NvmeBpResult NVRAM variable (runtime-readable) so a host can read the
+  run outcome and the BP write-protection readback without capturing the
+  console.
 
   Copyright (c) Microsoft Corporation. All rights reserved.
   SPDX-License-Identifier: BSD-2-Clause-Patent
@@ -130,6 +130,7 @@ LogHexDump32 (
 #define NVME_ADMIN_FIRMWARE_COMMIT          0x10
 #define NVME_ADMIN_GET_LOG_PAGE             0x02
 #define NVME_ADMIN_SET_FEATURES             0x09
+#define NVME_ADMIN_GET_FEATURES             0x0A
 
 #define NVME_IDENTIFY_CNS_CONTROLLER        0x01
 
@@ -167,10 +168,11 @@ LogHexDump32 (
 #define BPWPS_FIELD_MASK                    0x7
 
 #define IDENTIFY_BUFFER_SIZE                4096
-// Target BP1. On this controller BP0 has a different (and not yet
-// documented to us) write-protect encoding; the FID 0x85 CDW11 layout
-// below is the BP1 version. Switch to BP0 only when we have the BP0
-// CDW11 layout.
+// Target boot partition. BP0 and BP1 use the same write-protection encoding:
+// Get Features FID=0x85 returns both states in the standard CDW11 layout
+// (BP1WPS bits 5:3, BP0WPS bits 2:0), and CDW11=0x09 unlocks both. Either
+// partition is writable by this path; change this constant and the Firmware
+// Commit BPID bit together to retarget.
 #define TARGET_BPID                         1
 
 // Identify Controller offsets (NVMe 1.4 Figure 247)
@@ -292,6 +294,11 @@ typedef struct {
   UINT32  VendorEnableDw3;        // (field name preserved for NVRAM layout compat)
   UINT32  VendorEnableStatus;     // SCT<<8 | SC
   INT32   VendorEnableEfiStatus;
+  // === Get Features FID=0x85 write-protection readback (BP0/BP1 experiment) ===
+  UINT32  BpWpsPreDw0;            // Get Features DW0 before unlock (BP1WPS 5:3, BP0WPS 2:0)
+  UINT32  BpWpsPreStatus;         // SCT<<8 | SC for the pre-unlock read
+  UINT32  BpWpsPostDw0;           // Get Features DW0 after  unlock
+  UINT32  BpWpsPostStatus;        // SCT<<8 | SC for the post-unlock read
   // === VERIFY-mode results: BPMBL/BPRSEL/BPINFO MMIO drive loop ===
   UINT32  MmioBpinfoStart;        // raw BPINFO at start of verify (BPSZ + BRS + ABPID)
   UINT32  MmioBprselEnc;          // encoded BPRSEL value we wrote (BPID|offset|size)
@@ -327,7 +334,18 @@ WriteResultToNvRam (
   VOID
   )
 {
-  // intentionally empty
+  // Persist the result struct to an NVRAM variable with RUNTIME access so a
+  // Windows host can read it back after the run via
+  // GetFirmwareEnvironmentVariableEx (no on-screen capture required).
+  gResult.Magic   = BP_RESULT_MAGIC;
+  gResult.Version = BP_RESULT_VERSION;
+  gRT->SetVariable (
+         L"NvmeBpResult",
+         &gNvmeBpResultGuid,
+         EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS,
+         sizeof (gResult),
+         &gResult
+         );
 }
 
 // Path to the BP image on the load volume (typically \ValidationOS.wim on
@@ -799,6 +817,67 @@ UnlockBpWriteProtection (
 }
 
 //
+// Read back the current Boot Partition Write Protection state via
+// Get Features FID=0x85. Completion DW0 carries the current value in the
+// CDW11 layout: BP1WPS at bits 5:3, BP0WPS at bits 2:0.
+//
+STATIC
+EFI_STATUS
+EFIAPI
+ReadBpWriteProtection (
+  IN  EFI_NVM_EXPRESS_PASS_THRU_PROTOCOL  *PassThru,
+  OUT UINT32                              *Dw0,
+  OUT UINT32                              *Sct,
+  OUT UINT32                              *Sc
+  )
+{
+  EFI_NVM_EXPRESS_PASS_THRU_COMMAND_PACKET  Packet;
+  EFI_NVM_EXPRESS_COMMAND                   Cmd;
+  EFI_NVM_EXPRESS_COMPLETION                Completion;
+  UINT32                                    StatusField;
+
+  ZeroMem (&Cmd, sizeof (Cmd));
+  ZeroMem (&Completion, sizeof (Completion));
+  Cmd.Cdw0.Opcode = NVME_ADMIN_GET_FEATURES;
+  Cmd.Cdw10       = NVME_FID_BP_WRITE_PROTECTION_CFG;  // FID at bits 7:0, SEL=000b (current)
+  Cmd.Flags       = CDW10_VALID;
+
+  ZeroMem (&Packet, sizeof (Packet));
+  Packet.CommandTimeout = 2ULL * 10000000ULL;
+  Packet.QueueType      = NVME_ADMIN_QUEUE;
+  Packet.NvmeCmd        = &Cmd;
+  Packet.NvmeCompletion = &Completion;
+
+  EFI_STATUS  Status = PassThru->PassThru (PassThru, 0, &Packet, NULL);
+  *Dw0 = Completion.DW0;
+  StatusField = (Completion.DW3 >> 17) & 0x7FFF;
+  *Sc  = (StatusField >> 0) & 0xFF;
+  *Sct = (StatusField >> 8) & 0x7;
+  return Status;
+}
+
+//
+// Decode and log both BPxWPS fields from a Get Features FID=0x85 DW0 value.
+//
+STATIC
+VOID
+LogBpWpsState (
+  IN CONST CHAR16  *Tag,
+  IN UINT32        Dw0
+  )
+{
+  STATIC CONST CHAR16  *WpsNames[8] = {
+    L"NoChangeRequested/None", L"WriteUnlocked", L"WriteLocked",
+    L"WriteLockedUntilPowerCycle", L"RPMB-controlled",
+    L"Reserved(5)", L"Reserved(6)", L"Reserved(7)"
+  };
+  UINT32  Bp0 = (Dw0 >> BPWPS_BP0_SHIFT) & BPWPS_FIELD_MASK;
+  UINT32  Bp1 = (Dw0 >> BPWPS_BP1_SHIFT) & BPWPS_FIELD_MASK;
+  LogPrint (L"  %s: DW0=0x%08x  BP0WPS=%u (%s)  BP1WPS=%u (%s)\n",
+            Tag, Dw0, Bp0, WpsNames[Bp0], Bp1, WpsNames[Bp1]);
+}
+
+//
 // Send a single Firmware Image Download chunk and decode the completion.
 // Logs nothing; caller decides whether/how to log based on the returned values.
 //
@@ -1191,6 +1270,20 @@ WriteBpTestPattern (
   // but BP contents stay unchanged.
   //
   LogPrint (L"\n=== Unlock: Set Features FID=0x85 CDW11=0x09 (BP0+BP1 = Write Unlocked) ===\n");
+  {
+    // Read the write-protection state around the unlock so the controller's
+    // actual BP0WPS/BP1WPS behavior is observable, not inferred from write
+    // failures. Read-only; failures are logged and do not gate the flow.
+    UINT32      WpsDw0, WpsSct, WpsSc;
+    EFI_STATUS  WpsStatus = ReadBpWriteProtection (PassThru, &WpsDw0, &WpsSct, &WpsSc);
+    gResult.BpWpsPreDw0    = WpsDw0;
+    gResult.BpWpsPreStatus = EFI_ERROR (WpsStatus) ? 0xFFFFFFFF : ((WpsSct << 8) | WpsSc);
+    if (EFI_ERROR (WpsStatus) || WpsSct != 0 || WpsSc != 0) {
+      LogPrint (L"  Get Features FID=0x85 (pre-unlock): %r SCT=%u SC=0x%02x\n", WpsStatus, WpsSct, WpsSc);
+    } else {
+      LogBpWpsState (L"BPWPS before unlock", WpsDw0);
+    }
+  }
   Status = UnlockBpWriteProtection (PassThru, &Dw3, &Sct, &Sc);
   gResult.VendorEnableDw3       = Dw3;
   gResult.VendorEnableStatus    = (Sct << 8) | Sc;
@@ -1199,6 +1292,18 @@ WriteBpTestPattern (
   WriteResultToNvRam ();
   LogPrint (L"  Set Features FID=0x85: %r  DW3=0x%08x  SCT=%u SC=0x%02x\n",
             Status, Dw3, Sct, Sc);
+  {
+    UINT32      WpsDw0, WpsSct, WpsSc;
+    EFI_STATUS  WpsStatus = ReadBpWriteProtection (PassThru, &WpsDw0, &WpsSct, &WpsSc);
+    gResult.BpWpsPostDw0    = WpsDw0;
+    gResult.BpWpsPostStatus = EFI_ERROR (WpsStatus) ? 0xFFFFFFFF : ((WpsSct << 8) | WpsSc);
+    WriteResultToNvRam ();
+    if (EFI_ERROR (WpsStatus) || WpsSct != 0 || WpsSc != 0) {
+      LogPrint (L"  Get Features FID=0x85 (post-unlock): %r SCT=%u SC=0x%02x\n", WpsStatus, WpsSct, WpsSc);
+    } else {
+      LogBpWpsState (L"BPWPS after unlock ", WpsDw0);
+    }
+  }
   if (EFI_ERROR (Status) || Sct != 0 || Sc != 0) {
     LogPrint (L"  unlock FAILED — aborting before Phase A (download would silently no-op)\n");
     gResult.LastEfiStatus = (INT32)Status;
