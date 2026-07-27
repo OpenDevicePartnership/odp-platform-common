@@ -319,13 +319,10 @@ typedef struct {
 STATIC BP_RESULT  gResult;
 
 //
-// Was: write gResult to the NvmeBpResult NVRAM variable so a host OS could
-// drive the WRITE/VERIFY/NOOP state machine across reboots.
-//
-// Now: no-op. The tool decides what to do from content comparison at each
-// boot, not from prior NVRAM state. Stubbed-not-deleted so the legacy
-// WriteResultToNvRam() call sites scattered through WriteBpTestPattern and
-// VerifyBpFromMmio continue to compile unchanged.
+// Persist gResult to the NvmeBpResult NVRAM variable with RUNTIME access so a
+// host OS can read the run outcome and the BP write-protection readback via
+// GetFirmwareEnvironmentVariableEx, without capturing the console. Called at
+// several points during the run so a crash still leaves the last state behind.
 //
 STATIC
 VOID
@@ -334,18 +331,20 @@ WriteResultToNvRam (
   VOID
   )
 {
-  // Persist the result struct to an NVRAM variable with RUNTIME access so a
-  // Windows host can read it back after the run via
-  // GetFirmwareEnvironmentVariableEx (no on-screen capture required).
+  EFI_STATUS  Status;
+
   gResult.Magic   = BP_RESULT_MAGIC;
   gResult.Version = BP_RESULT_VERSION;
-  gRT->SetVariable (
-         L"NvmeBpResult",
-         &gNvmeBpResultGuid,
-         EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS,
-         sizeof (gResult),
-         &gResult
-         );
+  Status          = gRT->SetVariable (
+                          L"NvmeBpResult",
+                          &gNvmeBpResultGuid,
+                          EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS,
+                          sizeof (gResult),
+                          &gResult
+                          );
+  if (EFI_ERROR (Status)) {
+    LogPrint (L"[warn] WriteResultToNvRam: SetVariable(NvmeBpResult) failed: %r\n", Status);
+  }
 }
 
 // Path to the BP image on the load volume (typically \ValidationOS.wim on
