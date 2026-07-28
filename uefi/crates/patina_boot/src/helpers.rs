@@ -188,7 +188,21 @@ pub fn connect_all<B: BootServices>(boot_services: &B) -> Result<()> {
     let mut prev_handle_count = 0;
     let mut stabilized = false;
 
-    for _iteration in 0..MAX_ITERATIONS {
+    // Diagnostic: coarse per-iteration cost via the CPU timestamp counter.
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    fn ticks() -> u64 {
+        // SAFETY: rdtsc has no preconditions and no side effects.
+        unsafe { core::arch::x86_64::_rdtsc() }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    #[inline]
+    fn ticks() -> u64 {
+        0
+    }
+
+    for iteration in 0..MAX_ITERATIONS {
+        let t_start = ticks();
         // Get all handles in the system
         let handles = boot_services
             .locate_handle_buffer(HandleSearchType::AllHandle)
@@ -199,10 +213,21 @@ pub fn connect_all<B: BootServices>(boot_services: &B) -> Result<()> {
         // intentionally ignored: most handles have no matching driver (or are
         // already connected), mirroring EDK2's connect-all behavior. An individual
         // failure does not mean overall enumeration failed.
+        let mut newly_connected = 0usize;
         for &handle in handles.iter() {
             // SAFETY: Empty driver handle list and null device path are valid per UEFI spec
-            let _ = unsafe { boot_services.connect_controller(handle, Vec::new(), None, true) };
+            if unsafe { boot_services.connect_controller(handle, Vec::new(), None, true) }.is_ok() {
+                newly_connected += 1;
+            }
         }
+
+        log::info!(
+            "SRE-PERF connect_all iter {}: handles={}, newly_connected={}, ticks={}",
+            iteration,
+            current_handle_count,
+            newly_connected,
+            ticks().wrapping_sub(t_start),
+        );
 
         // Check if handle count has stabilized
         if current_handle_count == prev_handle_count {
