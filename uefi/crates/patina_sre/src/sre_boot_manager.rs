@@ -562,6 +562,11 @@ impl BootOrchestrator for SreBootManager {
         dxe_dispatch: &dyn DxeDispatch,
         image_handle: efi::Handle,
     ) -> Result<!, EfiError> {
+        // Signal gMsStartOfBds before connect (C BDS order) and before EndOfDxe.
+        if let Err(e) = signal_event_group(boot_services, &MS_START_OF_BDS_NOTIFY_GUID) {
+            log::error!("signal gMsStartOfBdsNotifyGuid failed: {:?}", e);
+        }
+
         if let Err(e) = interleave_connect_and_dispatch(boot_services, dxe_dispatch) {
             log::error!("interleave_connect_and_dispatch failed: {:?}", e);
         }
@@ -595,17 +600,11 @@ impl BootOrchestrator for SreBootManager {
             }
         }
 
+        // Signal EndOfDxe (flash lockdown) after capsule processing so the
+        // capsule path stays flash-writable. signal_bds_phase_entry signals
+        // gEfiEndOfDxeEventGroupGuid.
         if let Err(e) = helpers::signal_bds_phase_entry(boot_services) {
-            log::error!("signal_bds_phase_entry failed: {:?}", e);
-        }
-
-        // Signal the Microsoft start-of-BDS event group that the C BDS
-        // path fires. Boot-policy components in the Microsoft UEFI
-        // ecosystem (PcBdsPkg, Project MU) key off this for pre-boot
-        // work and it has no observed adverse effects in the Patina
-        // dispatch path.
-        if let Err(e) = signal_event_group(boot_services, &MS_START_OF_BDS_NOTIFY_GUID) {
-            log::error!("signal gMsStartOfBdsNotifyGuid failed: {:?}", e);
+            log::error!("signal_bds_phase_entry (EndOfDxe) failed: {:?}", e);
         }
 
         // Signal the DFCI start-of-BDS event so the MU SettingsManager DXE
