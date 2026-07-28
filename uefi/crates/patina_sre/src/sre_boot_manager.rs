@@ -607,19 +607,22 @@ impl BootOrchestrator for SreBootManager {
             drop(g);
         }
 
-        let g = perf::scope(&perf, "SreBdsPhaseSignals");
+        let g = perf::scope(&perf, "SreSignalBdsPhaseEntry");
         if let Err(e) = helpers::signal_bds_phase_entry(boot_services) {
             log::error!("signal_bds_phase_entry failed: {:?}", e);
         }
+        drop(g);
 
         // Signal the Microsoft start-of-BDS event group that the C BDS
         // path fires. Boot-policy components in the Microsoft UEFI
         // ecosystem (PcBdsPkg, Project MU) key off this for pre-boot
         // work and it has no observed adverse effects in the Patina
         // dispatch path.
+        let g = perf::scope(&perf, "SreSignalMsStartOfBds");
         if let Err(e) = signal_event_group(boot_services, &MS_START_OF_BDS_NOTIFY_GUID) {
             log::error!("signal gMsStartOfBdsNotifyGuid failed: {:?}", e);
         }
+        drop(g);
 
         // Signal the DFCI start-of-BDS event so the MU SettingsManager DXE
         // driver publishes gDfciSettingAccessProtocolGuid. Signalling here
@@ -628,6 +631,7 @@ impl BootOrchestrator for SreBootManager {
         // SettingAccessCallback closes its own event from inside the callback,
         // which would corrupt the EDK2 DxeCore notify iterator if fired while
         // EndOfDxe were still iterating. Gated behind with_dfci_bds_signal().
+        let g = perf::scope(&perf, "SreSignalDfciStartOfBds");
         if self.dfci_bds_signal
             && let Err(e) = signal_event_group(boot_services, &DFCI_START_OF_BDS_NOTIFY_GUID)
         {
