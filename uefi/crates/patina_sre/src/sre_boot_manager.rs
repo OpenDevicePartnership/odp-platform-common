@@ -568,6 +568,25 @@ impl BootOrchestrator for SreBootManager {
         // phase duration in milliseconds.
         let perf = perf::Perf::locate(boot_services);
 
+        // Signal the BDS-phase / start-of-BDS event groups BEFORE connecting
+        // controllers, matching the C BDS order (PlatformBootManagerBeforeConsole
+        // signals these, then ConnectAll runs). Some subscribers dispatch on
+        // these signals and must run while their hardware is still in its
+        // post-PEI window: e.g. Usb4CmDxe reaches the USB4 host router in ~20 ms
+        // when dispatched here, but times out for ~10 s if it dispatches after
+        // the connect/enumeration work below.
+        let g = perf::scope(&perf, "SreSignalBdsPhaseEntry");
+        if let Err(e) = helpers::signal_bds_phase_entry(boot_services) {
+            log::error!("signal_bds_phase_entry failed: {:?}", e);
+        }
+        drop(g);
+
+        let g = perf::scope(&perf, "SreSignalMsStartOfBds");
+        if let Err(e) = signal_event_group(boot_services, &MS_START_OF_BDS_NOTIFY_GUID) {
+            log::error!("signal gMsStartOfBdsNotifyGuid failed: {:?}", e);
+        }
+        drop(g);
+
         let g = perf::scope(&perf, "SreInterleaveConnect");
         if let Err(e) = interleave_connect_and_dispatch(boot_services, dxe_dispatch) {
             log::error!("interleave_connect_and_dispatch failed: {:?}", e);
@@ -606,23 +625,6 @@ impl BootOrchestrator for SreBootManager {
             }
             drop(g);
         }
-
-        let g = perf::scope(&perf, "SreSignalBdsPhaseEntry");
-        if let Err(e) = helpers::signal_bds_phase_entry(boot_services) {
-            log::error!("signal_bds_phase_entry failed: {:?}", e);
-        }
-        drop(g);
-
-        // Signal the Microsoft start-of-BDS event group that the C BDS
-        // path fires. Boot-policy components in the Microsoft UEFI
-        // ecosystem (PcBdsPkg, Project MU) key off this for pre-boot
-        // work and it has no observed adverse effects in the Patina
-        // dispatch path.
-        let g = perf::scope(&perf, "SreSignalMsStartOfBds");
-        if let Err(e) = signal_event_group(boot_services, &MS_START_OF_BDS_NOTIFY_GUID) {
-            log::error!("signal gMsStartOfBdsNotifyGuid failed: {:?}", e);
-        }
-        drop(g);
 
         // Signal the DFCI start-of-BDS event so the MU SettingsManager DXE
         // driver publishes gDfciSettingAccessProtocolGuid. Signalling here
