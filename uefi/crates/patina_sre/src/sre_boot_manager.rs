@@ -46,6 +46,7 @@ use patina_boot::{BootOrchestrator, helpers, proxy};
 use r_efi::efi;
 
 use crate::bp_recovery;
+use crate::perf;
 
 /// Result of probing the platform's button-services protocol for an SRE
 /// hotkey at BDS entry.
@@ -562,15 +563,24 @@ impl BootOrchestrator for SreBootManager {
         dxe_dispatch: &dyn DxeDispatch,
         image_handle: efi::Handle,
     ) -> Result<!, EfiError> {
+        // Per-phase FPDT instrumentation (no-op if the performance protocol is
+        // absent). Each `perf::scope` emits a start/end record and logs the
+        // phase duration in milliseconds.
+        let perf = perf::Perf::locate(boot_services);
+
+        let g = perf::scope(&perf, "SreInterleaveConnect");
         if let Err(e) = interleave_connect_and_dispatch(boot_services, dxe_dispatch) {
             log::error!("interleave_connect_and_dispatch failed: {:?}", e);
         }
+        drop(g);
 
         // One last connect pass before EndOfDxe so PartitionDxe and similar
         // driver bindings can run during the open window.
+        let g = perf::scope(&perf, "SrePreEndOfDxeConnect");
         if let Err(e) = helpers::connect_all(boot_services) {
             log::error!("connect_all (pre-EndOfDxe) failed: {:?}", e);
         }
+        drop(g);
 
         // Drive MU capsule-queue processing before EndOfDxe. Controllers are
         // connected (FMP protocols present) and the flash is still writable
@@ -580,6 +590,7 @@ impl BootOrchestrator for SreBootManager {
         // is empty and this is a no-op. Mirrors the C PlatformBootManagerLib
         // BOOT_ON_FLASH_UPDATE path that SreBootManager replaces.
         if self.capsule_processing {
+            let g = perf::scope(&perf, "SreCapsuleProcessing");
             // Draw + register the OEM boot logo first (GOP is up after
             // connect_all) so the MU capsule processor's DisplayUpdateProgress
             // can render the firmware-update progress bar instead of a black
@@ -593,8 +604,10 @@ impl BootOrchestrator for SreBootManager {
             if let Err(e) = signal_event_group(boot_services, &MU_READY_TO_PROCESS_CAPSULES_NOTIFY_GUID) {
                 log::error!("signal gMuReadyToProcessCapsulesNotifyGuid failed: {:?}", e);
             }
+            drop(g);
         }
 
+        let g = perf::scope(&perf, "SreBdsPhaseSignals");
         if let Err(e) = helpers::signal_bds_phase_entry(boot_services) {
             log::error!("signal_bds_phase_entry failed: {:?}", e);
         }
@@ -620,10 +633,13 @@ impl BootOrchestrator for SreBootManager {
         {
             log::error!("signal gDfciStartOfBdsNotifyGuid failed: {:?}", e);
         }
+        drop(g);
 
+        let g = perf::scope(&perf, "SreConsoleDiscovery");
         if let Err(e) = helpers::discover_console_devices(boot_services, runtime_services) {
             log::error!("discover_console_devices failed: {:?}", e);
         }
+        drop(g);
 
         // Unified SRE hotkey dispatch. probe_sre_hotkey reads the latched
         // Vol-Up/Vol-Down + Power state via MS_BUTTON_SERVICES_PROTOCOL
@@ -642,7 +658,9 @@ impl BootOrchestrator for SreBootManager {
         // Vol-Down: USB-first via SimpleFileSystem enumeration, falling
         // back to `frontpage_app_path` if configured, else fall through
         // to normal Boot#### discovery.
+        let g = perf::scope(&perf, "SreHotkeyProbe");
         let hotkey = probe_sre_hotkey(boot_services);
+        drop(g);
         log::info!("SRE hotkey result: {:?}", hotkey);
 
         match hotkey {
@@ -714,7 +732,9 @@ impl BootOrchestrator for SreBootManager {
         // so we can both filter USB entries (which would re-run the SRE
         // flashing tool that committed the WIM) and dispatch run_sre_flow as
         // the final fallback. Cost: one 512-byte LID 0x15 head read of BP1.
+        let g = perf::scope(&perf, "SreBpPayloadProbe");
         let bp_has_sre = self.bp_sre_fallback && bp_recovery::bp_has_sre_payload(boot_services);
+        drop(g);
 
         // Try boot options discovered from the firmware's Boot#### EFI variables.
         // The constructor's `main_os_path` is used as a fallback when discovery

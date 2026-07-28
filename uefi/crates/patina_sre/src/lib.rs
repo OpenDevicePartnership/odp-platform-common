@@ -16,6 +16,7 @@
 extern crate alloc;
 
 mod bp_recovery;
+mod perf;
 mod sre_boot_manager;
 
 pub use sre_boot_manager::{SreBootManager, SreHotkey, fv_file_device_path, fv_volume_file_device_path};
