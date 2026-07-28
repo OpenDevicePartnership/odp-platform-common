@@ -77,53 +77,54 @@ fn cpu_ticks() -> u64 {
     0
 }
 
-/// Handle to the performance-measurement protocol plus a calibrated
-/// ticks-per-millisecond factor for the log line.
+/// Calibrated millisecond timer, plus an optional handle to the
+/// performance-measurement protocol for FPDT records. The millisecond log line
+/// works from the CPU timestamp alone, so it is available even when the
+/// protocol is absent.
 pub(crate) struct Perf {
-    create: CreateMeasurementFn,
+    create: Option<CreateMeasurementFn>,
     ticks_per_ms: u64,
 }
 
 impl Perf {
-    /// Locate the protocol and calibrate the timestamp counter against a short
-    /// stall. Returns `None` (all instrumentation becomes a no-op) if the
-    /// protocol is not published.
+    /// Calibrate the timestamp counter against a short stall and (best-effort)
+    /// locate the performance-measurement protocol. Always returns a value:
+    /// the millisecond log line is produced from the CPU timestamp regardless
+    /// of whether the protocol is present.
     pub(crate) fn locate<B: BootServices>(boot_services: &B) -> Option<Self> {
-        // SAFETY: the returned interface is only used to read the leading
-        // function-pointer field of the protocol struct.
-        let iface =
-            unsafe { boot_services.locate_protocol_unchecked(&PERF_PROTOCOL_GUID, core::ptr::null_mut()) }.ok()?;
-        if iface.is_null() {
-            return None;
-        }
-        // The protocol struct is `{ create_performance_measurement: fn }`; the
-        // function pointer is the first (and only) field.
-        // SAFETY: iface points at a valid EdkiiPerformanceMeasurement instance.
-        let create = unsafe { *(iface as *const CreateMeasurementFn) };
-
-        // Calibrate ticks/ms with a 50 ms stall (skipped if the counter reads 0).
+        // Calibrate ticks/ms with a 50 ms stall.
         let t0 = cpu_ticks();
         let _ = boot_services.stall(50_000);
         let t1 = cpu_ticks();
         let ticks_per_ms = t1.wrapping_sub(t0) / 50;
 
+        // Best-effort: locate the protocol for FPDT records. Absence only
+        // disables the FPDT emit, not the millisecond log line.
+        // SAFETY: the returned interface is only used to read the leading
+        // function-pointer field of the protocol struct.
+        let create =
+            match unsafe { boot_services.locate_protocol_unchecked(&PERF_PROTOCOL_GUID, core::ptr::null_mut()) } {
+                Ok(iface) if !iface.is_null() => {
+                    // SAFETY: iface points at a valid EdkiiPerformanceMeasurement
+                    // instance; the create function is its first (and only) field.
+                    Some(unsafe { *(iface as *const CreateMeasurementFn) })
+                }
+                _ => {
+                    log::info!("SRE-PERF: performance-measurement protocol not found; FPDT records disabled");
+                    None
+                }
+            };
+
         Some(Self { create, ticks_per_ms })
     }
 
     fn emit(&self, name: &str, id: u32, attr: u32) {
+        let Some(create) = self.create else { return };
         if let Ok(cstr) = CString::new(name) {
             // SAFETY: `create` is the protocol's efiapi function; the caller
             // GUID and string outlive the call.
             unsafe {
-                (self.create)(
-                    core::ptr::null(),
-                    &SRE_PERF_CALLER_GUID,
-                    cstr.as_ptr(),
-                    0,
-                    0,
-                    id,
-                    attr,
-                );
+                create(core::ptr::null(), &SRE_PERF_CALLER_GUID, cstr.as_ptr(), 0, 0, id, attr);
             }
         }
     }
