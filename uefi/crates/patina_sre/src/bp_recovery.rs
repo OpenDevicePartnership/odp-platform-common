@@ -21,26 +21,23 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::{ffi::c_void, ptr};
 
-use patina::{boot_services::BootServices, error::EfiError};
+use patina::{
+    boot_services::BootServices,
+    device_path::parse_node::Header as DevicePathNodeHdr,
+    error::EfiError,
+};
 use patina_boot::helpers;
-use r_efi::efi;
-use zerocopy::FromBytes as _;
-use zerocopy_derive::{FromBytes, Immutable, IntoBytes, KnownLayout};
+use r_efi::{efi, protocols::device_path};
+use scroll::{Endian, ctx::{TryFromCtx, TryIntoCtx}};
 
 /// Target boot partition for the SRE WIM payload.
 const TARGET_BPID: u8 = 1;
 
-/// UEFI device-path node header: Type, SubType, little-endian Length.
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout)]
-#[repr(C)]
-struct DevicePathNodeHdr {
-    r#type: u8,
-    sub_type: u8,
-    length: zerocopy::little_endian::U16,
-}
-
 /// Byte size of a device-path node header.
-const NODE_HDR_BYTES: usize = core::mem::size_of::<DevicePathNodeHdr>();
+const NODE_HDR_BYTES: usize = DevicePathNodeHdr::size_of_header();
+
+/// Sanity cap for device-path walks; real device paths are well under this.
+const DEVICE_PATH_MAX_BYTES: usize = 64 * 1024;
 
 /// Fixed BP size on platforms in scope (BPINFO.BPSZ * 128 KiB = 1 GiB).
 const BPSIZE_BYTES: usize = 1024 * 1024 * 1024;
@@ -577,27 +574,32 @@ fn register_ram_disk<B: BootServices>(boot_services: &B, dram: &[u8]) -> Result<
 /// minimum, or a total size above the sanity cap — so callers can fail
 /// cleanly instead of hanging or slicing out of bounds.
 pub(crate) unsafe fn device_path_size(dp: *const u8) -> usize {
-    /// Sanity cap for the walk; real device paths are well under this. A
-    /// walk that would pass the cap is rejected before the next header read,
-    /// bounding how far a malformed path can carry it (the walk cannot
-    /// verify the caller's allocation).
-    const DEVICE_PATH_MAX_BYTES: usize = 64 * 1024;
     let mut consumed: usize = 0;
     loop {
+        // Do not read another header once fewer than its bytes remain within
+        // the cap. This bounds the walk even if the previous node ended
+        // exactly at the cap without an END_ENTIRE node.
+        if consumed > DEVICE_PATH_MAX_BYTES - NODE_HDR_BYTES {
+            return 0;
+        }
         // SAFETY: caller guarantees `dp` points at a device path; the header
         // is copied out before parsing, and the length and cap checks below
         // stop the walk on malformed input instead of reading arbitrary
         // memory. `consumed` is bounded by the cap, so the read stays within
         // the walked window.
         let hdr_bytes = unsafe { ptr::read_unaligned(dp.wrapping_add(consumed) as *const [u8; NODE_HDR_BYTES]) };
-        let Ok(hdr) = DevicePathNodeHdr::read_from_bytes(&hdr_bytes) else {
-            // Unreachable: the input is exactly header-sized.
+        let Ok((hdr, _)) = DevicePathNodeHdr::try_from_ctx(&hdr_bytes, Endian::Little) else {
             return 0;
         };
-        let length = hdr.length.get() as usize;
+        let length = hdr.length;
         // A node length below the header minimum can't be walked (length 0
         // would spin forever). Return 0 so callers fail cleanly.
         if length < NODE_HDR_BYTES {
+            return 0;
+        }
+        let is_end_entire =
+            hdr.r#type == device_path::TYPE_END && hdr.sub_type == device_path::End::SUBTYPE_ENTIRE;
+        if is_end_entire && length != NODE_HDR_BYTES {
             return 0;
         }
         // Accumulate the walked size in an independent counter, not a pointer
@@ -608,7 +610,7 @@ pub(crate) unsafe fn device_path_size(dp: *const u8) -> usize {
             _ => return 0,
         };
         consumed = total;
-        if hdr.r#type == 0x7F && hdr.sub_type == 0xFF {
+        if is_end_entire {
             return total;
         }
     }
@@ -624,14 +626,12 @@ pub(crate) fn build_file_path_node(path: &str) -> Vec<u8> {
     let path_bytes = utf16.len() * 2;
     let node_len = NODE_HDR_BYTES + path_bytes;
 
-    use zerocopy::IntoBytes;
-
-    // END_ENTIRE: type=0x7F, subtype=0xFF, length=4.
-    let end_hdr = DevicePathNodeHdr {
-        r#type: 0x7F,
-        sub_type: 0xFF,
-        length: zerocopy::little_endian::U16::new(NODE_HDR_BYTES as u16),
-    };
+    // END_ENTIRE: length=4.
+    let end_hdr = DevicePathNodeHdr::new(
+        device_path::TYPE_END,
+        device_path::End::SUBTYPE_ENTIRE,
+        NODE_HDR_BYTES,
+    );
 
     // The node length field is 16-bit; a path long enough to overflow it
     // would produce a header that misdescribes the appended bytes. Fail
@@ -639,23 +639,32 @@ pub(crate) fn build_file_path_node(path: &str) -> Vec<u8> {
     // the subsequent LoadImage return NotFound.
     if node_len > u16::MAX as usize {
         log::error!("build_file_path_node: path too long for a FilePath node ({node_len} bytes)");
-        return end_hdr.as_bytes().to_vec();
+        return encode_node_header(end_hdr).to_vec();
     }
 
-    // FilePath node: type=4 (MEDIA), subtype=4 (FILEPATH), length=node_len.
-    let file_hdr = DevicePathNodeHdr {
-        r#type: 0x04,
-        sub_type: 0x04,
-        length: zerocopy::little_endian::U16::new(node_len as u16),
-    };
+    // MEDIA_FILEPATH_DP node.
+    let file_hdr = DevicePathNodeHdr::new(
+        device_path::TYPE_MEDIA,
+        device_path::Media::SUBTYPE_FILE_PATH,
+        node_len,
+    );
 
     let mut out = Vec::with_capacity(node_len + NODE_HDR_BYTES);
-    out.extend_from_slice(file_hdr.as_bytes());
+    out.extend_from_slice(&encode_node_header(file_hdr));
     for w in &utf16 {
         out.extend_from_slice(&w.to_le_bytes());
     }
-    out.extend_from_slice(end_hdr.as_bytes());
+    out.extend_from_slice(&encode_node_header(end_hdr));
     out
+}
+
+fn encode_node_header(header: DevicePathNodeHdr) -> [u8; NODE_HDR_BYTES] {
+    let mut bytes = [0; NODE_HDR_BYTES];
+    let written = header
+        .try_into_ctx(&mut bytes, Endian::Little)
+        .expect("fixed-size buffer must encode a device-path header");
+    debug_assert_eq!(written, NODE_HDR_BYTES);
+    bytes
 }
 
 /// Find the FAT SimpleFileSystem handle rooted at `parent_dp`, then chainload
@@ -935,6 +944,29 @@ mod tests {
     }
 
     #[test]
+    fn test_device_path_size_rejects_missing_end_at_cap() {
+        let mut path = alloc::vec![0u8; DEVICE_PATH_MAX_BYTES + NODE_HDR_BYTES];
+
+        // Three valid nodes consume exactly the cap without an END_ENTIRE
+        // node. The walk must reject the path before attempting a header read
+        // at the first byte beyond the cap.
+        let first_node_len = DEVICE_PATH_MAX_BYTES - (2 * NODE_HDR_BYTES);
+        path[0] = 0x01;
+        path[1] = 0x01;
+        path[2..4].copy_from_slice(&(first_node_len as u16).to_le_bytes());
+        for offset in [first_node_len, first_node_len + NODE_HDR_BYTES] {
+            path[offset] = 0x01;
+            path[offset + 1] = 0x01;
+            path[offset + 2..offset + 4].copy_from_slice(&(NODE_HDR_BYTES as u16).to_le_bytes());
+        }
+
+        // SAFETY: the buffer outlives the call and contains every header up
+        // to the cap. The additional header-sized allocation avoids requiring
+        // an out-of-bounds read to exercise this malformed path.
+        assert_eq!(unsafe { device_path_size(path.as_ptr()) }, 0);
+    }
+
+    #[test]
     fn test_build_file_path_node_chainload_default() {
         let bytes = build_file_path_node(DEFAULT_BOOT_FILE_PATH);
         // First two bytes must always be the FilePath node type/subtype.
@@ -966,6 +998,13 @@ mod tests {
         // SAFETY: dp is a valid synthetic UEFI device path terminated by END_ENTIRE.
         let size = unsafe { device_path_size(dp.as_ptr()) };
         assert_eq!(size, 4);
+    }
+
+    #[test]
+    fn test_device_path_size_rejects_end_entire_with_invalid_length() {
+        let dp: [u8; 8] = [0x7F, 0xFF, 0x08, 0x00, 0, 0, 0, 0];
+        // SAFETY: dp is a valid allocation containing the malformed header.
+        assert_eq!(unsafe { device_path_size(dp.as_ptr()) }, 0);
     }
 
     // === probe_max_transfer ===
