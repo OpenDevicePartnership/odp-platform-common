@@ -27,7 +27,7 @@ use patina::{
 };
 use r_efi::{
     efi,
-    protocols::simple_text_input,
+    protocols::{device_path, simple_text_input},
     system::{
         EVENT_GROUP_READY_TO_BOOT, GLOBAL_VARIABLE as EFI_GLOBAL_VARIABLE, VARIABLE_BOOTSERVICE_ACCESS,
         VARIABLE_NON_VOLATILE, VARIABLE_RUNTIME_ACCESS,
@@ -667,9 +667,7 @@ fn boot_option_variable_name(option_number: u16) -> Vec<u16> {
 /// Walks the node list checking that each node's Length field doesn't exceed the
 /// remaining buffer and that the path terminates with an EndEntire node.
 fn validate_device_path_nodes(buffer: &[u8]) -> bool {
-    const NODE_HEADER_SIZE: usize = 4;
-    const END_ENTIRE_TYPE: u8 = 0x7F;
-    const END_ENTIRE_SUBTYPE: u8 = 0xFF;
+    const NODE_HEADER_SIZE: usize = core::mem::size_of::<device_path::Protocol>();
 
     let mut pos = 0;
     loop {
@@ -688,7 +686,7 @@ fn validate_device_path_nodes(buffer: &[u8]) -> bool {
             return false;
         }
 
-        if node_type == END_ENTIRE_TYPE && node_subtype == END_ENTIRE_SUBTYPE {
+        if node_type == device_path::TYPE_END && node_subtype == device_path::End::SUBTYPE_ENTIRE {
             return true;
         }
 

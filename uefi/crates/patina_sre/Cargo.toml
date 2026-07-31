@@ -24,6 +24,7 @@ readme = "README.md"
 [dependencies]
 log = { version = "0.4", default-features = false }
 r-efi = { version = "7", default-features = false }
+scroll = { version = "0.13", default-features = false }
 spin = { version = "0.9", default-features = false, features = ["spin_mutex"] }
 
 # patina_boot lives at uefi/crates/patina_boot/ in this same repo. Use a path
