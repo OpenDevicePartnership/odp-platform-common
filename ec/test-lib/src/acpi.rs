@@ -1,4 +1,4 @@
-use crate::ucsi::{self, Mailbox, UcsiCapability, UcsiConnectorCapability, UcsiConnectorStatus, UcsiVersion};
+use crate::ucsi::{self, UcsiCapability, UcsiConnectorCapability, UcsiConnectorStatus, UcsiVersion};
 use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, UcsiSource, common};
 use battery_service_interface::{
     BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit,
@@ -708,8 +708,8 @@ impl RtcSource for Acpi {
 
 impl Acpi {
     /// Issue one UCSI command by writing the 8-byte CONTROL buffer to
-    /// `\_SB.ECT0.USND` and decoding the returned 48-byte mailbox.
-    fn ucsi_command(&self, control: [u8; ucsi::CONTROL_LEN]) -> Result<Mailbox, Error> {
+    /// `\_SB.ECT0.USND` and returning the raw 48-byte mailbox response.
+    fn ucsi_command(&self, control: [u8; ucsi::CONTROL_LEN]) -> Result<Vec<u8>, Error> {
         let output = self.evaluate("\\_SB.ECT0.USND", Some(&[AcpiMethodArgument::Buffer(control.to_vec())]))?;
         if output.count != 1 {
             return Err(Error::UnexpectedResponse);
@@ -718,28 +718,28 @@ impl Acpi {
         if arg.type_ != AcpiArgumentType::Buffer as u16 {
             return Err(Error::UnexpectedArgumentType(arg.type_));
         }
-        Ok(Mailbox::decode(&arg.data)?)
+        Ok(arg.data.clone())
     }
 }
 
 impl UcsiSource for Acpi {
     fn get_version(&self) -> Result<UcsiVersion, Self::Error> {
         let mailbox = self.ucsi_command(ucsi::control(ucsi::opcode::GET_CAPABILITY, 0))?;
-        Ok(mailbox.version())
+        Ok(ucsi::decode_version(&mailbox)?)
     }
 
     fn get_capability(&self) -> Result<UcsiCapability, Self::Error> {
         let mailbox = self.ucsi_command(ucsi::control(ucsi::opcode::GET_CAPABILITY, 0))?;
-        Ok(mailbox.capability()?)
+        Ok(ucsi::decode_capability(&mailbox)?)
     }
 
     fn get_connector_capability(&self, connector: u8) -> Result<UcsiConnectorCapability, Self::Error> {
         let mailbox = self.ucsi_command(ucsi::control(ucsi::opcode::GET_CONNECTOR_CAPABILITY, connector))?;
-        Ok(mailbox.connector_capability()?)
+        Ok(ucsi::decode_connector_capability(&mailbox)?)
     }
 
     fn get_connector_status(&self, connector: u8) -> Result<UcsiConnectorStatus, Self::Error> {
         let mailbox = self.ucsi_command(ucsi::control(ucsi::opcode::GET_CONNECTOR_STATUS, connector))?;
-        Ok(mailbox.connector_status()?)
+        Ok(ucsi::decode_connector_status(&mailbox)?)
     }
 }

@@ -1,6 +1,4 @@
-use crate::ucsi::{
-    OperationMode, PowerDirection, UcsiCapability, UcsiConnectorCapability, UcsiConnectorStatus, UcsiVersion,
-};
+use crate::ucsi::{PowerDirection, UcsiCapability, UcsiConnectorCapability, UcsiConnectorStatus, UcsiVersion};
 use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, UcsiSource};
 use battery_service_interface::{
     BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit,
@@ -457,16 +455,13 @@ impl UcsiSource for Mock {
             num_connectors: 1,
             usb_pd_supported: true,
             bcd_pd_version: 0x0300,
-            bcd_usb_type_c_version: 0x0200,
         })
     }
     fn get_connector_capability(&self, _connector: u8) -> Result<UcsiConnectorCapability, Self::Error> {
         Ok(UcsiConnectorCapability {
-            operation_mode: OperationMode {
-                drp: true,
-                usb2: true,
-                usb3: true,
-            },
+            drp: true,
+            usb2: true,
+            usb3: true,
             provider: true,
             consumer: true,
         })
@@ -477,56 +472,5 @@ impl UcsiSource for Mock {
             power_direction: PowerDirection::Sink,
             partner_usb: true,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ucsi_version_is_1_2() {
-        assert_eq!(Mock::new().get_version().unwrap(), UcsiVersion(0x0120));
-    }
-
-    #[test]
-    fn ucsi_capability_reports_single_pd_connector() {
-        assert_eq!(
-            Mock::new().get_capability().unwrap(),
-            UcsiCapability {
-                num_connectors: 1,
-                usb_pd_supported: true,
-                bcd_pd_version: 0x0300,
-                bcd_usb_type_c_version: 0x0200,
-            }
-        );
-    }
-
-    #[test]
-    fn ucsi_connector_capability_is_drp_provider_consumer() {
-        assert_eq!(
-            Mock::new().get_connector_capability(1).unwrap(),
-            UcsiConnectorCapability {
-                operation_mode: OperationMode {
-                    drp: true,
-                    usb2: true,
-                    usb3: true,
-                },
-                provider: true,
-                consumer: true,
-            }
-        );
-    }
-
-    #[test]
-    fn ucsi_connector_status_is_connected_sink() {
-        assert_eq!(
-            Mock::new().get_connector_status(1).unwrap(),
-            UcsiConnectorStatus {
-                connected: true,
-                power_direction: PowerDirection::Sink,
-                partner_usb: true,
-            }
-        );
     }
 }

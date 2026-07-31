@@ -6,17 +6,12 @@
 
 use std::fmt;
 
-/// Total UCSI mailbox size in bytes.
-pub const MAILBOX_LEN: usize = 48;
-/// UCSI 1.2 version word reported in the mailbox VERSION field.
-pub const UCSI_VERSION_1_2: u16 = 0x0120;
 /// Length of the UCSI CONTROL field the OS writes to issue a command.
 pub const CONTROL_LEN: usize = 8;
 
-const VERSION_OFFSET: usize = 0;
-const CCI_OFFSET: usize = 4;
+const MAILBOX_LEN: usize = 48;
+const UCSI_VERSION_1_2: u16 = 0x0120;
 const MESSAGE_IN_OFFSET: usize = 16;
-const MESSAGE_IN_LEN: usize = 16;
 
 /// UCSI command opcodes for the host read surface.
 pub mod opcode {
@@ -43,47 +38,9 @@ pub fn control(opcode: u8, connector: u8) -> [u8; CONTROL_LEN] {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UcsiVersion(pub u16);
 
-impl UcsiVersion {
-    /// Major version digit.
-    pub fn major(self) -> u8 {
-        (self.0 >> 8) as u8
-    }
-    /// Minor version digit.
-    pub fn minor(self) -> u8 {
-        ((self.0 >> 4) & 0xf) as u8
-    }
-}
-
 impl fmt::Display for UcsiVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}", self.major(), self.minor())
-    }
-}
-
-/// Command Status and Connector Change Indicator (UCSI spec 4.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Cci(pub u32);
-
-impl Cci {
-    /// Length of the returned MESSAGE IN data (bits 15..8).
-    pub fn data_len(self) -> u8 {
-        (self.0 >> 8) as u8
-    }
-    /// Command was not supported (bit 25).
-    pub fn not_supported(self) -> bool {
-        self.0 & (1 << 25) != 0
-    }
-    /// Busy (bit 28).
-    pub fn busy(self) -> bool {
-        self.0 & (1 << 28) != 0
-    }
-    /// Command error (bit 30).
-    pub fn error(self) -> bool {
-        self.0 & (1 << 30) != 0
-    }
-    /// Command complete (bit 31).
-    pub fn cmd_complete(self) -> bool {
-        self.0 & (1 << 31) != 0
+        write!(f, "{}.{}", self.0 >> 8, (self.0 >> 4) & 0xf)
     }
 }
 
@@ -96,26 +53,17 @@ pub struct UcsiCapability {
     pub usb_pd_supported: bool,
     /// BCD-coded USB PD spec version.
     pub bcd_pd_version: u16,
-    /// BCD-coded USB Type-C spec version.
-    pub bcd_usb_type_c_version: u16,
 }
 
-/// Connector operation-mode flags (subset used by the host UI).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct OperationMode {
+/// Per-connector capabilities (GET_CONNECTOR_CAPABILITY response).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UcsiConnectorCapability {
     /// Dual-role port.
     pub drp: bool,
     /// USB 2.0 capable.
     pub usb2: bool,
     /// USB 3.x capable.
     pub usb3: bool,
-}
-
-/// Per-connector capabilities (GET_CONNECTOR_CAPABILITY response).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UcsiConnectorCapability {
-    /// Supported operation modes.
-    pub operation_mode: OperationMode,
     /// Connector can act as a power provider (source).
     pub provider: bool,
     /// Connector can act as a power consumer (sink).
@@ -154,13 +102,8 @@ pub struct UcsiConnectorStatus {
 /// Error decoding a UCSI mailbox response.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MailboxError {
-    /// The mailbox buffer was not exactly [`MAILBOX_LEN`] bytes.
-    WrongLength {
-        /// Expected byte count.
-        expected: usize,
-        /// Actual byte count.
-        actual: usize,
-    },
+    /// The mailbox buffer was not exactly 48 bytes.
+    WrongLength(usize),
     /// The VERSION field did not match a supported UCSI version.
     UnsupportedVersion(u16),
     /// CCI did not report command-complete.
@@ -181,9 +124,7 @@ pub enum MailboxError {
 impl fmt::Display for MailboxError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::WrongLength { expected, actual } => {
-                write!(f, "mailbox length {actual} bytes, expected {expected}")
-            }
+            Self::WrongLength(n) => write!(f, "mailbox length {n} bytes, expected 48"),
             Self::UnsupportedVersion(v) => write!(f, "unsupported UCSI version {v:#06x}"),
             Self::NotComplete => write!(f, "CCI did not report command complete"),
             Self::CommandError => write!(f, "CCI reported command error"),
@@ -197,116 +138,85 @@ impl fmt::Display for MailboxError {
 
 impl std::error::Error for MailboxError {}
 
-/// A decoded UCSI mailbox: validated VERSION + CCI plus the raw MESSAGE IN bytes.
-#[derive(Debug, Clone)]
-pub struct Mailbox {
-    version: UcsiVersion,
-    cci: Cci,
-    message_in: [u8; MESSAGE_IN_LEN],
+/// Validate the 48-byte mailbox header (length, VERSION, CCI status) and return
+/// the CCI data-length field.
+fn validate(bytes: &[u8]) -> Result<usize, MailboxError> {
+    if bytes.len() != MAILBOX_LEN {
+        return Err(MailboxError::WrongLength(bytes.len()));
+    }
+    let version = u16::from_le_bytes([bytes[0], bytes[1]]);
+    if version != UCSI_VERSION_1_2 {
+        return Err(MailboxError::UnsupportedVersion(version));
+    }
+    let cci = u32::from_le_bytes(bytes[4..8].try_into().expect("4-byte CCI slice"));
+    if cci & (1 << 31) == 0 {
+        return Err(MailboxError::NotComplete);
+    }
+    if cci & (1 << 30) != 0 {
+        return Err(MailboxError::CommandError);
+    }
+    if cci & (1 << 25) != 0 {
+        return Err(MailboxError::NotSupported);
+    }
+    Ok(((cci >> 8) & 0xff) as usize)
 }
 
-impl Mailbox {
-    /// Validate VERSION and CCI, returning the decoded mailbox.
-    ///
-    /// Rejects a wrong-sized buffer, an unsupported VERSION, or a CCI that is
-    /// not command-complete / reports error / not-supported.
-    pub fn decode(bytes: &[u8]) -> Result<Self, MailboxError> {
-        if bytes.len() != MAILBOX_LEN {
-            return Err(MailboxError::WrongLength {
-                expected: MAILBOX_LEN,
-                actual: bytes.len(),
-            });
-        }
-        let version = UcsiVersion(u16::from_le_bytes([bytes[VERSION_OFFSET], bytes[VERSION_OFFSET + 1]]));
-        if version.0 != UCSI_VERSION_1_2 {
-            return Err(MailboxError::UnsupportedVersion(version.0));
-        }
-        let cci = Cci(u32::from_le_bytes(
-            bytes[CCI_OFFSET..CCI_OFFSET + 4].try_into().expect("4-byte CCI slice"),
-        ));
-        if !cci.cmd_complete() {
-            return Err(MailboxError::NotComplete);
-        }
-        if cci.error() {
-            return Err(MailboxError::CommandError);
-        }
-        if cci.not_supported() {
-            return Err(MailboxError::NotSupported);
-        }
-        let mut message_in = [0u8; MESSAGE_IN_LEN];
-        message_in.copy_from_slice(&bytes[MESSAGE_IN_OFFSET..MESSAGE_IN_OFFSET + MESSAGE_IN_LEN]);
-        Ok(Self {
-            version,
-            cci,
-            message_in,
-        })
+/// Validate the header and return the first `expected` MESSAGE IN bytes.
+fn message_in(bytes: &[u8], expected: usize) -> Result<&[u8], MailboxError> {
+    let actual = validate(bytes)?;
+    if actual != expected {
+        return Err(MailboxError::UnexpectedDataLen { expected, actual });
     }
-
-    /// UCSI version reported in the mailbox.
-    pub fn version(&self) -> UcsiVersion {
-        self.version
-    }
-
-    /// Raw CCI reported in the mailbox.
-    pub fn cci(&self) -> Cci {
-        self.cci
-    }
-
-    /// The first `expected` MESSAGE IN bytes, after checking CCI data length.
-    fn data(&self, expected: usize) -> Result<&[u8], MailboxError> {
-        let actual = self.cci.data_len() as usize;
-        if actual != expected {
-            return Err(MailboxError::UnexpectedDataLen { expected, actual });
-        }
-        Ok(&self.message_in[..expected])
-    }
-
-    /// Decode a GET_CAPABILITY (16-byte) response.
-    pub fn capability(&self) -> Result<UcsiCapability, MailboxError> {
-        let d = self.data(16)?;
-        let attributes = u32::from_le_bytes([d[0], d[1], d[2], d[3]]);
-        Ok(UcsiCapability {
-            num_connectors: d[4],
-            usb_pd_supported: attributes & (1 << 2) != 0,
-            bcd_pd_version: u16::from_le_bytes([d[12], d[13]]),
-            bcd_usb_type_c_version: u16::from_le_bytes([d[14], d[15]]),
-        })
-    }
-
-    /// Decode a GET_CONNECTOR_CAPABILITY (2-byte) response.
-    pub fn connector_capability(&self) -> Result<UcsiConnectorCapability, MailboxError> {
-        let d = self.data(2)?;
-        let raw = u16::from_le_bytes([d[0], d[1]]);
-        let op = (raw & 0xff) as u8;
-        Ok(UcsiConnectorCapability {
-            operation_mode: OperationMode {
-                drp: op & (1 << 2) != 0,
-                usb2: op & (1 << 5) != 0,
-                usb3: op & (1 << 6) != 0,
-            },
-            provider: raw & (1 << 8) != 0,
-            consumer: raw & (1 << 9) != 0,
-        })
-    }
-
-    /// Decode a GET_CONNECTOR_STATUS (11-byte) response.
-    pub fn connector_status(&self) -> Result<UcsiConnectorStatus, MailboxError> {
-        let d = self.data(11)?;
-        Ok(UcsiConnectorStatus {
-            connected: bit(d, 19),
-            power_direction: if bit(d, 20) {
-                PowerDirection::Source
-            } else {
-                PowerDirection::Sink
-            },
-            partner_usb: bit(d, 21),
-        })
-    }
+    Ok(&bytes[MESSAGE_IN_OFFSET..MESSAGE_IN_OFFSET + expected])
 }
 
 /// Read bit `index` from a little-endian byte slice (bit 0 = LSB of byte 0).
 fn bit(bytes: &[u8], index: usize) -> bool {
     (bytes[index / 8] >> (index % 8)) & 1 == 1
+}
+
+/// Validate a mailbox and return the UCSI version.
+pub fn decode_version(bytes: &[u8]) -> Result<UcsiVersion, MailboxError> {
+    validate(bytes)?;
+    Ok(UcsiVersion(u16::from_le_bytes([bytes[0], bytes[1]])))
+}
+
+/// Decode a GET_CAPABILITY (16-byte) response.
+pub fn decode_capability(bytes: &[u8]) -> Result<UcsiCapability, MailboxError> {
+    let d = message_in(bytes, 16)?;
+    Ok(UcsiCapability {
+        num_connectors: d[4],
+        usb_pd_supported: d[0] & (1 << 2) != 0,
+        bcd_pd_version: u16::from_le_bytes([d[12], d[13]]),
+    })
+}
+
+/// Decode a GET_CONNECTOR_CAPABILITY (2-byte) response.
+pub fn decode_connector_capability(bytes: &[u8]) -> Result<UcsiConnectorCapability, MailboxError> {
+    let d = message_in(bytes, 2)?;
+    let raw = u16::from_le_bytes([d[0], d[1]]);
+    let op = raw as u8;
+    Ok(UcsiConnectorCapability {
+        drp: op & (1 << 2) != 0,
+        usb2: op & (1 << 5) != 0,
+        usb3: op & (1 << 6) != 0,
+        provider: raw & (1 << 8) != 0,
+        consumer: raw & (1 << 9) != 0,
+    })
+}
+
+/// Decode a GET_CONNECTOR_STATUS (11-byte) response.
+pub fn decode_connector_status(bytes: &[u8]) -> Result<UcsiConnectorStatus, MailboxError> {
+    let d = message_in(bytes, 11)?;
+    Ok(UcsiConnectorStatus {
+        connected: bit(d, 19),
+        power_direction: if bit(d, 20) {
+            PowerDirection::Source
+        } else {
+            PowerDirection::Sink
+        },
+        partner_usb: bit(d, 21),
+    })
 }
 
 #[cfg(test)]
@@ -321,13 +231,11 @@ mod tests {
     /// Assemble a 48-byte mailbox from a CCI word and MESSAGE IN bytes.
     fn mailbox(cci: u32, message_in: &[u8]) -> [u8; MAILBOX_LEN] {
         let mut buf = [0u8; MAILBOX_LEN];
-        buf[VERSION_OFFSET..VERSION_OFFSET + 2].copy_from_slice(&UCSI_VERSION_1_2.to_le_bytes());
-        buf[CCI_OFFSET..CCI_OFFSET + 4].copy_from_slice(&cci.to_le_bytes());
+        buf[0..2].copy_from_slice(&UCSI_VERSION_1_2.to_le_bytes());
+        buf[4..8].copy_from_slice(&cci.to_le_bytes());
         buf[MESSAGE_IN_OFFSET..MESSAGE_IN_OFFSET + message_in.len()].copy_from_slice(message_in);
         buf
     }
-
-    // ── control ───────────────────────────────────────────────────────────────
 
     #[test]
     fn control_places_opcode_and_connector() {
@@ -338,128 +246,106 @@ mod tests {
         assert_eq!(&c[3..], &[0u8; 5]);
     }
 
-    // ── version / display ─────────────────────────────────────────────────────
+    // ── header validation boundaries ──────────────────────────────────────────
 
     #[test]
-    fn version_display_is_major_minor() {
-        assert_eq!(UcsiVersion(0x0120).to_string(), "1.2");
-    }
-
-    // ── decode: VERSION / CCI / length validation ─────────────────────────────
-
-    #[test]
-    fn decode_rejects_wrong_length() {
-        assert_eq!(
-            Mailbox::decode(&[0u8; 47]).unwrap_err(),
-            MailboxError::WrongLength {
-                expected: 48,
-                actual: 47
-            }
-        );
+    fn rejects_wrong_length() {
+        assert_eq!(decode_version(&[0u8; 47]).unwrap_err(), MailboxError::WrongLength(47));
     }
 
     #[test]
-    fn decode_rejects_unsupported_version() {
+    fn rejects_unsupported_version() {
         let mut buf = mailbox(cci_complete(16), &[]);
         buf[0..2].copy_from_slice(&0x0100u16.to_le_bytes());
         assert_eq!(
-            Mailbox::decode(&buf).unwrap_err(),
+            decode_version(&buf).unwrap_err(),
             MailboxError::UnsupportedVersion(0x0100)
         );
     }
 
     #[test]
-    fn decode_rejects_incomplete_cci() {
-        let buf = mailbox(0, &[]);
-        assert_eq!(Mailbox::decode(&buf).unwrap_err(), MailboxError::NotComplete);
+    fn rejects_incomplete_cci() {
+        assert_eq!(decode_version(&mailbox(0, &[])).unwrap_err(), MailboxError::NotComplete);
     }
 
     #[test]
-    fn decode_rejects_error_cci() {
+    fn rejects_error_cci() {
         let buf = mailbox((1 << 31) | (1 << 30), &[]);
-        assert_eq!(Mailbox::decode(&buf).unwrap_err(), MailboxError::CommandError);
+        assert_eq!(decode_version(&buf).unwrap_err(), MailboxError::CommandError);
     }
 
     #[test]
-    fn decode_rejects_not_supported_cci() {
+    fn rejects_not_supported_cci() {
         let buf = mailbox((1 << 31) | (1 << 25), &[]);
-        assert_eq!(Mailbox::decode(&buf).unwrap_err(), MailboxError::NotSupported);
+        assert_eq!(decode_version(&buf).unwrap_err(), MailboxError::NotSupported);
     }
 
     #[test]
-    fn decode_accepts_valid_header() {
-        let buf = mailbox(cci_complete(16), &[]);
-        let mb = Mailbox::decode(&buf).expect("valid mailbox");
-        assert_eq!(mb.version(), UcsiVersion(0x0120));
-        assert_eq!(mb.cci().data_len(), 16);
-    }
-
-    // ── capability (16 bytes) ─────────────────────────────────────────────────
-
-    #[test]
-    fn capability_decodes_fixture() {
-        // attributes bit2 (USB PD), num_connectors=1, bcdPD=0x0300, bcdTypeC=0x0200.
-        let mut msg = [0u8; 16];
-        msg[0] = 0b0000_0100;
-        msg[4] = 1;
-        msg[12..14].copy_from_slice(&0x0300u16.to_le_bytes());
-        msg[14..16].copy_from_slice(&0x0200u16.to_le_bytes());
-        let mb = Mailbox::decode(&mailbox(cci_complete(16), &msg)).unwrap();
+    fn rejects_wrong_data_len() {
+        let buf = mailbox(cci_complete(2), &[0u8; 16]);
         assert_eq!(
-            mb.capability().unwrap(),
-            UcsiCapability {
-                num_connectors: 1,
-                usb_pd_supported: true,
-                bcd_pd_version: 0x0300,
-                bcd_usb_type_c_version: 0x0200,
+            decode_capability(&buf).unwrap_err(),
+            MailboxError::UnexpectedDataLen {
+                expected: 16,
+                actual: 2
             }
         );
     }
 
     #[test]
-    fn capability_rejects_wrong_data_len() {
-        let mb = Mailbox::decode(&mailbox(cci_complete(2), &[0u8; 16])).unwrap();
+    fn version_decodes_and_displays() {
         assert_eq!(
-            mb.capability(),
-            Err(MailboxError::UnexpectedDataLen {
-                expected: 16,
-                actual: 2
-            })
+            decode_version(&mailbox(cci_complete(16), &[])).unwrap(),
+            UcsiVersion(0x0120)
         );
+        assert_eq!(UcsiVersion(0x0120).to_string(), "1.2");
     }
 
-    // ── connector capability (2 bytes) ────────────────────────────────────────
+    // ── field bit decode ──────────────────────────────────────────────────────
+
+    #[test]
+    fn capability_decodes_fixture() {
+        // attributes bit2 (USB PD), num_connectors=1, bcdPD=0x0300.
+        let mut msg = [0u8; 16];
+        msg[0] = 0b0000_0100;
+        msg[4] = 1;
+        msg[12..14].copy_from_slice(&0x0300u16.to_le_bytes());
+        let cap = decode_capability(&mailbox(cci_complete(16), &msg)).unwrap();
+        assert_eq!(
+            cap,
+            UcsiCapability {
+                num_connectors: 1,
+                usb_pd_supported: true,
+                bcd_pd_version: 0x0300,
+            }
+        );
+    }
 
     #[test]
     fn connector_capability_decodes_fixture() {
         // operation_mode = drp|usb2|usb3, provider + consumer.
         let op = (1 << 2) | (1 << 5) | (1 << 6);
         let raw: u16 = op | (1 << 8) | (1 << 9);
-        let mb = Mailbox::decode(&mailbox(cci_complete(2), &raw.to_le_bytes())).unwrap();
+        let cap = decode_connector_capability(&mailbox(cci_complete(2), &raw.to_le_bytes())).unwrap();
         assert_eq!(
-            mb.connector_capability().unwrap(),
+            cap,
             UcsiConnectorCapability {
-                operation_mode: OperationMode {
-                    drp: true,
-                    usb2: true,
-                    usb3: true,
-                },
+                drp: true,
+                usb2: true,
+                usb3: true,
                 provider: true,
                 consumer: true,
             }
         );
     }
 
-    // ── connector status (11 bytes) ───────────────────────────────────────────
-
     #[test]
     fn connector_status_decodes_connected_sink() {
         // connect_status bit19, power_direction bit20=0 (sink), partner usb bit21.
         let mut msg = [0u8; 11];
-        msg[2] = (1 << 3) | (1 << 5); // bit19 (connect) + bit21 (partner usb)
-        let mb = Mailbox::decode(&mailbox(cci_complete(11), &msg)).unwrap();
+        msg[2] = (1 << 3) | (1 << 5);
         assert_eq!(
-            mb.connector_status().unwrap(),
+            decode_connector_status(&mailbox(cci_complete(11), &msg)).unwrap(),
             UcsiConnectorStatus {
                 connected: true,
                 power_direction: PowerDirection::Sink,
@@ -472,7 +358,7 @@ mod tests {
     fn connector_status_decodes_source_direction() {
         let mut msg = [0u8; 11];
         msg[2] = (1 << 3) | (1 << 4); // connect + power_direction=source (bit20)
-        let mb = Mailbox::decode(&mailbox(cci_complete(11), &msg)).unwrap();
-        assert_eq!(mb.connector_status().unwrap().power_direction, PowerDirection::Source);
+        let status = decode_connector_status(&mailbox(cci_complete(11), &msg)).unwrap();
+        assert_eq!(status.power_direction, PowerDirection::Source);
     }
 }

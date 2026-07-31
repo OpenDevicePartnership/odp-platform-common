@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use battery_service_interface::{BixFixedStrings, BstReturn};
 use color_eyre::Result;
+use color_eyre::eyre::eyre;
 use ec_test_lib::Threshold;
 use ec_test_lib::ucsi::{UcsiCapability, UcsiConnectorCapability, UcsiConnectorStatus, UcsiVersion};
 use time_alarm_service_interface::{
@@ -45,11 +46,20 @@ pub(crate) trait DynSource: Send + Sync {
     fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy>;
     fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds>;
 
-    // UCSI
-    fn get_ucsi_version(&self) -> Result<UcsiVersion>;
-    fn get_ucsi_capability(&self) -> Result<UcsiCapability>;
-    fn get_ucsi_connector_capability(&self, connector: u8) -> Result<UcsiConnectorCapability>;
-    fn get_ucsi_connector_status(&self, connector: u8) -> Result<UcsiConnectorStatus>;
+    // UCSI — default to unsupported so lightweight UI test doubles need not
+    // implement them; real sources override these via the blanket impl below.
+    fn get_ucsi_version(&self) -> Result<UcsiVersion> {
+        Err(eyre!("UCSI not supported by this source"))
+    }
+    fn get_ucsi_capability(&self) -> Result<UcsiCapability> {
+        Err(eyre!("UCSI not supported by this source"))
+    }
+    fn get_ucsi_connector_capability(&self, _connector: u8) -> Result<UcsiConnectorCapability> {
+        Err(eyre!("UCSI not supported by this source"))
+    }
+    fn get_ucsi_connector_status(&self, _connector: u8) -> Result<UcsiConnectorStatus> {
+        Err(eyre!("UCSI not supported by this source"))
+    }
 }
 
 // ── Blanket impl ─────────────────────────────────────────────────────────────

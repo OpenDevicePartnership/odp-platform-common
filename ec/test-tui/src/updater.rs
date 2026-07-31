@@ -402,17 +402,12 @@ impl UcsiUpdater {
 
     #[tracing::instrument(skip_all)]
     fn update(&mut self) {
+        // Reads may be steadily unsupported (e.g. serial has no UCSI peer); the
+        // Fetched cells carry the error to the UI, so we don't warn every tick.
         let version = self.source.get_ucsi_version();
         let capability = self.source.get_ucsi_capability();
         let connector_capability = self.source.get_ucsi_connector_capability(UCSI_CONNECTOR);
         let connector_status = self.source.get_ucsi_connector_status(UCSI_CONNECTOR);
-
-        if let Err(ref e) = version {
-            warn!(error = %e, "failed to read UCSI version");
-        }
-        if let Err(ref e) = connector_status {
-            warn!(error = %e, "failed to read UCSI connector status");
-        }
 
         let mut s = self.state.write().expect("state RwLock poisoned");
         s.version = Some(version);
