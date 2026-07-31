@@ -31,6 +31,7 @@
 #![feature(never_type)]
 
 pub mod boot_dispatcher;
+pub mod boot_mode;
 pub mod boot_orchestrator;
 pub mod config;
 pub mod connect_controller;

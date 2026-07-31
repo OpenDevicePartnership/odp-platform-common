@@ -226,16 +226,15 @@ pub fn connect_all<B: BootServices>(boot_services: &B) -> Result<()> {
     Ok(())
 }
 
-/// PCI class of `handle` as `(base_class << 8) | subclass`, or `0xFFFF` if the
-/// handle is not a PCI device (no `PciIo`). Read from config offset 0x08.
-fn pci_class<B: BootServices>(boot_services: &B, handle: efi::Handle) -> u32 {
+/// PCI class of `handle` as `(base_class << 8) | subclass`, read from config
+/// offset 0x08. Returns `Err` if the handle is not a PCI device (no `PciIo`) or
+/// the config read fails.
+fn pci_class<B: BootServices>(boot_services: &B, handle: efi::Handle) -> Result<u32> {
     use r_efi::protocols::pci_io;
 
     // SAFETY: querying PciIo on the handle; the returned interface is only used
     // to read the class-code register. Non-PCI handles simply lack it.
-    let Ok(pci) = (unsafe { boot_services.handle_protocol::<pci_io::Protocol>(handle) }) else {
-        return 0xffff;
-    };
+    let pci = unsafe { boot_services.handle_protocol::<pci_io::Protocol>(handle) }.map_err(EfiError::from)?;
     let mut class: u32 = 0;
     // SAFETY: `pci` is a valid PciIo interface; reads one u32 of config space
     // (class-code register at offset 0x08) into a stack local.
@@ -249,10 +248,10 @@ fn pci_class<B: BootServices>(boot_services: &B, handle: efi::Handle) -> u32 {
         )
     };
     if status != efi::Status::SUCCESS {
-        return 0xffff;
+        return Err(EfiError::from(status));
     }
     // byte 3 = base class, byte 2 = subclass (little-endian u32).
-    ((class >> 24) & 0xff) << 8 | ((class >> 16) & 0xff)
+    Ok(((class >> 24) & 0xff) << 8 | ((class >> 16) & 0xff))
 }
 
 /// True if `handle` is a PCI USB host controller (base class `0x0C`, subclass
@@ -260,7 +259,9 @@ fn pci_class<B: BootServices>(boot_services: &B, handle: efi::Handle) -> u32 {
 /// binding them triggers port power-on and device enumeration that dominate
 /// connect time.
 fn is_usb_host_controller<B: BootServices>(boot_services: &B, handle: efi::Handle) -> bool {
-    pci_class(boot_services, handle) == 0x0c03
+    // A handle whose class can't be read (not a PCI device, or read failure) is
+    // treated as not-USB, so it is connected rather than skipped.
+    pci_class(boot_services, handle).is_ok_and(|class| class == 0x0c03)
 }
 
 /// Connect the device tree but skip PCI USB host controllers. Uses

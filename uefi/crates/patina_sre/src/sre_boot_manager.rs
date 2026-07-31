@@ -6,9 +6,10 @@
 //! 1. Signal the `gMsStartOfBds` event group
 //! 2. Dispatch DXE drivers so their driver bindings are installed; the device
 //!    tree is not connected up front
-//! 3. Optional capsule-queue processing on a flash-update boot, before EndOfDxe
-//!    while the flash is still writable (connects the tree for firmware-
-//!    management protocols); skipped on a normal boot
+//! 3. Optional capsule-queue processing via [`crate::capsule::process`], before
+//!    EndOfDxe while the flash is still writable; signals the capsule processor
+//!    (a no-op unless a capsule is queued on a flash-update boot) and draws the
+//!    progress-bar logo only on a flash-update boot
 //! 4. Signal `EndOfDxe` (security lockdown)
 //! 5. Probe the hotkey provider. On a recovery chord, connect the full device
 //!    tree and consoles, then dispatch the configured SRE app path or fall back
@@ -44,10 +45,10 @@ use patina::{
     error::EfiError,
     runtime_services::StandardRuntimeServices,
 };
-use patina_boot::{BootOrchestrator, helpers, proxy};
+use patina_boot::{BootOrchestrator, helpers};
 use r_efi::efi;
 
-use crate::bp_recovery;
+use crate::{bp_recovery, events::signal_event_group};
 
 /// Result of probing the platform's button-services protocol for an SRE
 /// hotkey at BDS entry.
@@ -195,50 +196,6 @@ static DFCI_START_OF_BDS_NOTIFY_GUID: efi::Guid = efi::Guid::from_fields(
     &[0x78, 0x12, 0xb0, 0x29, 0x9c, 0x45],
 );
 
-/// `gMuReadyToProcessCapsulesNotifyGuid` from `MsCorePkg.dec`. The C
-/// `PlatformBootManagerLib` signals this after `ConnectAll` in the
-/// `BOOT_ON_FLASH_UPDATE` path; the MU capsule processor
-/// (`SecuredCoreCapsuleProcessorDxe`) arms a callback on it only when its
-/// capsule queue is non-empty, drains the queue (applying FMP capsules),
-/// and cold-resets. Safe to signal unconditionally: with an empty queue no
-/// callback is registered, so it is a no-op.
-static MU_READY_TO_PROCESS_CAPSULES_NOTIFY_GUID: efi::Guid = efi::Guid::from_fields(
-    0x2ab1c860,
-    0xe697,
-    0x4ede,
-    0x8c,
-    0x0f,
-    &[0x65, 0xcd, 0x6e, 0x44, 0x44, 0x35],
-);
-
-/// Create a one-shot NOTIFY_SIGNAL event tied to `group_guid`, fire it, then
-/// close it — broadcasting a notification to whichever DXE drivers registered
-/// a callback against the group.
-fn signal_event_group<B: BootServices>(boot_services: &B, group_guid: &'static efi::Guid) -> patina::error::Result<()> {
-    use patina::boot_services::{event::EventType, tpl::Tpl};
-
-    extern "efiapi" fn noop(_event: *mut core::ffi::c_void, _context: *mut ()) {}
-
-    // SAFETY: noop callback + null context is a valid signal-only event;
-    // we use it purely to broadcast to consumers of `group_guid`.
-    let event = unsafe {
-        boot_services.create_event_ex_unchecked::<()>(
-            EventType::NOTIFY_SIGNAL,
-            Tpl::CALLBACK,
-            Some(noop),
-            core::ptr::null_mut(),
-            group_guid,
-        )
-    }
-    .map_err(EfiError::from)?;
-
-    let signal_result = boot_services.signal_event(event);
-    let close_result = boot_services.close_event(event);
-    signal_result.map_err(EfiError::from)?;
-    close_result.map_err(EfiError::from)?;
-    Ok(())
-}
-
 /// SRE boot manager implementing [`BootOrchestrator`].
 ///
 /// Normal boot path plus hotkey dispatch when paths are configured via the
@@ -270,14 +227,16 @@ pub struct SreBootManager {
     /// DFCI/SEMM mailbox processing runs at BDS entry. Default `false`; platforms
     /// that ship the DFCI/SEMM stack opt in via [`Self::with_dfci_bds_signal`].
     dfci_bds_signal: bool,
-    /// When `true`, `execute()` signals `gMuReadyToProcessCapsulesNotifyGuid`
-    /// after connecting controllers (so FMP protocols are present) and before
-    /// EndOfDxe/flash lockdown. On a `BOOT_ON_FLASH_UPDATE` boot the MU capsule
-    /// processor drains its queue and cold-resets; on a normal boot the queue is
-    /// empty and the signal is a no-op. Without it, a staged capsule leaves the
-    /// PEI-set `BOOT_ON_FLASH_UPDATE` boot mode uncleared and the platform loops.
-    /// Default `false`. Platforms with the MU capsule queue opt in via
-    /// [`Self::with_capsule_processing`].
+    /// When `true`, `execute()` invokes [`crate::capsule::process`] after
+    /// connecting controllers (so FMP protocols are present) and before
+    /// EndOfDxe/flash lockdown. That hook signals
+    /// `gMuReadyToProcessCapsulesNotifyGuid` on every call (a no-op with an empty
+    /// queue; the MU capsule processor drains its queue and cold-resets on a
+    /// flash-update boot with a queued capsule) and draws the progress-bar logo
+    /// only on a flash-update boot, gated on the boot mode the platform binary
+    /// records. Without it, a staged capsule leaves the flash-update boot mode
+    /// uncleared and the platform loops. Default `false`. Platforms with the MU
+    /// capsule queue opt in via [`Self::with_capsule_processing`].
     capsule_processing: bool,
 }
 
@@ -347,12 +306,14 @@ impl SreBootManager {
         self
     }
 
-    /// Opt into MU capsule-queue processing during [`Self::execute`]. Signals
-    /// `gMuReadyToProcessCapsulesNotifyGuid` after connecting controllers and
-    /// before EndOfDxe, handing off to `SecuredCoreCapsuleProcessorDxe`.
-    /// Required on platforms using the MU capsule queue so a staged capsule is
-    /// applied and the `BOOT_ON_FLASH_UPDATE` boot mode is cleared; a no-op
-    /// when nothing is queued. Default off.
+    /// Opt into MU capsule-queue processing during [`Self::execute`]. Invokes
+    /// [`crate::capsule::process`] after connecting controllers and before
+    /// EndOfDxe; that hook signals `gMuReadyToProcessCapsulesNotifyGuid` on every
+    /// call (handing off to `SecuredCoreCapsuleProcessorDxe`, which self-gates:
+    /// a no-op with an empty queue, a drain + cold-reset on a flash-update boot)
+    /// and draws the progress-bar logo only on a flash-update boot. Required on
+    /// platforms using the MU capsule queue so a staged capsule is applied and
+    /// the flash-update boot mode is cleared. Default off.
     pub fn with_capsule_processing(mut self) -> Self {
         self.capsule_processing = true;
         self
@@ -563,23 +524,15 @@ impl BootOrchestrator for SreBootManager {
         }
 
         // Drive capsule-queue processing before EndOfDxe, while the flash is
-        // still writable. The capsule processor self-gates on the boot mode and
-        // no-ops on a normal boot, and its firmware-management protocols are
-        // already present (installed at DXE dispatch, and device FMPs bound by
-        // the connect above), so this only draws the progress-bar logo and
-        // signals — no extra device-tree connect. On a capsule boot the
-        // processor drains its queue and cold-resets from inside the signal, so
-        // execute() does not return.
+        // still writable. crate::capsule::process signals the capsule processor
+        // unconditionally (a no-op with an empty queue or a normal boot; a drain
+        // + cold-reset on a flash-update boot, so it may not return) and draws
+        // the progress-bar logo only on a flash-update boot. Its firmware-
+        // management protocols are already present (installed at DXE dispatch,
+        // device FMPs bound by the connect above), so no extra device-tree
+        // connect is needed.
         if self.capsule_processing {
-            // Draw + register the OEM boot logo so the capsule progress bar
-            // renders instead of a black screen. Best-effort: no proxy or no GOP
-            // just means no bar, not a failed update.
-            if let Err(e) = proxy::display_boot_logo(boot_services) {
-                log::warn!("proxy::display_boot_logo failed (no progress bar): {:?}", e);
-            }
-            if let Err(e) = signal_event_group(boot_services, &MU_READY_TO_PROCESS_CAPSULES_NOTIFY_GUID) {
-                log::error!("signal gMuReadyToProcessCapsulesNotifyGuid failed: {:?}", e);
-            }
+            crate::capsule::process(boot_services);
         }
 
         // Signal EndOfDxe (flash lockdown) after capsule processing so the
