@@ -9,6 +9,7 @@ use crate::battery::{poll_bix, poll_bst};
 use crate::source::DynSource;
 use crate::state::{
     BatteryCommand, BatteryState, FanRpmBounds, FanStateLevels, RtcState, SystemState, ThermalCommand, ThermalState,
+    UCSI_CONNECTOR, UcsiState,
 };
 
 // ── Battery ───────────────────────────────────────────────────────────────────
@@ -383,5 +384,73 @@ impl SystemUpdater {
             tokio::time::sleep(interval).await;
             self.update();
         }
+    }
+}
+
+// ── UCSI (USB-C) ──────────────────────────────────────────────────────────────
+
+/// Polls the UCSI version, PPM capability, and connector state on every tick.
+pub struct UcsiUpdater {
+    source: Arc<dyn DynSource>,
+    state: Arc<RwLock<UcsiState>>,
+}
+
+impl UcsiUpdater {
+    pub fn new(source: Arc<dyn DynSource>, state: Arc<RwLock<UcsiState>>) -> Self {
+        Self { source, state }
+    }
+
+    #[tracing::instrument(skip_all)]
+    fn update(&mut self) {
+        let version = self.source.get_ucsi_version();
+        let capability = self.source.get_ucsi_capability();
+        let connector_capability = self.source.get_ucsi_connector_capability(UCSI_CONNECTOR);
+        let connector_status = self.source.get_ucsi_connector_status(UCSI_CONNECTOR);
+
+        if let Err(ref e) = version {
+            warn!(error = %e, "failed to read UCSI version");
+        }
+        if let Err(ref e) = connector_status {
+            warn!(error = %e, "failed to read UCSI connector status");
+        }
+
+        let mut s = self.state.write().expect("state RwLock poisoned");
+        s.version = Some(version);
+        s.capability = Some(capability);
+        s.connector_capability = Some(connector_capability);
+        s.connector_status = Some(connector_status);
+    }
+
+    pub async fn run(mut self, interval: Duration) {
+        info!(interval_ms = interval.as_millis(), "UCSI updater started");
+        self.update();
+        loop {
+            tokio::time::sleep(interval).await;
+            self.update();
+        }
+    }
+}
+
+#[cfg(test)]
+mod ucsi_tests {
+    use super::*;
+    use ec_test_lib::mock::Mock;
+    use ec_test_lib::ucsi::{PowerDirection, UcsiVersion};
+
+    #[test]
+    fn update_populates_cells_from_source() {
+        let source: Arc<dyn DynSource> = Arc::new(Mock::default());
+        let state = Arc::new(RwLock::new(UcsiState::default()));
+        let mut updater = UcsiUpdater::new(source, Arc::clone(&state));
+
+        updater.update();
+
+        let s = state.read().unwrap();
+        assert_eq!(s.version.as_ref().unwrap().as_ref().unwrap(), &UcsiVersion(0x0120));
+        assert_eq!(s.capability.as_ref().unwrap().as_ref().unwrap().num_connectors, 1);
+        assert!(s.connector_capability.as_ref().unwrap().as_ref().unwrap().provider);
+        let status = s.connector_status.as_ref().unwrap().as_ref().unwrap();
+        assert!(status.connected);
+        assert_eq!(status.power_direction, PowerDirection::Sink);
     }
 }

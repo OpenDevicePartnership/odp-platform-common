@@ -7,6 +7,7 @@ mod source;
 mod state;
 mod system;
 mod thermal;
+mod ucsi;
 mod updater;
 mod widgets;
 
@@ -96,6 +97,7 @@ const BATTERY_PERIOD: Duration = Duration::from_secs(1);
 const THERMAL_PERIOD: Duration = Duration::from_secs(1);
 const RTC_PERIOD: Duration = Duration::from_secs(1);
 const SYSTEM_PERIOD: Duration = Duration::from_millis(500);
+const UCSI_PERIOD: Duration = Duration::from_secs(1);
 
 fn init_tracing(cli: &Cli) -> color_eyre::Result<logging::LogBuffer> {
     let file_layer: Option<_> = cli
@@ -134,6 +136,7 @@ async fn main() -> color_eyre::Result<()> {
     let thermal_state = Arc::new(RwLock::new(state::ThermalState::default()));
     let rtc_state = Arc::new(RwLock::new(state::RtcState::default()));
     let system_state = Arc::new(RwLock::new(state::SystemState::default()));
+    let ucsi_state = Arc::new(RwLock::new(state::UcsiState::default()));
 
     let (battery_tx, battery_rx) = std::sync::mpsc::channel::<state::BatteryCommand>();
     let (thermal_tx, thermal_rx) = std::sync::mpsc::channel::<state::ThermalCommand>();
@@ -154,12 +157,17 @@ async fn main() -> color_eyre::Result<()> {
         let upd = updater::SystemUpdater::new(Arc::clone(&system_state));
         async move { upd.run(SYSTEM_PERIOD).await }
     });
+    tokio::task::spawn({
+        let upd = updater::UcsiUpdater::new(Arc::clone(&source), Arc::clone(&ucsi_state));
+        async move { upd.run(UCSI_PERIOD).await }
+    });
 
     app::App::new(
         battery_state,
         thermal_state,
         rtc_state,
         system_state,
+        ucsi_state,
         battery_tx,
         thermal_tx,
         log_buffer,

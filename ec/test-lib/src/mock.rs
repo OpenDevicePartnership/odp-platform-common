@@ -1,4 +1,7 @@
-use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold};
+use crate::ucsi::{
+    OperationMode, PowerDirection, UcsiCapability, UcsiConnectorCapability, UcsiConnectorStatus, UcsiVersion,
+};
+use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, UcsiSource};
 use battery_service_interface::{
     BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit,
 };
@@ -442,5 +445,88 @@ impl RtcSource for Mock {
     fn clear_wake_status(&self, timer_id: AcpiTimerId) -> Result<(), Self::Error> {
         self.rtc.lock().unwrap().timers[timer_id as usize].timer_status = TimerStatus(0);
         Ok(())
+    }
+}
+
+impl UcsiSource for Mock {
+    fn get_version(&self) -> Result<UcsiVersion, Self::Error> {
+        Ok(UcsiVersion(0x0120))
+    }
+    fn get_capability(&self) -> Result<UcsiCapability, Self::Error> {
+        Ok(UcsiCapability {
+            num_connectors: 1,
+            usb_pd_supported: true,
+            bcd_pd_version: 0x0300,
+            bcd_usb_type_c_version: 0x0200,
+        })
+    }
+    fn get_connector_capability(&self, _connector: u8) -> Result<UcsiConnectorCapability, Self::Error> {
+        Ok(UcsiConnectorCapability {
+            operation_mode: OperationMode {
+                drp: true,
+                usb2: true,
+                usb3: true,
+            },
+            provider: true,
+            consumer: true,
+        })
+    }
+    fn get_connector_status(&self, _connector: u8) -> Result<UcsiConnectorStatus, Self::Error> {
+        Ok(UcsiConnectorStatus {
+            connected: true,
+            power_direction: PowerDirection::Sink,
+            partner_usb: true,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ucsi_version_is_1_2() {
+        assert_eq!(Mock::new().get_version().unwrap(), UcsiVersion(0x0120));
+    }
+
+    #[test]
+    fn ucsi_capability_reports_single_pd_connector() {
+        assert_eq!(
+            Mock::new().get_capability().unwrap(),
+            UcsiCapability {
+                num_connectors: 1,
+                usb_pd_supported: true,
+                bcd_pd_version: 0x0300,
+                bcd_usb_type_c_version: 0x0200,
+            }
+        );
+    }
+
+    #[test]
+    fn ucsi_connector_capability_is_drp_provider_consumer() {
+        assert_eq!(
+            Mock::new().get_connector_capability(1).unwrap(),
+            UcsiConnectorCapability {
+                operation_mode: OperationMode {
+                    drp: true,
+                    usb2: true,
+                    usb3: true,
+                },
+                provider: true,
+                consumer: true,
+            }
+        );
+    }
+
+    #[test]
+    fn ucsi_connector_status_is_connected_sink() {
+        assert_eq!(
+            Mock::new().get_connector_status(1).unwrap(),
+            UcsiConnectorStatus {
+                connected: true,
+                power_direction: PowerDirection::Sink,
+                partner_usb: true,
+            }
+        );
     }
 }

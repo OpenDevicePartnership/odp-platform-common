@@ -587,6 +587,21 @@ mod tests {
         ) -> color_eyre::Result<time_alarm_service_interface::AlarmTimerSeconds> {
             Err(eyre!("unused"))
         }
+        fn get_ucsi_version(&self) -> color_eyre::Result<ec_test_lib::ucsi::UcsiVersion> {
+            Err(eyre!("unused"))
+        }
+        fn get_ucsi_capability(&self) -> color_eyre::Result<ec_test_lib::ucsi::UcsiCapability> {
+            Err(eyre!("unused"))
+        }
+        fn get_ucsi_connector_capability(
+            &self,
+            _: u8,
+        ) -> color_eyre::Result<ec_test_lib::ucsi::UcsiConnectorCapability> {
+            Err(eyre!("unused"))
+        }
+        fn get_ucsi_connector_status(&self, _: u8) -> color_eyre::Result<ec_test_lib::ucsi::UcsiConnectorStatus> {
+            Err(eyre!("unused"))
+        }
     }
 
     struct ErrThermal;
@@ -640,6 +655,21 @@ mod tests {
             &self,
             _: time_alarm_service_interface::AcpiTimerId,
         ) -> color_eyre::Result<time_alarm_service_interface::AlarmTimerSeconds> {
+            Err(eyre!("unused"))
+        }
+        fn get_ucsi_version(&self) -> color_eyre::Result<ec_test_lib::ucsi::UcsiVersion> {
+            Err(eyre!("unused"))
+        }
+        fn get_ucsi_capability(&self) -> color_eyre::Result<ec_test_lib::ucsi::UcsiCapability> {
+            Err(eyre!("unused"))
+        }
+        fn get_ucsi_connector_capability(
+            &self,
+            _: u8,
+        ) -> color_eyre::Result<ec_test_lib::ucsi::UcsiConnectorCapability> {
+            Err(eyre!("unused"))
+        }
+        fn get_ucsi_connector_status(&self, _: u8) -> color_eyre::Result<ec_test_lib::ucsi::UcsiConnectorStatus> {
             Err(eyre!("unused"))
         }
     }

@@ -1,4 +1,5 @@
-use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, common};
+use crate::ucsi::{self, Mailbox, UcsiCapability, UcsiConnectorCapability, UcsiConnectorStatus, UcsiVersion};
+use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, UcsiSource, common};
 use battery_service_interface::{
     BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit,
 };
@@ -148,6 +149,8 @@ pub enum Error {
     OperationFailed,
     /// Data validation failed (invalid enum discriminant, malformed field, etc.)
     InvalidData,
+    /// Decoding a UCSI mailbox response failed
+    Ucsi(ucsi::MailboxError),
 }
 
 impl std::fmt::Display for Error {
@@ -158,6 +161,7 @@ impl std::fmt::Display for Error {
             Self::UnexpectedArgumentType(t) => write!(f, "Unexpected argument type: {t}"),
             Self::OperationFailed => write!(f, "Operation failed"),
             Self::InvalidData => write!(f, "Invalid data"),
+            Self::Ucsi(e) => write!(f, "UCSI mailbox error: {e}"),
         }
     }
 }
@@ -172,7 +176,14 @@ impl crate::Error for Error {
             Self::UnexpectedArgumentType(_) => crate::ErrorKind::UnexpectedResponse,
             Self::OperationFailed => crate::ErrorKind::Other,
             Self::InvalidData => crate::ErrorKind::InvalidData,
+            Self::Ucsi(_) => crate::ErrorKind::InvalidData,
         }
+    }
+}
+
+impl From<ucsi::MailboxError> for Error {
+    fn from(e: ucsi::MailboxError) -> Self {
+        Self::Ucsi(e)
     }
 }
 
@@ -692,5 +703,43 @@ impl RtcSource for Acpi {
     fn clear_wake_status(&self, timer_id: AcpiTimerId) -> Result<(), Self::Error> {
         let _ = self.evaluate("\\_SB.ECT0._CWS", Some(&[AcpiMethodArgument::Int(timer_id.into())]))?;
         Ok(())
+    }
+}
+
+impl Acpi {
+    /// Issue one UCSI command by writing the 8-byte CONTROL buffer to
+    /// `\_SB.ECT0.USND` and decoding the returned 48-byte mailbox.
+    fn ucsi_command(&self, control: [u8; ucsi::CONTROL_LEN]) -> Result<Mailbox, Error> {
+        let output = self.evaluate("\\_SB.ECT0.USND", Some(&[AcpiMethodArgument::Buffer(control.to_vec())]))?;
+        if output.count != 1 {
+            return Err(Error::UnexpectedResponse);
+        }
+        let arg = output.arg(0)?;
+        if arg.type_ != AcpiArgumentType::Buffer as u16 {
+            return Err(Error::UnexpectedArgumentType(arg.type_));
+        }
+        Ok(Mailbox::decode(&arg.data)?)
+    }
+}
+
+impl UcsiSource for Acpi {
+    fn get_version(&self) -> Result<UcsiVersion, Self::Error> {
+        let mailbox = self.ucsi_command(ucsi::control(ucsi::opcode::GET_CAPABILITY, 0))?;
+        Ok(mailbox.version())
+    }
+
+    fn get_capability(&self) -> Result<UcsiCapability, Self::Error> {
+        let mailbox = self.ucsi_command(ucsi::control(ucsi::opcode::GET_CAPABILITY, 0))?;
+        Ok(mailbox.capability()?)
+    }
+
+    fn get_connector_capability(&self, connector: u8) -> Result<UcsiConnectorCapability, Self::Error> {
+        let mailbox = self.ucsi_command(ucsi::control(ucsi::opcode::GET_CONNECTOR_CAPABILITY, connector))?;
+        Ok(mailbox.connector_capability()?)
+    }
+
+    fn get_connector_status(&self, connector: u8) -> Result<UcsiConnectorStatus, Self::Error> {
+        let mailbox = self.ucsi_command(ucsi::control(ucsi::opcode::GET_CONNECTOR_STATUS, connector))?;
+        Ok(mailbox.connector_status()?)
     }
 }
