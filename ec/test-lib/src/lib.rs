@@ -10,6 +10,9 @@ pub(crate) mod common;
 #[cfg(target_os = "windows")]
 pub mod acpi;
 
+#[cfg(target_os = "windows")]
+pub mod hid;
+
 pub mod mock;
 pub mod serial;
 

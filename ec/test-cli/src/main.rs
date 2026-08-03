@@ -35,6 +35,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         #[cfg(target_os = "windows")]
-        SourceKind::Local => dispatch(ec_test_lib::acpi::Acpi::new(cli.fan_instance), cli.command),
+        SourceKind::Acpi => dispatch(ec_test_lib::acpi::Acpi::new(cli.fan_instance), cli.command),
+
+        #[cfg(target_os = "windows")]
+        SourceKind::Hid => dispatch(ec_test_lib::hid::Hid::new()?, cli.command),
     }
 }
