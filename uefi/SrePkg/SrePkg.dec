@@ -19,6 +19,18 @@
   # ODP Package token space guid { 212D507B-7906-4CB3-B0C3-08E544E25C34 }
   gOdpPkgTokenSpaceGuid = { 0x212d507b, 0x7906, 0x4cb3, { 0xb0, 0xc3, 0x8, 0xe5, 0x44, 0xe2, 0x5c, 0x34 } }
 
+  # Staging UpdateImageTypeId carried by the WIM payload. No FmpDxe instance
+  # claims it; it exists only so the peeler can identify the WIM and so stock
+  # FmpDxe would harmlessly skip it if the peeler were ever bypassed.
+  # { d31b249c-bc66-4cdc-be21-30b1b6566b9c }
+  gSreWimStagingGuid = { 0xd31b249c, 0xbc66, 0x4cdc, { 0xbe, 0x21, 0x30, 0xb1, 0xb6, 0x56, 0x6b, 0x9c } }
+
+  # SRE ESRT GUID — the outer CapsuleGuid that Windows Update applies when
+  # delivering the SRE capsule. This is the single identification point.
+  # { 9777ff5d-3c53-4316-9af3-b99fb9c60fb5 }
+  gSreEsrtGuid = { 0x9777ff5d, 0x3c53, 0x4316, { 0x9a, 0xf3, 0xb9, 0x9f, 0xb9, 0xc6, 0x0f, 0xb5 } }
+
+
 [PcdsFeatureFlag]
   
   # Re-routes the Vol+/Vol- power-on hotkeys in DeviceBootManagerPriorityBoot.
