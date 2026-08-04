@@ -862,7 +862,10 @@ pub fn run_sre_flow<B: BootServices>(boot_services: &B, image_handle: efi::Handl
 ///
 /// Cost: one 512-byte LID 0x15 head read of BP1.
 pub fn bp_has_sre_payload<B: BootServices>(boot_services: &B) -> bool {
-    helpers::connect_all(boot_services).ok();
+    // The NVMe pass-thru protocol is produced by connecting the NVMe
+    // controller; the caller connects the boot device path before calling
+    // this, so no whole-tree connect is needed here. If NVMe is not connected,
+    // the locate below fails cleanly and this returns false.
 
     // SAFETY: dereferencing the returned interface only via raw pointer calls below.
     let passthru =

@@ -12,6 +12,7 @@
 //!
 extern crate alloc;
 
+use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 use core::ptr;
 
@@ -180,37 +181,40 @@ pub fn boot_from_device_path<B: BootServices>(
 /// Returns `Ok(())` when device topology enumeration is complete.
 ///
 pub fn connect_all<B: BootServices>(boot_services: &B) -> Result<()> {
-    // Loop until the number of handles stabilizes, indicating device topology is complete.
-    // This is needed because connecting a PCI bus creates new handles for PCI devices,
-    // which then need to be connected to bind drivers like NVMe, which creates namespace
-    // handles, etc.
+    // Connect every handle once, looping until a pass adds no new handles.
+    // Connecting a bus creates child device handles that then need their own
+    // drivers bound, so the topology grows over passes. Handles already
+    // attempted are skipped, so a pass never re-runs driver bindings on the
+    // stable set (recursive connect already bound the subtree the first time).
     const MAX_ITERATIONS: usize = 10;
-    let mut prev_handle_count = 0;
+
+    let mut connected: BTreeSet<usize> = BTreeSet::new();
     let mut stabilized = false;
 
     for _iteration in 0..MAX_ITERATIONS {
-        // Get all handles in the system
         let handles = boot_services
             .locate_handle_buffer(HandleSearchType::AllHandle)
             .map_err(EfiError::from)?;
-        let current_handle_count = handles.len();
 
-        // Connect each handle recursively. Per-handle failures are expected and
-        // intentionally ignored: most handles have no matching driver (or are
-        // already connected), mirroring EDK2's connect-all behavior. An individual
-        // failure does not mean overall enumeration failed.
+        // Connect each handle recursively, at most once across all passes.
+        // Per-handle failures are expected and intentionally ignored: most
+        // handles have no matching driver. An individual failure does not mean
+        // overall enumeration failed.
+        let mut newly = 0usize;
         for &handle in handles.iter() {
-            // SAFETY: Empty driver handle list and null device path are valid per UEFI spec
+            if !connected.insert(handle as usize) {
+                continue;
+            }
+            newly += 1;
+            // SAFETY: Empty driver handle list and null remaining path are valid per UEFI spec
             let _ = unsafe { boot_services.connect_controller(handle, Vec::new(), None, true) };
         }
 
-        // Check if handle count has stabilized
-        if current_handle_count == prev_handle_count {
+        // A pass that connected nothing new means the topology is complete.
+        if newly == 0 {
             stabilized = true;
             break;
         }
-
-        prev_handle_count = current_handle_count;
     }
 
     if !stabilized {
@@ -218,6 +222,96 @@ pub fn connect_all<B: BootServices>(boot_services: &B) -> Result<()> {
             "connect_all: handle count did not stabilize within {MAX_ITERATIONS} iterations; device enumeration may be incomplete"
         );
     }
+
+    Ok(())
+}
+
+/// PCI class of `handle` as `(base_class << 8) | subclass`, read from config
+/// offset 0x08. Returns `Err` if the handle is not a PCI device (no `PciIo`) or
+/// the config read fails.
+fn pci_class<B: BootServices>(boot_services: &B, handle: efi::Handle) -> Result<u32> {
+    use r_efi::protocols::pci_io;
+
+    // SAFETY: querying PciIo on the handle; the returned interface is only used
+    // to read the class-code register. Non-PCI handles simply lack it.
+    let pci = unsafe { boot_services.handle_protocol::<pci_io::Protocol>(handle) }.map_err(EfiError::from)?;
+    let mut class: u32 = 0;
+    // SAFETY: `pci` is a valid PciIo interface; reads one u32 of config space
+    // (class-code register at offset 0x08) into a stack local.
+    let status = unsafe {
+        (pci.pci.read)(
+            pci as *mut pci_io::Protocol,
+            pci_io::WIDTH_UINT32,
+            0x08,
+            1,
+            &mut class as *mut u32 as *mut core::ffi::c_void,
+        )
+    };
+    if status != efi::Status::SUCCESS {
+        return Err(EfiError::from(status));
+    }
+    // byte 3 = base class, byte 2 = subclass (little-endian u32).
+    Ok(((class >> 24) & 0xff) << 8 | ((class >> 16) & 0xff))
+}
+
+/// True if `handle` is a PCI USB host controller (base class `0x0C`, subclass
+/// `0x03`). USB host controllers are not on the storage/console boot path;
+/// binding them triggers port power-on and device enumeration that dominate
+/// connect time.
+fn is_usb_host_controller<B: BootServices>(boot_services: &B, handle: efi::Handle) -> bool {
+    // A handle whose class can't be read (not a PCI device, or read failure) is
+    // treated as not-USB, so it is connected rather than skipped.
+    pci_class(boot_services, handle).is_ok_and(|class| class == 0x0c03)
+}
+
+/// Connect the device tree but skip PCI USB host controllers. Uses
+/// `recursive = false` so each controller is bound individually and USB hosts
+/// can be excluded (a recursive connect of the PCI root would bind them as a
+/// side effect). Connects storage, partitions, filesystems, and graphics —
+/// enough for short-form boot paths to resolve via `expand_device_path` —
+/// without paying for USB port power-on/enumeration.
+///
+/// Not a full substitute for [`connect_all`]: callers that need USB (recovery,
+/// USB boot) must still call [`connect_all`].
+pub fn connect_all_skip_usb<B: BootServices>(boot_services: &B) -> Result<()> {
+    const MAX_ITERATIONS: usize = 20;
+
+    let mut connected: BTreeSet<usize> = BTreeSet::new();
+    let mut skipped = 0usize;
+    let mut stabilized = false;
+
+    for _iteration in 0..MAX_ITERATIONS {
+        let handles = boot_services
+            .locate_handle_buffer(HandleSearchType::AllHandle)
+            .map_err(EfiError::from)?;
+
+        let mut newly = 0usize;
+        for &handle in handles.iter() {
+            if !connected.insert(handle as usize) {
+                continue;
+            }
+            if is_usb_host_controller(boot_services, handle) {
+                skipped += 1;
+                continue;
+            }
+            newly += 1;
+            // recursive = false so USB hosts revealed by connecting a bus are
+            // themselves skipped on the next pass instead of being bound
+            // recursively.
+            // SAFETY: Empty driver handle list and null remaining path are valid per UEFI spec
+            let _ = unsafe { boot_services.connect_controller(handle, Vec::new(), None, false) };
+        }
+
+        if newly == 0 {
+            stabilized = true;
+            break;
+        }
+    }
+
+    if !stabilized {
+        log::warn!("connect_all_skip_usb: did not stabilize within {MAX_ITERATIONS} iterations");
+    }
+    log::info!("connect_all_skip_usb: skipped {skipped} USB host controller(s)");
 
     Ok(())
 }

@@ -3,23 +3,26 @@
 //! [`SreBootManager`] implements [`patina_boot::BootOrchestrator`] for platforms
 //! shipping a System Recovery Environment alongside the main OS. The flow:
 //!
-//! 1. Interleave controller connection with DXE driver dispatch
-//! 2. Extra `connect_all` pass before EndOfDxe so platforms whose driver-binding
-//!    runs only in the open window get a chance to bind (e.g. PartitionDxe
-//!    creating GPT child handles)
-//! 3. Signal `EndOfDxe` (security lockdown)
-//! 4. Signal start-of-BDS event groups
-//! 5. Discover console devices
-//! 6. Probe the hotkey provider; on a recovery chord, dispatch the configured
-//!    SRE app path or fall back to [`bp_recovery::run_sre_flow`] (NVMe LID read
-//!    → RAM disk → chainload); on a frontpage chord, try USB via live
-//!    `SimpleFileSystem` enumeration, then fall back to the configured
-//!    frontpage app
-//! 7. Enumerate firmware `Boot####` EFI variables via `discover_boot_options`
-//!    and try each in order: `signal_ready_to_boot` then `boot_from_device_path`
-//! 8. If discovery yields no entries or fails, fall back to the
-//!    constructor-provided `main_os_path`
-//! 9. Return `EfiError::NotFound` if every boot attempt has been exhausted
+//! 1. Signal the `gMsStartOfBds` event group
+//! 2. Dispatch DXE drivers so their driver bindings are installed; the device
+//!    tree is not connected up front
+//! 3. Optional capsule-queue processing via [`crate::capsule::process`], before
+//!    EndOfDxe while the flash is still writable; signals the capsule processor
+//!    (a no-op unless a capsule is queued on a flash-update boot) and draws the
+//!    progress-bar logo only on a flash-update boot
+//! 4. Signal `EndOfDxe` (security lockdown)
+//! 5. Probe the hotkey provider. On a recovery chord, connect the full device
+//!    tree and consoles, then dispatch the configured SRE app path or fall back
+//!    to [`bp_recovery::run_sre_flow`] (NVMe LID read → RAM disk → chainload);
+//!    on a frontpage chord, try USB via live `SimpleFileSystem` enumeration,
+//!    then a configured frontpage app
+//! 6. Normal boot: connect the device tree except USB host controllers (storage,
+//!    partitions, filesystems and graphics bind, so short-form `Boot####` paths
+//!    resolve; USB port enumeration — not on the boot path — is skipped), then
+//!    boot each `Boot####` entry, and the constructor `main_os_path`, in order
+//! 7. Safety net: if nothing booted, connect the full tree (including USB) and
+//!    retry, so a normal boot never fails for lack of enumeration
+//! 8. Return `EfiError::NotFound` if every boot attempt has been exhausted
 //!
 //! Optional platform hooks, all default-off and builder-enabled: MU
 //! capsule-queue processing before EndOfDxe
@@ -42,10 +45,10 @@ use patina::{
     error::EfiError,
     runtime_services::StandardRuntimeServices,
 };
-use patina_boot::{BootOrchestrator, helpers, proxy};
+use patina_boot::{BootOrchestrator, helpers};
 use r_efi::efi;
 
-use crate::bp_recovery;
+use crate::{bp_recovery, events::signal_event_group};
 
 /// Result of probing the platform's button-services protocol for an SRE
 /// hotkey at BDS entry.
@@ -99,9 +102,8 @@ mod ms_button_services {
 
 /// Probe `MS_BUTTON_SERVICES_PROTOCOL` for an SRE hotkey at BDS entry.
 ///
-/// Mirrors the C-BDS hotkey-handling pattern: locate the protocol, read
-/// Vol-Up first then Vol-Down, clear the latched state so other consumers
-/// don't double-act on the same press.
+/// Locate the protocol, read Vol-Up first then Vol-Down, and clear the latched
+/// state so other consumers don't double-act on the same press.
 ///
 /// Returns `SreHotkey::None` if the protocol isn't published (graceful
 /// fallback on platforms without a button-services producer) or if neither
@@ -166,9 +168,9 @@ fn probe_sre_hotkey<B: BootServices>(boot_services: &B) -> SreHotkey {
     result
 }
 
-/// `gMsStartOfBdsNotifyGuid` from `PcBdsPkg.dec`. C BDS fires this at the
-/// start of the BDS phase; subscribers include Microsoft boot-policy
-/// components that key off it for pre-boot work. `static` (not `const`) so
+/// `gMsStartOfBdsNotifyGuid` from `PcBdsPkg.dec`. Fired at the start of the BDS
+/// phase; subscribers include Microsoft boot-policy components that key off it
+/// for pre-boot work. `static` (not `const`) so
 /// `&MS_START_OF_BDS_NOTIFY_GUID` is naturally `&'static efi::Guid` as
 /// `create_event_ex_unchecked` requires.
 static MS_START_OF_BDS_NOTIFY_GUID: efi::Guid = efi::Guid::from_fields(
@@ -193,79 +195,6 @@ static DFCI_START_OF_BDS_NOTIFY_GUID: efi::Guid = efi::Guid::from_fields(
     0xc2,
     &[0x78, 0x12, 0xb0, 0x29, 0x9c, 0x45],
 );
-
-/// `gMuReadyToProcessCapsulesNotifyGuid` from `MsCorePkg.dec`. The C
-/// `PlatformBootManagerLib` signals this after `ConnectAll` in the
-/// `BOOT_ON_FLASH_UPDATE` path; the MU capsule processor
-/// (`SecuredCoreCapsuleProcessorDxe`) arms a callback on it only when its
-/// capsule queue is non-empty, drains the queue (applying FMP capsules),
-/// and cold-resets. Safe to signal unconditionally: with an empty queue no
-/// callback is registered, so it is a no-op.
-static MU_READY_TO_PROCESS_CAPSULES_NOTIFY_GUID: efi::Guid = efi::Guid::from_fields(
-    0x2ab1c860,
-    0xe697,
-    0x4ede,
-    0x8c,
-    0x0f,
-    &[0x65, 0xcd, 0x6e, 0x44, 0x44, 0x35],
-);
-
-/// Equivalent of the C `EfiEventGroupSignal(&group_guid)` macro: create a
-/// one-shot NOTIFY_SIGNAL event tied to `group_guid`, fire it, then close
-/// it. Used to broadcast a start-of-BDS-style notification to whichever
-/// DXE drivers registered a callback against the group.
-fn signal_event_group<B: BootServices>(boot_services: &B, group_guid: &'static efi::Guid) -> patina::error::Result<()> {
-    use patina::boot_services::{event::EventType, tpl::Tpl};
-
-    extern "efiapi" fn noop(_event: *mut core::ffi::c_void, _context: *mut ()) {}
-
-    // SAFETY: noop callback + null context is a valid signal-only event;
-    // we use it purely to broadcast to consumers of `group_guid`.
-    let event = unsafe {
-        boot_services.create_event_ex_unchecked::<()>(
-            EventType::NOTIFY_SIGNAL,
-            Tpl::CALLBACK,
-            Some(noop),
-            core::ptr::null_mut(),
-            group_guid,
-        )
-    }
-    .map_err(EfiError::from)?;
-
-    let signal_result = boot_services.signal_event(event);
-    let close_result = boot_services.close_event(event);
-    signal_result.map_err(EfiError::from)?;
-    close_result.map_err(EfiError::from)?;
-    Ok(())
-}
-
-fn interleave_connect_and_dispatch<B: BootServices, D: DxeDispatch + ?Sized>(
-    boot_services: &B,
-    dxe_services: &D,
-) -> patina::error::Result<()> {
-    // Multi-round connect/dispatch interleaving was observed to leave the
-    // PTL I2C5 HID controller in a stuck state on Maa: repeated
-    // `connect_all` retriggers the I2C driver's Start() which races the
-    // controller's disable-poll path. Restricting to one round matches
-    // what the default Patina BootDispatcher does and avoids the race;
-    // late-binding drivers still get a chance via the post-loop
-    // `connect_all` pass before EndOfDxe in `execute`.
-    const MAX_ROUNDS: usize = 1;
-
-    for _round in 0..MAX_ROUNDS {
-        helpers::connect_all(boot_services)?;
-        if !dxe_services.dispatch()? {
-            return Ok(());
-        }
-    }
-
-    // Expected on platforms where dispatch reports remaining work: stopping
-    // after MAX_ROUNDS is by design, and the pre-EndOfDxe `connect_all` pass
-    // in `execute` covers late-binding drivers.
-    log::debug!("DXE dispatch reports remaining work after {MAX_ROUNDS} round(s); continuing by design");
-
-    Ok(())
-}
 
 /// SRE boot manager implementing [`BootOrchestrator`].
 ///
@@ -298,14 +227,16 @@ pub struct SreBootManager {
     /// DFCI/SEMM mailbox processing runs at BDS entry. Default `false`; platforms
     /// that ship the DFCI/SEMM stack opt in via [`Self::with_dfci_bds_signal`].
     dfci_bds_signal: bool,
-    /// When `true`, `execute()` signals `gMuReadyToProcessCapsulesNotifyGuid`
-    /// after connecting controllers (so FMP protocols are present) and before
-    /// EndOfDxe/flash lockdown. On a `BOOT_ON_FLASH_UPDATE` boot the MU capsule
-    /// processor drains its queue and cold-resets; on a normal boot the queue is
-    /// empty and the signal is a no-op. Without it, a staged capsule leaves the
-    /// PEI-set `BOOT_ON_FLASH_UPDATE` boot mode uncleared and the platform loops.
-    /// Default `false`. Platforms with the MU capsule queue opt in via
-    /// [`Self::with_capsule_processing`].
+    /// When `true`, `execute()` invokes [`crate::capsule::process`] after
+    /// connecting controllers (so FMP protocols are present) and before
+    /// EndOfDxe/flash lockdown. That hook signals
+    /// `gMuReadyToProcessCapsulesNotifyGuid` on every call (a no-op with an empty
+    /// queue; the MU capsule processor drains its queue and cold-resets on a
+    /// flash-update boot with a queued capsule) and draws the progress-bar logo
+    /// only on a flash-update boot, gated on the boot mode the platform binary
+    /// records. Without it, a staged capsule leaves the flash-update boot mode
+    /// uncleared and the platform loops. Default `false`. Platforms with the MU
+    /// capsule queue opt in via [`Self::with_capsule_processing`].
     capsule_processing: bool,
 }
 
@@ -375,13 +306,14 @@ impl SreBootManager {
         self
     }
 
-    /// Opt into MU capsule-queue processing during [`Self::execute`]. Signals
-    /// `gMuReadyToProcessCapsulesNotifyGuid` after connecting controllers and
-    /// before EndOfDxe, reproducing the C `PlatformBootManagerLib`
-    /// `BOOT_ON_FLASH_UPDATE` handoff to `SecuredCoreCapsuleProcessorDxe` that
-    /// the SRE boot manager otherwise omits. Required on platforms using the MU
-    /// capsule queue so a staged capsule is applied and the `BOOT_ON_FLASH_UPDATE`
-    /// boot mode is cleared; a no-op when nothing is queued. Default off.
+    /// Opt into MU capsule-queue processing during [`Self::execute`]. Invokes
+    /// [`crate::capsule::process`] after connecting controllers and before
+    /// EndOfDxe; that hook signals `gMuReadyToProcessCapsulesNotifyGuid` on every
+    /// call (handing off to `SecuredCoreCapsuleProcessorDxe`, which self-gates:
+    /// a no-op with an empty queue, a drain + cold-reset on a flash-update boot)
+    /// and draws the progress-bar logo only on a flash-update boot. Required on
+    /// platforms using the MU capsule queue so a staged capsule is applied and
+    /// the flash-update boot mode is cleared. Default off.
     pub fn with_capsule_processing(mut self) -> Self {
         self.capsule_processing = true;
         self
@@ -423,8 +355,8 @@ fn device_path_has_usb_node(dp: &patina::device_path::paths::DevicePath) -> bool
 /// Locate the device path of the first `SimpleFileSystem` handle whose
 /// device path contains a USB messaging node.
 ///
-/// Mirrors the C-BDS pattern of iterating live device topology to find a
-/// bootable USB. Filters on `SimpleFileSystem` rather than raw `BlockIo`
+/// Iterates live device topology to find a bootable USB. Filters on
+/// `SimpleFileSystem` rather than raw `BlockIo`
 /// because: (1) SFS handles only exist on mounted FAT filesystems —
 /// `PartitionDxe` and `FatDxe` cooperate to install SFS specifically on
 /// the partition hosting a recognizable volume; (2) `LoadImage` on a
@@ -516,7 +448,7 @@ pub fn fv_file_device_path(file_guid: efi::Guid) -> DevicePathBuf {
 /// does — without it the call returns `NotFound` because the bare FvFile
 /// shape isn't walked across installed FV2 protocols).
 ///
-/// The C-BDS equivalent typically resolves the FV dynamically via
+/// The FV can also be resolved dynamically via
 /// `LoadedImage(gImageHandle).DeviceHandle`. This helper accepts the FV
 /// GUID as a parameter; callers typically pin a platform-specific DXE FV
 /// GUID. Dynamic resolution is a follow-up.
@@ -562,49 +494,52 @@ impl BootOrchestrator for SreBootManager {
         dxe_dispatch: &dyn DxeDispatch,
         image_handle: efi::Handle,
     ) -> Result<!, EfiError> {
-        // Signal gMsStartOfBds before connect (C BDS order) and before EndOfDxe.
+        // Signal gMsStartOfBds before dispatch and before EndOfDxe.
         if let Err(e) = signal_event_group(boot_services, &MS_START_OF_BDS_NOTIFY_GUID) {
             log::error!("signal gMsStartOfBdsNotifyGuid failed: {:?}", e);
         }
 
-        if let Err(e) = interleave_connect_and_dispatch(boot_services, dxe_dispatch) {
-            log::error!("interleave_connect_and_dispatch failed: {:?}", e);
+        // Dispatch DXE drivers so their driver bindings are installed.
+        loop {
+            match dxe_dispatch.dispatch() {
+                Ok(true) => continue,
+                Ok(false) => break,
+                Err(e) => {
+                    log::error!("DXE dispatch failed: {:?}", e);
+                    break;
+                }
+            }
         }
 
-        // One last connect pass before EndOfDxe so PartitionDxe and similar
-        // driver bindings can run during the open window.
-        if let Err(e) = helpers::connect_all(boot_services) {
-            log::error!("connect_all (pre-EndOfDxe) failed: {:?}", e);
+        // Connect the device tree except USB host controllers (storage,
+        // partitions, filesystems and graphics bind — so short-form Boot####
+        // paths resolve, and the firmware-management protocols and GOP are
+        // present — while USB port enumeration, not on the boot path, is
+        // skipped). Done here so it happens in the pre-EndOfDxe open window and
+        // the capsule block below has its FMP and a drawable console without a
+        // separate connect. A full connect_all second pass in the boot loop
+        // guarantees boot if this leaves the boot device unreachable.
+        if let Err(e) = helpers::connect_all_skip_usb(boot_services) {
+            log::error!("connect_all_skip_usb failed: {:?}", e);
         }
 
-        // Drive MU capsule-queue processing before EndOfDxe. Controllers are
-        // connected (FMP protocols present) and the flash is still writable
-        // (SMM lockdown is skipped in BOOT_ON_FLASH_UPDATE mode). On a capsule
-        // boot the MU processor drains its queue and cold-resets from inside
-        // this signal, so execute() does not return; on a normal boot the queue
-        // is empty and this is a no-op. Mirrors the C PlatformBootManagerLib
-        // BOOT_ON_FLASH_UPDATE path that SreBootManager replaces.
+        // Drive capsule-queue processing before EndOfDxe, while the flash is
+        // still writable. crate::capsule::process signals the capsule processor
+        // unconditionally (a no-op with an empty queue or a normal boot; a drain
+        // + cold-reset on a flash-update boot, so it may not return) and draws
+        // the progress-bar logo only on a flash-update boot. Its firmware-
+        // management protocols are already present (installed at DXE dispatch,
+        // device FMPs bound by the connect above), so no extra device-tree
+        // connect is needed.
         if self.capsule_processing {
-            // Draw + register the OEM boot logo first (GOP is up after
-            // connect_all) so the MU capsule processor's DisplayUpdateProgress
-            // can render the firmware-update progress bar instead of a black
-            // screen. The C logo-draw sites (MsBootPolicy/DeviceBootManagerLib)
-            // are bypassed on the SRE path. Best-effort: a missing proxy or no
-            // GOP just means no bar, not a failed update.
-            if let Err(e) = proxy::display_boot_logo(boot_services) {
-                log::warn!("proxy::display_boot_logo failed (no progress bar): {:?}", e);
-            }
-
-            if let Err(e) = signal_event_group(boot_services, &MU_READY_TO_PROCESS_CAPSULES_NOTIFY_GUID) {
-                log::error!("signal gMuReadyToProcessCapsulesNotifyGuid failed: {:?}", e);
-            }
+            crate::capsule::process(boot_services);
         }
 
         // Signal EndOfDxe (flash lockdown) after capsule processing so the
         // capsule path stays flash-writable. signal_bds_phase_entry signals
         // gEfiEndOfDxeEventGroupGuid.
         if let Err(e) = helpers::signal_bds_phase_entry(boot_services) {
-            log::error!("signal_bds_phase_entry (EndOfDxe) failed: {:?}", e);
+            log::error!("signal_bds_phase_entry failed: {:?}", e);
         }
 
         // Signal the DFCI start-of-BDS event so the MU SettingsManager DXE
@@ -620,10 +555,6 @@ impl BootOrchestrator for SreBootManager {
             log::error!("signal gDfciStartOfBdsNotifyGuid failed: {:?}", e);
         }
 
-        if let Err(e) = helpers::discover_console_devices(boot_services, runtime_services) {
-            log::error!("discover_console_devices failed: {:?}", e);
-        }
-
         // Unified SRE hotkey dispatch. probe_sre_hotkey reads the latched
         // Vol-Up/Vol-Down + Power state via MS_BUTTON_SERVICES_PROTOCOL
         // and clears it (so we must run it once — both paths below share
@@ -632,7 +563,7 @@ impl BootOrchestrator for SreBootManager {
         // Vol-Up has two dispatch modes:
         //   1. If `sre_app_path` is configured, dispatch that FwFile via
         //      `boot_from_device_path`. Typical when the platform has a
-        //      C-side recovery app stored in the firmware volume.
+        //      recovery app stored in the firmware volume.
         //   2. Otherwise, run the in-Rust `bp_recovery::run_sre_flow`
         //      (NVMe LID 0x15 read of BP1 -> RAM disk -> chainload). No
         //      external app needed; everything lives in patina_sre.
@@ -643,6 +574,19 @@ impl BootOrchestrator for SreBootManager {
         // to normal Boot#### discovery.
         let hotkey = probe_sre_hotkey(boot_services);
         log::info!("SRE hotkey result: {:?}", hotkey);
+
+        // Recovery paths (Vol-Up SRE / bp_recovery, Vol-Down USB) enumerate and
+        // display devices beyond the boot chain, so connect the full tree and
+        // set up consoles before them. A normal boot (no hotkey) skips both and
+        // connects only its boot device path below.
+        if hotkey != SreHotkey::None {
+            if let Err(e) = helpers::connect_all(boot_services) {
+                log::error!("connect_all (recovery) failed: {:?}", e);
+            }
+            if let Err(e) = helpers::discover_console_devices(boot_services, runtime_services) {
+                log::error!("discover_console_devices failed: {:?}", e);
+            }
+        }
 
         match hotkey {
             SreHotkey::VolumeUp => match &self.sre_app_path {
@@ -715,49 +659,52 @@ impl BootOrchestrator for SreBootManager {
         // the final fallback. Cost: one 512-byte LID 0x15 head read of BP1.
         let bp_has_sre = self.bp_sre_fallback && bp_recovery::bp_has_sre_payload(boot_services);
 
-        // Try boot options discovered from the firmware's Boot#### EFI variables.
-        // The constructor's `main_os_path` is used as a fallback when discovery
-        // either fails OR yields no entries (both leave `tried_any == false`).
-        let mut tried_any = false;
-        match helpers::discover_boot_options(runtime_services) {
-            Ok(boot_config) => {
-                for device_path in boot_config.devices() {
-                    if bp_has_sre && device_path_has_usb_node(device_path) {
-                        log::info!(
-                            "Skipping USB Boot#### (BP1 has SRE payload, fallback enabled); path={:?}",
-                            device_path
-                        );
-                        continue;
-                    }
-                    if bp_has_sre && device_path_has_fw_file_node(device_path) {
-                        log::info!(
-                            "Skipping FwFile Boot#### (BP1 has SRE payload, fallback enabled — platform dispatcher likely incompatible with Patina); path={:?}",
-                            device_path
-                        );
-                        continue;
-                    }
-                    tried_any = true;
-                    if let Err(e) = helpers::signal_ready_to_boot(boot_services) {
-                        log::error!("signal_ready_to_boot failed: {:?}", e);
-                    }
-                    match helpers::boot_from_device_path(boot_services, image_handle, device_path) {
-                        Ok(()) => log::warn!("Boot option returned control (path={:?}), trying next...", device_path),
-                        Err(e) => log::warn!("Boot option failed (path={:?}): {:?}", device_path, e),
-                    }
+        // Try boot options in two passes. Pass 0 runs after the USB-skip
+        // connect. If nothing boots (a boot targets a controller USB-skip left
+        // unbound), pass 1 connects the full tree, including USB, and retries —
+        // so a normal boot always succeeds. The constructor's `main_os_path` is
+        // the fallback when discovery yields no entries.
+        for pass in 0..2 {
+            if pass == 1 {
+                log::warn!("Boot exhausted after USB-skip connect; connecting full tree and retrying");
+                if let Err(e) = helpers::connect_all(boot_services) {
+                    log::error!("connect_all (fallback) failed: {:?}", e);
                 }
             }
-            Err(e) => log::error!("discover_boot_options failed: {:?}", e),
-        }
 
-        if !tried_any {
-            // Discovery returned no entries or errored — fall back to the
-            // constructor-provided path.
-            if let Err(e) = helpers::signal_ready_to_boot(boot_services) {
-                log::error!("signal_ready_to_boot failed: {:?}", e);
+            let mut tried_any = false;
+            match helpers::discover_boot_options(runtime_services) {
+                Ok(boot_config) => {
+                    for device_path in boot_config.devices() {
+                        if bp_has_sre && device_path_has_usb_node(device_path) {
+                            log::info!("Skipping USB Boot#### (BP1 has SRE payload); path={:?}", device_path);
+                            continue;
+                        }
+                        if bp_has_sre && device_path_has_fw_file_node(device_path) {
+                            log::info!("Skipping FwFile Boot#### (BP1 has SRE payload); path={:?}", device_path);
+                            continue;
+                        }
+                        tried_any = true;
+                        if let Err(e) = helpers::signal_ready_to_boot(boot_services) {
+                            log::error!("signal_ready_to_boot failed: {:?}", e);
+                        }
+                        match helpers::boot_from_device_path(boot_services, image_handle, device_path) {
+                            Ok(()) => log::warn!("Boot option returned control (path={:?}), trying next...", device_path),
+                            Err(e) => log::warn!("Boot option failed (path={:?}): {:?}", device_path, e),
+                        }
+                    }
+                }
+                Err(e) => log::error!("discover_boot_options failed: {:?}", e),
             }
-            match helpers::boot_from_device_path(boot_services, image_handle, &self.main_os_path) {
-                Ok(()) => log::warn!("Main OS fallback returned control (path={:?})", self.main_os_path),
-                Err(e) => log::warn!("Main OS fallback failed (path={:?}): {:?}", self.main_os_path, e),
+
+            if !tried_any {
+                if let Err(e) = helpers::signal_ready_to_boot(boot_services) {
+                    log::error!("signal_ready_to_boot failed: {:?}", e);
+                }
+                match helpers::boot_from_device_path(boot_services, image_handle, &self.main_os_path) {
+                    Ok(()) => log::warn!("Main OS fallback returned control (path={:?})", self.main_os_path),
+                    Err(e) => log::warn!("Main OS fallback failed (path={:?}): {:?}", self.main_os_path, e),
+                }
             }
         }
 
@@ -785,106 +732,16 @@ mod tests {
     extern crate alloc;
 
     use super::*;
-    use alloc::{boxed::Box, sync::Arc, vec::Vec};
-    use patina::{
-        boot_services::{MockBootServices, boxed::BootServicesBox},
-        device_path::{node_defs::EndEntire, paths::DevicePathBuf},
-    };
+    use alloc::{sync::Arc, vec::Vec};
+    use patina::device_path::{node_defs::EndEntire, paths::DevicePathBuf};
 
     fn test_device_path() -> DevicePathBuf {
         DevicePathBuf::from_device_path_node_iter(core::iter::once(EndEntire))
     }
 
-    struct MockDxeDispatcher {
-        results: spin::Mutex<alloc::collections::VecDeque<patina::error::Result<bool>>>,
-    }
-
-    impl MockDxeDispatcher {
-        fn new(results: &[patina::error::Result<bool>]) -> Self {
-            Self {
-                results: spin::Mutex::new(results.iter().cloned().collect()),
-            }
-        }
-    }
-
-    impl DxeDispatch for MockDxeDispatcher {
-        fn dispatch(&self) -> patina::error::Result<bool> {
-            self.results
-                .lock()
-                .pop_front()
-                .expect("MockDxeDispatcher: unexpected dispatch call")
-        }
-    }
-
-    fn leaked_boot_services_for_box() -> &'static MockBootServices {
-        Box::leak(Box::new({
-            let mut m = MockBootServices::new();
-            m.expect_free_pool().returning(|_| Ok(()));
-            m
-        }))
-    }
-
-    fn mock_handle_buffer(
-        handle_addrs: &[usize],
-        boot_services: &'static MockBootServices,
-    ) -> BootServicesBox<'static, [efi::Handle], MockBootServices> {
-        let handles: Vec<efi::Handle> = handle_addrs.iter().map(|&a| a as efi::Handle).collect();
-        let leaked = handles.leak();
-        // SAFETY: leaked is a valid pointer+length from Vec::leak.
-        unsafe { BootServicesBox::from_raw_parts_mut(leaked.as_mut_ptr(), leaked.len(), boot_services) }
-    }
-
     #[test]
     fn test_new_constructs() {
         let _ = SreBootManager::new(test_device_path());
-    }
-
-    #[test]
-    fn test_interleave_single_round_no_drivers_dispatched() {
-        let box_mock = leaked_boot_services_for_box();
-        let mut boot_mock = MockBootServices::new();
-
-        boot_mock
-            .expect_locate_handle_buffer()
-            .returning(move |_| Ok(mock_handle_buffer(&[1], box_mock)));
-        boot_mock.expect_connect_controller().returning(|_, _, _, _| Ok(()));
-
-        let dxe_mock = MockDxeDispatcher::new(&[Ok(false)]);
-
-        let result = interleave_connect_and_dispatch(&boot_mock, &dxe_mock);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_interleave_dispatch_failure_propagates() {
-        let box_mock = leaked_boot_services_for_box();
-        let mut boot_mock = MockBootServices::new();
-
-        boot_mock
-            .expect_locate_handle_buffer()
-            .returning(move |_| Ok(mock_handle_buffer(&[1], box_mock)));
-        boot_mock.expect_connect_controller().returning(|_, _, _, _| Ok(()));
-
-        let dxe_mock = MockDxeDispatcher::new(&[Err(EfiError::DeviceError)]);
-
-        let result = interleave_connect_and_dispatch(&boot_mock, &dxe_mock);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_interleave_stops_at_max_rounds() {
-        let box_mock = leaked_boot_services_for_box();
-        let mut boot_mock = MockBootServices::new();
-
-        boot_mock
-            .expect_locate_handle_buffer()
-            .returning(move |_| Ok(mock_handle_buffer(&[1], box_mock)));
-        boot_mock.expect_connect_controller().returning(|_, _, _, _| Ok(()));
-
-        let dxe_mock = MockDxeDispatcher::new(&[Ok(true); 10]);
-
-        let result = interleave_connect_and_dispatch(&boot_mock, &dxe_mock);
-        assert!(result.is_ok());
     }
 
     // Type-level confirmation that SreBootManager satisfies BootOrchestrator's
