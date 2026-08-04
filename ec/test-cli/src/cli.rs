@@ -48,9 +48,9 @@ pub enum SourceKind {
     #[cfg(target_os = "windows")]
     #[default]
     Acpi,
-    /// Real hardware via the HID class drivers (Windows).
+    /// Real hardware via the Windows class-driver interface.
     #[cfg(target_os = "windows")]
-    Hid,
+    Windows,
 }
 
 impl std::fmt::Display for SourceKind {
@@ -61,7 +61,7 @@ impl std::fmt::Display for SourceKind {
             #[cfg(target_os = "windows")]
             Self::Acpi => write!(f, "acpi"),
             #[cfg(target_os = "windows")]
-            Self::Hid => write!(f, "hid"),
+            Self::Windows => write!(f, "windows"),
         }
     }
 }

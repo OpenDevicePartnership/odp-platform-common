@@ -38,6 +38,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         SourceKind::Acpi => dispatch(ec_test_lib::acpi::Acpi::new(cli.fan_instance), cli.command),
 
         #[cfg(target_os = "windows")]
-        SourceKind::Hid => dispatch(ec_test_lib::hid::Hid::new()?, cli.command),
+        SourceKind::Windows => dispatch(ec_test_lib::windows::Windows::new()?, cli.command),
     }
 }

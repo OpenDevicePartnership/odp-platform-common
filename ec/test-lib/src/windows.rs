@@ -1,4 +1,4 @@
-//! HID data source (Windows).
+//! Windows data source.
 use crate::mock::Mock;
 use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold};
 use battery_service_interface::{BixFixedStrings, BstReturn};
@@ -74,10 +74,10 @@ fn get_device_path(interface_guid: &GUID) -> Result<String, Error> {
     Ok(path)
 }
 
-/// Errors produced by HID data source operations.
+/// Errors produced by Windows data source operations.
 #[derive(Debug)]
 pub enum Error {
-    /// The HID device interface could not be found.
+    /// The device interface could not be found.
     DeviceNotFound,
     /// A Windows API call failed with the returned HRESULT.
     Io(i32),
@@ -88,7 +88,7 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::DeviceNotFound => write!(f, "HID device not found"),
+            Self::DeviceNotFound => write!(f, "Device not found"),
             Self::Io(code) => write!(f, "HRESULT {code:#x}"),
             Self::InvalidData => write!(f, "Invalid data"),
         }
@@ -113,13 +113,13 @@ impl From<crate::mock::Error> for Error {
     }
 }
 
-/// A resolved handle to one HID class-driver device interface.
-struct HidDevice {
+/// A resolved handle to one Windows class-driver device interface.
+struct WindowsDevice {
     device_path: String,
 }
 
-impl HidDevice {
-    /// Create a HID device from given `interface_guid`.
+impl WindowsDevice {
+    /// Create a device from given `interface_guid`.
     fn new(interface_guid: &GUID) -> Result<Self, Error> {
         Ok(Self {
             device_path: get_device_path(interface_guid)?,
@@ -182,28 +182,28 @@ impl HidDevice {
     }
 }
 
-/// HID data source.
-pub struct Hid {
-    time_alarm: HidDevice,
-    // Revisit: Implement battery and thermal as HID devices once the drivers exist.
+/// Windows data source.
+pub struct Windows {
+    time_alarm: WindowsDevice,
+    // Revisit: Implement battery and thermal as Windows devices once the drivers exist.
     // For now, delegate to a mock.
     mock: Mock,
 }
 
-impl ErrorType for Hid {
+impl ErrorType for Windows {
     type Error = Error;
 }
 
-impl Hid {
+impl Windows {
     pub fn new() -> Result<Self, Error> {
         Ok(Self {
-            time_alarm: HidDevice::new(&GUID_DEVICE_ACPI_TIME)?,
+            time_alarm: WindowsDevice::new(&GUID_DEVICE_ACPI_TIME)?,
             mock: Mock::default(),
         })
     }
 }
 
-impl RtcSource for Hid {
+impl RtcSource for Windows {
     fn get_real_time(&self) -> Result<AcpiTimestamp, Error> {
         // ACPI_REAL_TIME shares the 16-byte ACPI layout used by AcpiTimestamp.
         let mut out = [0u8; 16];
@@ -292,9 +292,9 @@ impl RtcSource for Hid {
     }
 }
 
-// Revisit: Implement these as HID devices like TAD once the HID drivers exist for them.
+// Revisit: Implement these as Windows devices like TAD once the drivers exist for them.
 // For now, just return mock data.
-impl ThermalSource for Hid {
+impl ThermalSource for Windows {
     fn get_temperature(&self) -> Result<f64, Error> {
         ThermalSource::get_temperature(&self.mock).map_err(Into::into)
     }
@@ -324,7 +324,7 @@ impl ThermalSource for Hid {
     }
 }
 
-impl BatterySource for Hid {
+impl BatterySource for Windows {
     fn get_bst(&self) -> Result<BstReturn, Error> {
         BatterySource::get_bst(&self.mock).map_err(Into::into)
     }

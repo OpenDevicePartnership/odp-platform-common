@@ -119,6 +119,6 @@ pub(crate) fn build(cli: &Cli) -> Result<Arc<dyn DynSource>> {
         SourceKind::Acpi => Ok(Arc::new(ec_test_lib::acpi::Acpi::new(cli.fan_instance))),
 
         #[cfg(target_os = "windows")]
-        SourceKind::Hid => Ok(Arc::new(ec_test_lib::hid::Hid::new()?)),
+        SourceKind::Windows => Ok(Arc::new(ec_test_lib::windows::Windows::new()?)),
     }
 }
