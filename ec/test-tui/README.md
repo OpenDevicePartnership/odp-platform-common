@@ -15,7 +15,7 @@ For Windows on ARM (cross-compile):
 cargo build-win --release
 ```
 
-Note: to use the `local` source on Windows, you must have the `ectest.sys` KMDF driver built/installed and the required ACPI entries/device instance present. See [test-win/README.md](../test-win/README.md) for the Windows driver/setup requirements.
+Note: to use the `local` source on Windows, you must have the `ectest.sys` KMDF driver built/installed and the required ACPI entries/device instance present. The driver lives in [odp-windows-drivers](https://github.com/OpenDevicePartnership/odp-windows-drivers) (`drivers/acpi`); see [test-win/README.md](../test-win/README.md) for the user-mode setup requirements.
 
 ## Usage
 

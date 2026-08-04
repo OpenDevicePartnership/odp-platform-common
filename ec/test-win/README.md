@@ -1,13 +1,14 @@
 # ec-test-win
 
 ## Overview
-Windows native components for testing EC interfaces via ACPI. Includes a user-mode library, CLI test application, and a kernel-mode driver.
+Windows native components for testing EC interfaces via ACPI. Includes a user-mode library and CLI test application that talk to the `ectest.sys` KMDF driver.
+
+> The `ectest.sys` KMDF driver now lives in the [odp-windows-drivers](https://github.com/OpenDevicePartnership/odp-windows-drivers) repository (`drivers/acpi`). Build and install it from there. The IOCTL/struct contract shared with the driver is kept here in `inc/ectest.h`.
 
 ## Structure
 ```
 exe/  - User mode CLI (ectest.exe) to call and evaluate ACPI functions
-inc/  - Shared header files between user-mode and kernel-mode components
-kmdf/ - Kernel mode driver (ectest.sys) that evaluates ACPI methods
+inc/  - Shared header files (incl. the IOCTL contract used to talk to ectest.sys)
 lib/  - User mode library (eclib) bridging user apps to the KMDF driver
 dep/  - External dependencies (WIL git submodule)
 ```
@@ -27,23 +28,20 @@ Compile eclib.lib and eclib.dll from `lib/`:
 msbuild /p:Configuration=Release /p:Platform=ARM64
 ```
 
-Compile ectest.sys from `kmdf/`:
-```
-msbuild /p:Configuration=Release /p:Platform=ARM64
-```
-
 Compile ectest.exe from `exe/`:
 ```
 msbuild /p:Configuration=Release /p:Platform=ARM64
 ```
 
+The `ectest.sys` KMDF driver is built from the [odp-windows-drivers](https://github.com/OpenDevicePartnership/odp-windows-drivers) repository (`drivers/acpi`).
+
 ## Installing the Driver
-After recompiling ACPI and booting your device, install the driver and run validation tests.
+After recompiling ACPI and booting your device, install the driver and run validation tests. Build the `ectest.sys` driver from the [odp-windows-drivers](https://github.com/OpenDevicePartnership/odp-windows-drivers) repository (`drivers/acpi`).
 
 Copy the following files to a thumbdrive or location on the target:
 ```
 ec\test-win\exe\arm64\Debug\ectest.exe
-ec\test-win\kmdf\arm64\Debug\ectest_kmdf\*
+<odp-windows-drivers build output>\ectest_kmdf\*
 <WDKROOT>\Program Files\Windows Kits\10\Tools\10.0.26100.0\arm64\devcon.exe
 ```
 

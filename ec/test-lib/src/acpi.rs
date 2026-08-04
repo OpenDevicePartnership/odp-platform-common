@@ -13,7 +13,7 @@ use windows::Win32::Foundation::*;
 use windows::Win32::System::IO::*;
 use windows::core::{GUID, PCWSTR};
 
-// GUID defined in the KMDF INX file for ectest.sys
+// GUID defined in the ectest.sys KMDF driver (odp-windows-drivers, drivers/acpi)
 // {5362ad97-ddfe-429d-9305-31c0ad27880a}
 const GUID_DEVCLASS_ECTEST: GUID = GUID::from_values(
     0x5362ad97,
