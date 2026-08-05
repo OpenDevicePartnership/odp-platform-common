@@ -65,10 +65,17 @@ fn cell<T>(fetched: &Fetched<T>, f: impl FnOnce(&T) -> String) -> String {
 }
 
 fn capability_summary(cap: &ec_test_lib::ucsi::UcsiCapability) -> String {
+    let connector = if cap.num_connectors == 1 {
+        "connector"
+    } else {
+        "connectors"
+    };
+    let pd_support = if cap.usb_pd_supported { "USB-PD" } else { "no USB-PD" };
     format!(
-        "{} conn{}  PD {:x}.{:02x}",
+        "{} {connector} {} {pd_support} {} PD {:x}.{:02x}",
         cap.num_connectors,
-        if cap.usb_pd_supported { " USB-PD" } else { "" },
+        SYMBOLS.mid_dot,
+        SYMBOLS.mid_dot,
         cap.bcd_pd_version >> 8,
         cap.bcd_pd_version & 0xff,
     )
@@ -108,4 +115,20 @@ fn status_summary(status: &UcsiConnectorStatus) -> String {
         "Connected {} {} {} {partner}",
         SYMBOLS.mid_dot, status.power_direction, SYMBOLS.mid_dot
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capability_summary_separates_connector_and_pd_details() {
+        let capability = ec_test_lib::ucsi::UcsiCapability {
+            num_connectors: 1,
+            usb_pd_supported: true,
+            bcd_pd_version: 0x0300,
+        };
+
+        assert_eq!(capability_summary(&capability), "1 connector · USB-PD · PD 3.00");
+    }
 }

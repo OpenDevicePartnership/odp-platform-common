@@ -138,16 +138,13 @@ impl fmt::Display for MailboxError {
 
 impl std::error::Error for MailboxError {}
 
-/// Validate the 48-byte mailbox header (length, VERSION, CCI status) and return
+/// Validate the 48-byte mailbox length and CCI status, returning VERSION and
 /// the CCI data-length field.
-fn validate(bytes: &[u8]) -> Result<usize, MailboxError> {
+fn validate(bytes: &[u8]) -> Result<(u16, usize), MailboxError> {
     if bytes.len() != MAILBOX_LEN {
         return Err(MailboxError::WrongLength(bytes.len()));
     }
     let version = u16::from_le_bytes([bytes[0], bytes[1]]);
-    if version != UCSI_VERSION_1_2 {
-        return Err(MailboxError::UnsupportedVersion(version));
-    }
     let cci = u32::from_le_bytes(bytes[4..8].try_into().expect("4-byte CCI slice"));
     if cci & (1 << 31) == 0 {
         return Err(MailboxError::NotComplete);
@@ -158,12 +155,15 @@ fn validate(bytes: &[u8]) -> Result<usize, MailboxError> {
     if cci & (1 << 25) != 0 {
         return Err(MailboxError::NotSupported);
     }
-    Ok(((cci >> 8) & 0xff) as usize)
+    Ok((version, ((cci >> 8) & 0xff) as usize))
 }
 
 /// Validate the header and return the first `expected` MESSAGE IN bytes.
 fn message_in(bytes: &[u8], expected: usize) -> Result<&[u8], MailboxError> {
-    let actual = validate(bytes)?;
+    let (version, actual) = validate(bytes)?;
+    if version != UCSI_VERSION_1_2 {
+        return Err(MailboxError::UnsupportedVersion(version));
+    }
     if actual != expected {
         return Err(MailboxError::UnexpectedDataLen { expected, actual });
     }
@@ -177,8 +177,8 @@ fn bit(bytes: &[u8], index: usize) -> bool {
 
 /// Validate a mailbox and return the UCSI version.
 pub fn decode_version(bytes: &[u8]) -> Result<UcsiVersion, MailboxError> {
-    validate(bytes)?;
-    Ok(UcsiVersion(u16::from_le_bytes([bytes[0], bytes[1]])))
+    let (version, _) = validate(bytes)?;
+    Ok(UcsiVersion(version))
 }
 
 /// Decode a GET_CAPABILITY (16-byte) response.
@@ -254,11 +254,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsupported_version() {
+    fn command_decode_rejects_unsupported_version() {
         let mut buf = mailbox(cci_complete(16), &[]);
         buf[0..2].copy_from_slice(&0x0100u16.to_le_bytes());
         assert_eq!(
-            decode_version(&buf).unwrap_err(),
+            decode_capability(&buf).unwrap_err(),
             MailboxError::UnsupportedVersion(0x0100)
         );
     }
@@ -294,10 +294,9 @@ mod tests {
 
     #[test]
     fn version_decodes_and_displays() {
-        assert_eq!(
-            decode_version(&mailbox(cci_complete(16), &[])).unwrap(),
-            UcsiVersion(0x0120)
-        );
+        let mut buf = mailbox(cci_complete(16), &[]);
+        buf[0..2].copy_from_slice(&0x0200u16.to_le_bytes());
+        assert_eq!(decode_version(&buf).unwrap(), UcsiVersion(0x0200));
         assert_eq!(UcsiVersion(0x0120).to_string(), "1.2");
     }
 
