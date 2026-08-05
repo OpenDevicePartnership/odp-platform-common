@@ -44,10 +44,13 @@ pub enum SourceKind {
     /// Real hardware via serial transport.
     #[cfg_attr(not(target_os = "windows"), default)]
     Serial,
+    /// Real hardware via the local OS ACPI interface (Windows).
     #[cfg(target_os = "windows")]
-    /// Real hardware via the local OS interface (Windows ACPI).
     #[default]
-    Local,
+    Acpi,
+    /// Real hardware via the Windows class-driver interface.
+    #[cfg(target_os = "windows")]
+    Windows,
 }
 
 impl std::fmt::Display for SourceKind {
@@ -56,7 +59,9 @@ impl std::fmt::Display for SourceKind {
             Self::Mock => write!(f, "mock"),
             Self::Serial => write!(f, "serial"),
             #[cfg(target_os = "windows")]
-            Self::Local => write!(f, "local"),
+            Self::Acpi => write!(f, "acpi"),
+            #[cfg(target_os = "windows")]
+            Self::Windows => write!(f, "windows"),
         }
     }
 }
