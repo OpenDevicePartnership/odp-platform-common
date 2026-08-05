@@ -443,9 +443,10 @@ mod ucsi_tests {
         let s = state.read().unwrap();
         assert_eq!(s.version.as_ref().unwrap().as_ref().unwrap(), &UcsiVersion(0x0120));
         assert_eq!(s.capability.as_ref().unwrap().as_ref().unwrap().num_connectors, 1);
-        assert!(s.connector_capability.as_ref().unwrap().as_ref().unwrap().provider);
+        assert!(s.connector_capability.as_ref().unwrap().as_ref().unwrap().provider());
         let status = s.connector_status.as_ref().unwrap().as_ref().unwrap();
-        assert!(status.connected);
-        assert_eq!(status.power_direction, PowerDirection::Sink);
+        assert!(status.connect_status);
+        let connected = status.status.expect("connected payload present");
+        assert_eq!(connected.power_direction, PowerDirection::Sink);
     }
 }

@@ -724,22 +724,22 @@ impl Acpi {
 
 impl UcsiSource for Acpi {
     fn get_version(&self) -> Result<UcsiVersion, Self::Error> {
-        let mailbox = self.ucsi_command(ucsi::control(ucsi::opcode::GET_CAPABILITY, 0))?;
+        let mailbox = self.ucsi_command(ucsi::control(ucsi::CommandType::GetCapability, 0))?;
         Ok(ucsi::decode_version(&mailbox)?)
     }
 
     fn get_capability(&self) -> Result<UcsiCapability, Self::Error> {
-        let mailbox = self.ucsi_command(ucsi::control(ucsi::opcode::GET_CAPABILITY, 0))?;
+        let mailbox = self.ucsi_command(ucsi::control(ucsi::CommandType::GetCapability, 0))?;
         Ok(ucsi::decode_capability(&mailbox)?)
     }
 
     fn get_connector_capability(&self, connector: u8) -> Result<UcsiConnectorCapability, Self::Error> {
-        let mailbox = self.ucsi_command(ucsi::control(ucsi::opcode::GET_CONNECTOR_CAPABILITY, connector))?;
+        let mailbox = self.ucsi_command(ucsi::control(ucsi::CommandType::GetConnectorCapability, connector))?;
         Ok(ucsi::decode_connector_capability(&mailbox)?)
     }
 
     fn get_connector_status(&self, connector: u8) -> Result<UcsiConnectorStatus, Self::Error> {
-        let mailbox = self.ucsi_command(ucsi::control(ucsi::opcode::GET_CONNECTOR_STATUS, connector))?;
+        let mailbox = self.ucsi_command(ucsi::control(ucsi::CommandType::GetConnectorStatus, connector))?;
         Ok(ucsi::decode_connector_status(&mailbox)?)
     }
 }

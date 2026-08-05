@@ -1,7 +1,7 @@
 use crate::common;
 use crate::common::SYMBOLS;
 use crate::state::{Fetched, UcsiState};
-use ec_test_lib::ucsi::{UcsiConnectorCapability, UcsiConnectorStatus};
+use ec_test_lib::ucsi::{PowerDirection, UcsiCapability, UcsiConnectorCapability, UcsiConnectorStatus};
 use ratatui::{
     buffer::Buffer,
     crossterm::event::Event,
@@ -64,35 +64,40 @@ fn cell<T>(fetched: &Fetched<T>, f: impl FnOnce(&T) -> String) -> String {
     }
 }
 
-fn capability_summary(cap: &ec_test_lib::ucsi::UcsiCapability) -> String {
+fn capability_summary(cap: &UcsiCapability) -> String {
     let connector = if cap.num_connectors == 1 {
         "connector"
     } else {
         "connectors"
     };
-    let pd_support = if cap.usb_pd_supported { "USB-PD" } else { "no USB-PD" };
+    let pd_support = if cap.attributes.usb_power_delivery() {
+        "USB-PD"
+    } else {
+        "no USB-PD"
+    };
     format!(
         "{} {connector} {} {pd_support} {} PD {:x}.{:02x}",
         cap.num_connectors,
         SYMBOLS.mid_dot,
         SYMBOLS.mid_dot,
-        cap.bcd_pd_version >> 8,
-        cap.bcd_pd_version & 0xff,
+        cap.bcd_usb_pd_spec >> 8,
+        cap.bcd_usb_pd_spec & 0xff,
     )
 }
 
 fn connector_summary(cap: &UcsiConnectorCapability) -> String {
+    let modes_flags = cap.operation_mode();
     let mut modes = Vec::new();
-    if cap.drp {
+    if modes_flags.drp() {
         modes.push("DRP");
     }
-    if cap.usb2 {
+    if modes_flags.usb2() {
         modes.push("USB2");
     }
-    if cap.usb3 {
+    if modes_flags.usb3() {
         modes.push("USB3");
     }
-    let roles = match (cap.provider, cap.consumer) {
+    let roles = match (cap.provider(), cap.consumer()) {
         (true, true) => "provider/consumer",
         (true, false) => "provider",
         (false, true) => "consumer",
@@ -107,28 +112,45 @@ fn connector_summary(cap: &UcsiConnectorCapability) -> String {
 }
 
 fn status_summary(status: &UcsiConnectorStatus) -> String {
-    if !status.connected {
+    if !status.connect_status {
         return "Disconnected".to_string();
     }
-    let partner = if status.partner_usb { "USB" } else { "partner" };
+    let (direction, partner) = match &status.status {
+        Some(connected) => {
+            let direction = match connected.power_direction {
+                PowerDirection::Sink => "Sink",
+                PowerDirection::Source => "Source",
+            };
+            let partner = if connected.partner_flags.usb() {
+                "USB"
+            } else {
+                "partner"
+            };
+            (direction, partner)
+        }
+        None => ("?", "partner"),
+    };
     format!(
-        "Connected {} {} {} {partner}",
-        SYMBOLS.mid_dot, status.power_direction, SYMBOLS.mid_dot
+        "Connected {} {direction} {} {partner}",
+        SYMBOLS.mid_dot, SYMBOLS.mid_dot
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ec_test_lib::UcsiSource;
+    use ec_test_lib::mock::Mock;
 
     #[test]
     fn capability_summary_separates_connector_and_pd_details() {
-        let capability = ec_test_lib::ucsi::UcsiCapability {
-            num_connectors: 1,
-            usb_pd_supported: true,
-            bcd_pd_version: 0x0300,
-        };
+        let cap = Mock::default().get_capability().unwrap();
+        assert_eq!(capability_summary(&cap), "1 connector · USB-PD · PD 3.00");
+    }
 
-        assert_eq!(capability_summary(&capability), "1 connector · USB-PD · PD 3.00");
+    #[test]
+    fn status_summary_renders_connected_sink() {
+        let status = Mock::default().get_connector_status(1).unwrap();
+        assert_eq!(status_summary(&status), "Connected · Sink · USB");
     }
 }

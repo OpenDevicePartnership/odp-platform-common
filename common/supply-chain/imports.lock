@@ -28,6 +28,13 @@ criteria = "safe-to-deploy"
 version = "0.2.5"
 aggregated-from = "https://raw.githubusercontent.com/OpenDevicePartnership/mcxa-pac/refs/heads/main/supply-chain/audits.toml"
 
+[[audits.OpenDevicePartnership.audits.bincode]]
+who = "Jerry Xie <jerryxie@microsoft.com>"
+criteria = "safe-to-deploy"
+version = "2.0.1"
+notes = "no_std binary serialization library. ~15 unsafe blocks for u8 type-specialization guarded by unty::type_equal and MaybeUninit patterns. No build script, no proc macros. std imports only for Encode/Decode trait impls. Assisted-by: copilot-cli:claude-opus-4.6"
+aggregated-from = "https://raw.githubusercontent.com/OpenDevicePartnership/embedded-services/refs/heads/main/supply-chain/audits.toml"
+
 [[audits.OpenDevicePartnership.audits.bitfield]]
 who = "Felipe Balbi <felipe.balbi@microsoft.com>"
 criteria = "safe-to-deploy"
@@ -112,7 +119,10 @@ aggregated-from = "https://raw.githubusercontent.com/OpenDevicePartnership/embed
 who = "Felipe Balbi <febalbi@microsoft.com>"
 criteria = "safe-to-deploy"
 version = "0.5.0"
-aggregated-from = "https://raw.githubusercontent.com/OpenDevicePartnership/tps6699x/refs/heads/main/supply-chain/audits.toml"
+aggregated-from = [
+    "https://raw.githubusercontent.com/OpenDevicePartnership/tps6699x/refs/heads/main/supply-chain/audits.toml",
+    "https://raw.githubusercontent.com/OpenDevicePartnership/tps6699x/refs/heads/main/supply-chain/audits.toml",
+]
 
 [[audits.OpenDevicePartnership.audits.embassy-time]]
 who = "Billy Price <williamp@microsoft.com>"
@@ -365,8 +375,7 @@ aggregated-from = "https://raw.githubusercontent.com/OpenDevicePartnership/embed
 who = "Jerry Xie <jerryxie@microsoft.com>"
 criteria = "safe-to-deploy"
 delta = "1.21.3 -> 1.21.4"
-notes = "Delta: soundness fix for OnceCell::wait under parking_lot feature. The wait() in imp_pl.rs now wraps parking_lot_core::park in a while loop re-checking COMPLETE state, preventing uninitialized memory observation when concurrent get_or_try_init panics. Remaining changes: doc cfg guards, doc typo fix, new tests. No new unsafe, no build script, no proc macros, no new imports. Assisted-by: copilot-chat:claude-opus-4.6"
-aggregated-from = "https://raw.githubusercontent.com/OpenDevicePartnership/embedded-services/refs/heads/main/supply-chain/audits.toml"
+aggregated-from = "https://raw.githubusercontent.com/OpenDevicePartnership/bq25723/refs/heads/main/supply-chain/audits.toml"
 
 [[audits.OpenDevicePartnership.audits.pin-project-lite]]
 who = "Jerry Xie <jerryxie@microsoft.com>"
@@ -509,6 +518,13 @@ who = "Jerry Xie <jerryxie@microsoft.com>"
 criteria = "safe-to-deploy"
 delta = "1.0.18 -> 1.0.24"
 notes = "Delta: Unicode 16->17 table data update only. No unsafe, no build.rs, no new deps. Assisted-by: GitHub Copilot:claude-opus-4.6"
+aggregated-from = "https://raw.githubusercontent.com/OpenDevicePartnership/embedded-services/refs/heads/main/supply-chain/audits.toml"
+
+[[audits.OpenDevicePartnership.audits.unty]]
+who = "Jerry Xie <jerryxie@microsoft.com>"
+criteria = "safe-to-deploy"
+version = "0.0.4"
+notes = "Tiny no_std crate (1 file, ~120 LOC, zero deps). Two unsafe blocks: transmute_copy guarded by TypeId check in unty(), and a dtolnay-pattern transmute in non_static_type_id(). Both documented; no build script, no powerful imports. Assisted-by: copilot-cli:claude-opus-4.6"
 aggregated-from = "https://raw.githubusercontent.com/OpenDevicePartnership/embedded-services/refs/heads/main/supply-chain/audits.toml"
 
 [[audits.OpenDevicePartnership.audits.uuid]]

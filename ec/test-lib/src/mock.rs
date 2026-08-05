@@ -4,6 +4,9 @@ use battery_service_interface::{
     BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit,
 };
 use embedded_mcu_hal::time::{Datetime, DatetimeFields, Month};
+use embedded_usb_pd::ucsi::v1_2::lpm::get_connector_capability::OperationModeFlags;
+use embedded_usb_pd::ucsi::v1_2::lpm::get_connector_status::{ConnectedStatus, ConnectorPartnerFlags};
+use embedded_usb_pd::ucsi::v1_2::ppm::get_capability::Attributes;
 use std::sync::Mutex;
 use std::time::Instant;
 use time_alarm_service_interface::{
@@ -451,26 +454,41 @@ impl UcsiSource for Mock {
         Ok(UcsiVersion(0x0120))
     }
     fn get_capability(&self) -> Result<UcsiCapability, Self::Error> {
+        let mut attributes = Attributes::default();
+        attributes.set_battery_charging(true).set_usb_power_delivery(true);
         Ok(UcsiCapability {
+            attributes,
             num_connectors: 1,
-            usb_pd_supported: true,
-            bcd_pd_version: 0x0300,
+            optional_features: Default::default(),
+            num_alt_modes: 0,
+            bcd_battery_charging_spec: 0x0120,
+            bcd_usb_pd_spec: 0x0300,
+            bcd_type_c_spec: 0x0200,
         })
     }
     fn get_connector_capability(&self, _connector: u8) -> Result<UcsiConnectorCapability, Self::Error> {
-        Ok(UcsiConnectorCapability {
-            drp: true,
-            usb2: true,
-            usb3: true,
-            provider: true,
-            consumer: true,
-        })
+        let mut cap = UcsiConnectorCapability::default();
+        cap.set_operation_mode(
+            *OperationModeFlags::default()
+                .set_drp(true)
+                .set_usb2(true)
+                .set_usb3(true),
+        )
+        .set_provider(true)
+        .set_consumer(true);
+        Ok(cap)
     }
     fn get_connector_status(&self, _connector: u8) -> Result<UcsiConnectorStatus, Self::Error> {
+        let mut partner_flags = ConnectorPartnerFlags::default();
+        partner_flags.set_usb(true);
         Ok(UcsiConnectorStatus {
-            connected: true,
-            power_direction: PowerDirection::Sink,
-            partner_usb: true,
+            status_change: Default::default(),
+            connect_status: true,
+            status: Some(ConnectedStatus {
+                power_direction: PowerDirection::Sink,
+                partner_flags,
+                ..Default::default()
+            }),
         })
     }
 }
