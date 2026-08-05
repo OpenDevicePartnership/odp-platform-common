@@ -41,6 +41,10 @@
        D:\out\SreRecovery.bin
 #>
 [CmdletBinding()]
+# Generates a throwaway self-signed test-signing certificate; the plaintext
+# password is a fixed test value passed to BuildSreCapsule.py and never a
+# production secret.
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '')]
 param(
     [string] $OutDir = $PSScriptRoot,
     [string] $Password = "sretest",
