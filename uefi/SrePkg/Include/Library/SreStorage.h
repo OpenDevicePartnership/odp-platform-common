@@ -8,43 +8,96 @@
 #ifndef _SRE_STORAGE_H_
 #define _SRE_STORAGE_H_
 
-//
-// Partitions A and B supported for SRE storage operations
-//
-typedef enum {
-  SrePartition_A = 0,
-  SrePartition_B = 1
-} PARTITION_INDEX;
 
 //
-// Return TRUE if the SRE storage device is present and supported.  If FALSE, any other call will return EFI_UNSUPPORTED.
+// Return the geometry of the SRE storage area.  If the device is not present or
+// supported this returns EFI_UNSUPPORTED and any other call will also fail.
 //
-BOOLEAN
-EFIAPI
-IsSupported (
-  VOID
-  );
-
+// BlockCount           - Number of blocks in the storage area
+// BlockSize            - Size of a block in bytes
+// BlockBufferAlignment - Required address alignment (in bytes) for buffers passed
+//                        to SreStorageRead and SreStorageWriteBlock
 //
-// Return the size of the storage partition. 
+// EFI_INVALID_PARAMETER - If any output pointer is NULL
+// EFI_UNSUPPORTED       - If the SRE storage device is not present or supported
 //
 EFI_STATUS
 EFIAPI
-SreStorageSize (
-  OUT UINTN  *Size
+SreStorageInfo (
+  OUT UINTN           *BlockCount,
+  OUT UINTN           *BlockSize,
+  OUT UINTN           *BlockBufferAlignment
   );
 
 //
-// Read a region of the storage partition. Offset and length must be DWORD aligned.
+// Read a region of the storage partition
+//
+// PartitionIndex - Target storage partition index
+// BlockIndex     - Index of the block to read
+// BlockBuffer    - Buffer to receive the block data (must be BlockSize bytes and aligned to
+//                  BlockBufferAlignment as reported by SreStorageInfo)
+//
+// EFI_INVALID_PARAMETER - If Buffer is NULL, misaligned, or if Partition or Block Indexes are out of range
+// EFI_UNSUPPORTED       - If the SRE storage device is not present or supported
 //
 EFI_STATUS
 EFIAPI
 SreStorageRead (
   IN  PARTITION_INDEX PartitionIndex,
-  IN  UINT64          OffsetBytes,
-  OUT VOID            *Buffer,
-  IN  UINTN           Length
+  IN  UINTN           BlockIndex,
+  OUT VOID            *BlockBuffer
   );
+
+//
+// Prepare the storage area for update.  Internally an index is set to block 0 and a write must
+// be called BlockCount times for a close to succeed.
+//
+// PartitionIndex  - Target storage partition index
+//
+// EFI_UNSUPPORTED - If the SRE storage device is not present or supported
+//
+EFI_STATUS
+EFIAPI
+SreStorageWriteOpen (
+  IN  PARTITION_INDEX PartitionIndex
+  );
+
+//
+// Write the input data to the currently indexed block and move the internal block pointer to the
+// next block
+//
+// BlockBuffer - Buffer containing data to write to the storage area, all bytes from the block are written.
+//               Must be BlockSize bytes and aligned to BlockBufferAlignment as reported by SreStorageInfo.
+//
+// EFI_BAD_BUFFER_SIZE - If DataSize != BlockSize
+// EFI_END_OF_MEDIA    - If internal indexed block is at end of storage area
+// EFI_UNSUPPORTED - If the SRE storage device is not present or supported
+//
+EFI_STATUS
+EFIAPI
+SreStorageWriteBlock (
+  IN  VOID *BlockBuffer
+  );
+
+//
+// Close and flush a write session
+//
+// EFI_ABORTED - If internal block pointer is not currently at the end of the storage area
+//
+EFI_STATUS
+EFIAPI
+SreStorageWriteClose ();
+
+//
+// Abort an open write session without committing: clears the session state and
+// restores write protection on the partition being written, so subsequent
+// read/write-open operations are not blocked by a failed apply.
+//
+// EFI_NOT_READY - If no write session is open
+//
+EFI_STATUS
+EFIAPI
+SreStorageWriteAbort ();
 
 //
 // Perform the pre-OS handoff lock that requires a power reset to unlock.
@@ -52,41 +105,9 @@ SreStorageRead (
 EFI_STATUS
 EFIAPI
 SreStorageLock (
-  VOID
+  IN  PARTITION_INDEX PartitionIndex
   );
 
-//
-// Open a write session.  Each block must be written in sequence and no other commands may be called before closing.
-// The BlockBuffer must be freed by the caller after use.
-//
-EFI_STATUS
-EFIAPI
-SreStorageWriteOpen (
-  IN  PARTITION_INDEX PartitionIndex,
-  OUT UINTN           *BlockCount,
-  OUT UINTN           *BlockSize,
-  OUT VOID            **BlockBuffer
-  );
-
-//
-// Write a block of data to the storage partition.  BlockBuffer must point to an allocated block of the size reported
-// by SreStorageWriteOpen and each write indexes an internal pointer to the next block.
-//
-EFI_STATUS
-EFIAPI
-SreStorageWriteBlock (
-  IN  VOID  *BlockBuffer
-  );
-
-//
-// Close and flush a write session. Will fail if SreStorageWriteBlock has not been called the number of times indicated
-// by BlockCount.
-//
-EFI_STATUS
-EFIAPI
-SreStorageWriteClose (
-  VOID
-  );
 
 
 #endif // _SRE_STORAGE_H_

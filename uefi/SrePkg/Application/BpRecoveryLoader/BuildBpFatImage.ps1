@@ -87,9 +87,10 @@ if ($PSCmdlet.ParameterSetName -eq 'BootEfi') {
 if ($PayloadDir -and -not (Test-Path $PayloadDir)) { throw "PayloadDir not found: $PayloadDir" }
 if ($SizeBytes -lt 64MB)          { throw "SizeBytes must be >= 64 MiB for FAT32." }
 
-$workDir = Split-Path -Parent $OutImage
-if (-not $workDir) { $workDir = (Get-Location).Path }
-$vhd = Join-Path $workDir ([IO.Path]::ChangeExtension([IO.Path]::GetFileName($OutImage), '.vhd'))
+# Normalize to an absolute path
+$OutImage = [IO.Path]::GetFullPath((Join-Path (Get-Location).Path $OutImage))
+$workDir  = Split-Path -Parent $OutImage
+$vhd      = Join-Path $workDir ([IO.Path]::ChangeExtension([IO.Path]::GetFileName($OutImage), '.vhd'))
 
 if (Test-Path $vhd)       { Remove-Item $vhd -Force }
 if (Test-Path $OutImage)  { Remove-Item $OutImage -Force }
@@ -104,6 +105,25 @@ try {
     Initialize-Disk -Number $disk.Number -PartitionStyle GPT | Out-Null
     $part = New-Partition -DiskNumber $disk.Number -UseMaximumSize
     Format-Volume -Partition $part -FileSystem FAT32 -NewFileSystemLabel 'SRE_BP' -Confirm:$false -Force | Out-Null
+
+    # --- SRE descriptor-region guard --------------------------------------------
+    # The SRE FMP driver stamps its SRE_IMAGE_INFO descriptor at a fixed byte
+    # offset (0x4400 == GPT LBA 34) inside the reserved MSR gap that precedes the
+    # FAT data partition (see SRE_IMAGE_INFO_OFFSET in SreFmpDeviceLib.h). That is
+    # only safe while (a) the logical sector size is 512 so LBA 34 == 0x4400, and
+    # (b) the FAT data partition starts above the descriptor window. If a future
+    # layout change (e.g. a missing MSR partition) moved the FAT partition down to
+    # 0x4400, the descriptor would corrupt the FAT boot sector, so fail here.
+    $SreDescriptorOffset = 0x4400
+    $SreDescriptorBytes  = 512   # conservative reserved window for the descriptor
+    if ($disk.LogicalSectorSize -ne 512) {
+        throw ("Logical sector size is $($disk.LogicalSectorSize); SRE descriptor offset 0x4400 assumes 512-byte sectors (LBA 34).")
+    }
+    if ($part.Offset -le ($SreDescriptorOffset + $SreDescriptorBytes)) {
+        throw ("FAT partition starts at 0x{0:X}, which overlaps the reserved SRE descriptor window [0x{1:X}..0x{2:X}); the MSR gap is missing or too small." -f `
+            [long]$part.Offset, $SreDescriptorOffset, ($SreDescriptorOffset + $SreDescriptorBytes))
+    }
+    Write-Host ("  SRE descriptor window OK: FAT partition starts at 0x{0:X} (reserved 0x4400 window is clear)" -f [long]$part.Offset)
 
     # Pick a free drive letter and assign it.
     $used = (Get-PSDrive -PSProvider FileSystem).Name

@@ -1,29 +1,26 @@
-/** @file
-  Secure Recovery Environment (SRE) Firmware Management Protocol (FMP) Device Library.  No ASSERTs are being used
-  due to it being an FMP and we want to handle all errors without halting.
-
-  Copyright (c) Microsoft Corporation. All rights reserved.
-
-  SPDX-License-Identifier: BSD-2-Clause-Patent
-
-**/
+//
+// Secure Recovery Environment (SRE) Firmware Management Protocol (FMP) Device Library
+// 
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// SPDX-License-Identifier: BSD-2-Clause-Patent
+// 
 #include <PiDxe.h>
 #include <Guid/SystemResourceTable.h>
+#include <Library/BaseMemoryLib.h>
 #include <Library/DebugLib.h>
 #include <Library/FmpDeviceLib.h>
 #include <Library/MemoryAllocationLib.h>
 #include <Library/PrintLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
-#include <Protocol/SimpleFileSystem.h>
-#include <SreFmpDeviceLib.h>
-#include "SreImageSupport.h"
+
+#include <Library/SreFmpDeviceLib.h>
 #include <Library/SreStorage.h>
 
 // Global to keep Register FmpInstaller and FmpUninstaller having the same return values
 EFI_STATUS  mFmpRegisterStatus = EFI_SUCCESS;
 
 // Using a macro to guarantee we don't use an ASSERT or other method to halt execution when validating input
-// parameters due to this being an FMP driver that can not halt boot execution.
+// parameters.  This is an FMP driver that should not halt boot execution.
 #define INPUT_PARAM_CHECK(param_checks)                                       \
   if (param_checks) {                                                         \
     DEBUG ((DEBUG_ERROR, "[SRE %a] - invalid parameter\n", __FUNCTION__));    \
@@ -32,20 +29,194 @@ EFI_STATUS  mFmpRegisterStatus = EFI_SUCCESS;
 
 
 //
+// Private FMP library functions
+//
+
+/**
+  Handler to calculate and display the progress across both partitions
+
+  @param[in]  PartitionIndex  The index of the partition being written to.
+  @param[in]  BlockIndex      The index of the block being written.
+  @param[in]  BlockCount      The total number of blocks to write.
+  @param[in]  Progress        Optional EFI progress callback.
+**/
+VOID
+EFIAPI
+SreProgress(
+  IN  PARTITION_INDEX  PartitionIndex,
+  IN  UINTN   BlockIndex,
+  IN  UINTN   BlockCount,
+  IN  EFI_FIRMWARE_MANAGEMENT_UPDATE_IMAGE_PROGRESS  Progress OPTIONAL)
+{
+  STATIC UINTN LastPercent = (UINTN)-1;
+  UINTN Percent;
+
+  if (Progress != NULL) {
+    Percent = ((BlockIndex * 50) / BlockCount) + (PartitionIndex * 50);
+
+    if (Percent != LastPercent) {
+      Progress (Percent);
+      LastPercent = Percent;
+    }
+  }
+}
+
+/**
+  Stream an in-memory image to the SRE storage partition.
+
+  @param[in] PartitionIndex   Target storage partition index.
+  @param[in] Image            In-memory image buffer to stream.
+  @param[in] ImageSize        Size of the image buffer in bytes.
+  @param[in] CapsuleFwVersion Firmware version recorded in the image trailer.
+  @param[in] Progress         Optional progress callback.
+**/
+EFI_STATUS
+EFIAPI
+ApplyWimToSreStorage(
+  IN  PARTITION_INDEX PartitionIndex,
+  IN  CONST VOID *Image,
+  IN  UINTN ImageSize,
+  IN  UINT32 CapsuleFwVersion,
+  IN  EFI_FIRMWARE_MANAGEMENT_UPDATE_IMAGE_PROGRESS Progress OPTIONAL)
+{
+  EFI_STATUS         Status;
+  UINTN              BlockCount;
+  UINTN              BlockSize;
+  UINTN              BlockBufferAlignment;
+  UINTN              BlockIndex;
+  VOID               *Chunk = NULL;
+  CONST UINT8        *ImageBytes;
+  UINTN              RemainingToWrite;
+  BOOLEAN            SessionOpen = FALSE;
+
+  // Query the storage geometry so we can size, align, and stream the block buffer ourselves.
+  Status = SreStorageInfo (&BlockCount, &BlockSize, &BlockBufferAlignment);
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "[SRE %a] failed to read storage geometry - %r\n", __FUNCTION__, Status));
+    goto Done;
+  }
+
+  // Allocate a single reusable block buffer, aligned to the storage requirement,
+  // to stream the image into.
+  Chunk = AllocateAlignedPages (EFI_SIZE_TO_PAGES (BlockSize), BlockBufferAlignment);
+  if (Chunk == NULL) {
+    Status = EFI_OUT_OF_RESOURCES;
+    DEBUG ((DEBUG_ERROR, "[SRE %a] failed to allocate block buffer\n", __FUNCTION__));
+    goto Done;
+  }
+
+  Status = SreStorageWriteOpen (PartitionIndex);
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "[SRE %a] failed to open write session - %r\n", __FUNCTION__, Status));
+    goto Done;
+  }
+  SessionOpen = TRUE;
+
+  ImageBytes       = (CONST UINT8 *)Image;
+  RemainingToWrite = ImageSize;
+
+  for (BlockIndex = 0; BlockIndex < BlockCount; BlockIndex++) {
+    SreProgress (PartitionIndex, BlockIndex, BlockCount, Progress);
+
+    // Copy the next chunk of the in-memory image into the block buffer
+    UINTN CopyAmt = (RemainingToWrite < BlockSize) ? RemainingToWrite : BlockSize;
+
+    if (CopyAmt > 0) {
+      CopyMem (Chunk, ImageBytes, CopyAmt);
+      ImageBytes       += CopyAmt;
+      RemainingToWrite -= CopyAmt;
+    }
+
+    // Zero-pad any remainder of the block (the image ends before the partition does)
+    if (CopyAmt < BlockSize) {
+      ZeroMem (&((UINT8 *)Chunk)[CopyAmt], BlockSize - CopyAmt);
+    }
+
+    // Stamp the image descriptor into the block that spans the fixed offset.
+    if (BlockIndex == (SRE_IMAGE_INFO_OFFSET / BlockSize)) {
+      SRE_IMAGE_INFO  *ImageInfo;
+      UINTN           DescOffset;
+
+      DescOffset = SRE_IMAGE_INFO_OFFSET % BlockSize;
+      if (DescOffset + sizeof (SRE_IMAGE_INFO) > BlockSize) {
+        DEBUG ((DEBUG_ERROR, "[SRE %a] descriptor at offset %u spans the %u-byte block boundary\n", __FUNCTION__, (UINT32)DescOffset, (UINT32)BlockSize));
+        Status = EFI_UNSUPPORTED;
+        goto Done;
+      }
+
+      ImageInfo = (SRE_IMAGE_INFO *)&((UINT8 *)Chunk)[DescOffset];
+      ImageInfo->Signature     = SRE_IMAGE_INFO_SIG;
+      ImageInfo->StructVersion = SRE_IMAGE_INFO_STRUCT_VER;
+      ImageInfo->SreFwVersion  = CapsuleFwVersion;
+      ZeroMem (ImageInfo->Reserved, sizeof (ImageInfo->Reserved));
+    }
+
+    Status = SreStorageWriteBlock (Chunk);
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_ERROR, "[SRE %a] failed to write block - %r\n", __FUNCTION__, Status));
+      goto Done;
+    }
+  }
+  
+  if (Progress != NULL) {
+    Progress ((PartitionIndex * 50) + 50);
+  }
+
+  Status = SreStorageWriteClose ();
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "[SRE %a] failed to close write session for partition %d - %r\n", __FUNCTION__, PartitionIndex, Status));
+    goto Done;
+  }
+  SessionOpen = FALSE;
+
+Done:
+  // A session still open here means the apply failed before commit. Abort it
+  // (no commit, restore write protection) so the partition is not left
+  // writable and later storage operations are not blocked.
+  if (SessionOpen && EFI_ERROR (Status)) {
+    EFI_STATUS  AbortStatus;
+
+    AbortStatus = SreStorageWriteAbort ();
+    if (EFI_ERROR (AbortStatus)) {
+      DEBUG ((DEBUG_ERROR, "[SRE %a] failed to abort write session - %r\n", __FUNCTION__, AbortStatus));
+    }
+  }
+  if (Chunk != NULL) {
+    FreeAlignedPages (Chunk, EFI_SIZE_TO_PAGES (BlockSize));
+  }
+  return Status;
+}
+
+
+//
 // Public FMP library functions
 //
 
+/**
+  Register the FMP installer callback.
+
+  @param[in] Function  Installer callback to register.
+**/
 EFI_STATUS
 EFIAPI
 RegisterFmpInstaller (
   IN FMP_DEVICE_LIB_REGISTER_FMP_INSTALLER  Function)
 {
+  UINTN  BlockCount;
+  UINTN  BlockSize;
+  UINTN  BlockBufferAlignment;
+
   // Returning EFI_UNSUPPORTED will cause the FMP framework to install a single FMP instance on the ImageHandle.
   // Returning EFI_SUCCESS without registering an installer will result in this driver never binding to a device and properly not installing an ESRT entry.
-  mFmpRegisterStatus = IsSupported () ? EFI_UNSUPPORTED : EFI_SUCCESS;
+  mFmpRegisterStatus = !EFI_ERROR (SreStorageInfo (&BlockCount, &BlockSize, &BlockBufferAlignment)) ? EFI_UNSUPPORTED : EFI_SUCCESS;
   return mFmpRegisterStatus;
 }
 
+/**
+  Register the FMP uninstaller callback.
+
+  @param[in] Function  Uninstaller callback to register.
+**/
 EFI_STATUS
 EFIAPI
 RegisterFmpUninstaller (
@@ -54,6 +225,12 @@ RegisterFmpUninstaller (
   return mFmpRegisterStatus;
 }
 
+/**
+  Set the device context for this FMP instance.
+
+  @param[in]     Handle   Device handle.
+  @param[in,out] Context  Device context pointer.
+**/
 EFI_STATUS
 EFIAPI
 FmpDeviceSetContext (
@@ -64,6 +241,11 @@ FmpDeviceSetContext (
   return EFI_UNSUPPORTED;
 }
 
+/**
+  Return the size of the SRE storage region.
+
+  @param[out] Size  Size in bytes.
+**/
 EFI_STATUS
 EFIAPI
 FmpDeviceGetSize (
@@ -71,18 +253,29 @@ FmpDeviceGetSize (
   )
 {
   EFI_STATUS  Status;
+  UINTN       BlockCount;
+  UINTN       BlockSize;
+  UINTN       BlockBufferAlignment;
+
   INPUT_PARAM_CHECK(Size == NULL);
 
-  Status = SreStorageSize (Size);
+  Status = SreStorageInfo (&BlockCount, &BlockSize, &BlockBufferAlignment);
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "[SRE %a] failed to read boot partition size - %r\n", __FUNCTION__, Status));
+    return Status;
   }
-  else {
-    DEBUG ((DEBUG_INFO, "[SRE %a] Size = 0x%08X_%08X - success\n", __FUNCTION__, (*Size >> 32), (*Size & 0xFFFFFFFF)));
-  } 
-  return Status;
+
+  *Size = BlockCount * BlockSize;
+  DEBUG ((DEBUG_INFO, "[SRE %a] Size = 0x%08X_%08X - success\n", __FUNCTION__, (*Size >> 32), (*Size & 0xFFFFFFFF)));
+
+  return EFI_SUCCESS;
 }
 
+/**
+  Return a pointer to the image type ID GUID.
+
+  @param[out] Guid  Image type GUID pointer.
+**/
 EFI_STATUS
 EFIAPI
 FmpDeviceGetImageTypeIdGuidPtr (
@@ -93,6 +286,12 @@ FmpDeviceGetImageTypeIdGuidPtr (
   return EFI_UNSUPPORTED;
 }
 
+/**
+  Return the supported and current attribute flags.
+
+  @param[out] Supported  Bitmask of supported attributes.
+  @param[out] Setting    Bitmask of current attribute settings.
+**/
 EFI_STATUS
 EFIAPI
 FmpDeviceGetAttributes (
@@ -121,6 +320,11 @@ FmpDeviceGetAttributes (
   return EFI_SUCCESS;
 }
 
+/**
+  Return the lowest supported firmware version.
+
+  @param[out] LowestSupportedVersion  Minimum version allowed.
+**/
 EFI_STATUS
 EFIAPI
 FmpDeviceGetLowestSupportedVersion (
@@ -135,6 +339,11 @@ FmpDeviceGetLowestSupportedVersion (
   return EFI_SUCCESS;
 }
 
+/**
+  Return the current firmware version as a Unicode string.
+
+  @param[out] VersionString  Caller-freed version string.
+**/
 EFI_STATUS
 EFIAPI
 FmpDeviceGetVersionString (
@@ -176,34 +385,70 @@ FmpDeviceGetVersionString (
   return EFI_SUCCESS;
 }
 
+/**
+  Return the current firmware version from the installed descriptor.
+
+  @param[out] Version  Current firmware version.
+**/
 EFI_STATUS
 EFIAPI
 FmpDeviceGetVersion (
   OUT UINT32  *Version
   )
 {
-  EFI_STATUS          Status;
-  SRE_WIM_DESCRIPTOR  Descriptor;
-  UINTN Size = sizeof(SRE_WIM_DESCRIPTOR);
+  EFI_STATUS      Status;
+  UINTN           BlockCount;
+  UINTN           BlockSize;
+  UINTN           BlockBufferAlignment;
+  VOID            *BlockBuffer;
+  SRE_IMAGE_INFO  *ImageInfo;
 
   INPUT_PARAM_CHECK(Version == NULL);
 
-  // The Get/Set functions pass the ImageDescriptor instead of the raw WIM file
-  Status = FmpDeviceGetImage ((VOID *)&Descriptor, &Size);
-  if (Status == EFI_NOT_FOUND) {
-    *Version = 0x00000000;
-    DEBUG ((DEBUG_WARN, "[SRE %a] No valid image found, forcing version 0x00000000\n", __FUNCTION__));
-    Status = EFI_SUCCESS;
-  } else if (EFI_ERROR (Status)) {
+  Status = SreStorageInfo (&BlockCount, &BlockSize, &BlockBufferAlignment);
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "[SRE %a] failed to read storage geometry - %r\n", __FUNCTION__, Status));
     return Status;
-  } else {
-    *Version = Descriptor.WimVersion;
   }
 
+  // The image descriptor (SRE_IMAGE_INFO) lives at a fixed byte offset from the
+  // start of the partition. Read the block that spans that offset and index into
+  // it by (SRE_IMAGE_INFO_OFFSET % BlockSize).
+  BlockBuffer = AllocateAlignedPages (EFI_SIZE_TO_PAGES (BlockSize), BlockBufferAlignment);
+  if (BlockBuffer == NULL) {
+    DEBUG ((DEBUG_ERROR, "[SRE %a] - out of resources\n", __FUNCTION__));
+    return EFI_OUT_OF_RESOURCES;
+  }
+
+  Status = SreStorageRead (SrePartition_A, SRE_IMAGE_INFO_OFFSET / BlockSize, BlockBuffer);
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "[SRE %a] failed to read image descriptor - %r\n", __FUNCTION__, Status));
+    FreeAlignedPages (BlockBuffer, EFI_SIZE_TO_PAGES (BlockSize));
+    return Status;
+  }
+
+  ImageInfo = (SRE_IMAGE_INFO *)&((UINT8 *)BlockBuffer)[SRE_IMAGE_INFO_OFFSET % BlockSize];
+
+  // If no valid image descriptor is present, force version 0x00000000
+  if ((ImageInfo->Signature != SRE_IMAGE_INFO_SIG) ||
+      (ImageInfo->StructVersion != SRE_IMAGE_INFO_STRUCT_VER)) {
+    *Version = 0x00000000;
+    DEBUG ((DEBUG_WARN, "[SRE %a] No valid image trailer found, forcing version 0x00000000\n", __FUNCTION__));
+    FreeAlignedPages (BlockBuffer, EFI_SIZE_TO_PAGES (BlockSize));
+    return EFI_SUCCESS;
+  }
+
+  *Version = ImageInfo->SreFwVersion;
   DEBUG ((DEBUG_INFO, "[SRE %a] Version = 0x%08x - success\n", __FUNCTION__, *Version));
-  return Status;
+  FreeAlignedPages (BlockBuffer, EFI_SIZE_TO_PAGES (BlockSize));
+  return EFI_SUCCESS;
 }
 
+/**
+  Return the hardware instance identifier.
+
+  @param[out] HardwareInstance  Hardware instance value.
+**/
 EFI_STATUS
 EFIAPI
 FmpDeviceGetHardwareInstance (
@@ -214,6 +459,12 @@ FmpDeviceGetHardwareInstance (
   return EFI_UNSUPPORTED;
 }
 
+/**
+  Read the installed SRE descriptor from the boot partition.
+
+  @param[out]    Image      Buffer to receive the descriptor.
+  @param[in,out] ImageSize  On input, buffer size; on output, bytes written.
+**/
 EFI_STATUS
 EFIAPI
 FmpDeviceGetImage (
@@ -221,42 +472,17 @@ FmpDeviceGetImage (
   IN OUT UINTN  *ImageSize
   )
 {
-  EFI_STATUS          Status;
-  UINTN               PartitionSize;
-
-  INPUT_PARAM_CHECK(Image == NULL || ImageSize == NULL);
-
-  // The image descriptor is what this FMP passes around which resides at the end of the boot partition region.
-  Status = SreStorageSize (&PartitionSize);
-  if (EFI_ERROR (Status)) {
-    DEBUG ((DEBUG_ERROR, "[SRE %a] failed to read boot partition size - %r\n", __FUNCTION__, Status));
-    return Status;
-  }
-  if (*ImageSize < sizeof(SRE_WIM_DESCRIPTOR)) {
-    Status = EFI_BUFFER_TOO_SMALL;
-    DEBUG ((DEBUG_ERROR, "[SRE %a] input buffer too small to read the boot partition descriptor - %r\n", __FUNCTION__, Status));
-    *ImageSize = sizeof(SRE_WIM_DESCRIPTOR);
-    return Status;
-  }
-
-  Status = SreStorageRead (0, PartitionSize - sizeof(SRE_WIM_DESCRIPTOR), Image, sizeof(SRE_WIM_DESCRIPTOR));
-  if (EFI_ERROR(Status))
-  {
-    DEBUG ((DEBUG_ERROR, "[SRE %a] failed to read boot partition descriptor - %r\n", __FUNCTION__, Status));
-    return Status;
-  }
-
-  *ImageSize = sizeof(SRE_WIM_DESCRIPTOR);
-
-  if (!SreIsDescriptorValid ((CONST SRE_WIM_DESCRIPTOR *)Image)) {
-    DEBUG ((DEBUG_WARN, "[SRE %a] - no valid image descriptor found\n", __FUNCTION__));
-    return EFI_NOT_FOUND;
-  }
-
-  DEBUG ((DEBUG_INFO, "[SRE %a] - success\n", __FUNCTION__));
-  return EFI_SUCCESS;
+  return EFI_UNSUPPORTED;
 }
 
+/**
+  Validate the capsule image before applying.
+
+  @param[in]  Image            Descriptor image buffer.
+  @param[in]  ImageSize        Size of Image.
+  @param[out] ImageUpdatable   Result of updatability check.
+  @param[out] LastAttemptStatus Detailed status code.
+**/
 EFI_STATUS
 EFIAPI
 FmpDeviceCheckImageWithStatus (
@@ -266,61 +492,38 @@ FmpDeviceCheckImageWithStatus (
   OUT UINT32      *LastAttemptStatus
   )
 {
-  CONST SRE_WIM_DESCRIPTOR  *Descriptor;
   EFI_STATUS                Status;
-  EFI_FILE_PROTOCOL         *File;
   UINTN                     BpSize;
+  UINTN                     BlockCount;
+  UINTN                     BlockSize;
+  UINTN                     BlockBufferAlignment;
 
+  //
   // Per spec, return EFI_SUCCESS for all checks unless an underlying UEFI based call fails.  The caller is expected
   // to check the ImageUpdatable and LastAttemptStatus variables for information.
+  //
 
   INPUT_PARAM_CHECK(Image == NULL || ImageSize == 0 || ImageUpdatable == NULL || LastAttemptStatus == NULL);
-  Descriptor = (CONST SRE_WIM_DESCRIPTOR *)Image;
-  if (ImageSize < sizeof (SRE_WIM_DESCRIPTOR)) {
-    DEBUG ((DEBUG_ERROR, "[SRE %a] ERROR: invalid input image size of %d, expected %d\n", __FUNCTION__, ImageSize, sizeof (SRE_WIM_DESCRIPTOR)));
-    return EFI_SUCCESS;
-  }
-
-  DEBUG ((DEBUG_INFO, "[SRE %a] SRE_WIM_DESCRIPTOR:\n", __FUNCTION__));
-  DEBUG ((DEBUG_INFO, "    Signature = %c%c%c%c\n", Descriptor->Signature & 0xFF, (Descriptor->Signature >> 8) & 0xFF, (Descriptor->Signature >> 16) & 0xFF, (Descriptor->Signature >> 24) & 0xFF));
-  DEBUG ((DEBUG_INFO, "    StructVersion = %u\n", Descriptor->StructVersion));
-  DEBUG ((DEBUG_INFO, "    WimVersion  = %u\n", Descriptor->WimVersion));
-  DEBUG ((DEBUG_INFO, "    WimSize       = 0x%lx bytes\n", Descriptor->WimSize));
-  DEBUG ((DEBUG_INFO, "    WimHash       ="));
-  for (UINTN i = 0; i < sizeof (Descriptor->WimHash); i++) {
-    DEBUG ((DEBUG_INFO, " %02x", Descriptor->WimHash[i]));
-  }
-  DEBUG ((DEBUG_INFO, "\n"));
 
   *ImageUpdatable    = IMAGE_UPDATABLE_INVALID;
   *LastAttemptStatus = LAST_ATTEMPT_STATUS_ERROR_INVALID_FORMAT;
 
-  // Check that the input descriptor is valid
-  if (!SreIsDescriptorValid (Descriptor)) {
-    return EFI_SUCCESS;
-  }
-
   // Check that the staged WIM will fit into the SRE boot partition
-  Status = SreStorageSize (&BpSize);
+  Status = SreStorageInfo (&BlockCount, &BlockSize, &BlockBufferAlignment);
   if (EFI_ERROR (Status)) {
-    DEBUG ((DEBUG_ERROR, "[SRE %a] failed to read boot partition size - %r\n", __FUNCTION__, Status));
+    DEBUG ((DEBUG_ERROR, "[SRE %a] failed to read the boot partition size - %r\n", __FUNCTION__, Status));
     return Status;
   }
-  if ((Descriptor->WimSize + sizeof(SRE_WIM_DESCRIPTOR)) > BpSize)
+  BpSize = BlockCount * BlockSize;
+  if (ImageSize > BpSize)
   {
     DEBUG ((DEBUG_ERROR, "[SRE %a] ERROR: staged WIM will not fit into the SRE boot partition\n", __FUNCTION__));
     return EFI_SUCCESS;
   }
 
-  // Check that the staged WIM is accessible and readable
-  File = NULL;
-  Status = SreOpenStagedWim (EFI_FILE_MODE_READ, &File);
-  if (EFI_ERROR (Status)) {
-    *LastAttemptStatus = LAST_ATTEMPT_STATUS_ERROR_INSUFFICIENT_RESOURCES;
-    DEBUG ((DEBUG_ERROR, "[SRE %a] ERROR: staged WIM is not accessible - %r\n", __FUNCTION__, Status));
-    return EFI_SUCCESS;
-  }
-  File->Close (File);
+  //
+  // TODO:  No security checks are being performed yet, this driver currently relies on the signing of the capsule only
+  //
 
   // Success
   *ImageUpdatable    = IMAGE_UPDATABLE_VALID;
@@ -328,6 +531,13 @@ FmpDeviceCheckImageWithStatus (
   return EFI_SUCCESS;
 }
 
+/**
+  Validate the capsule image (without LastAttemptStatus).
+
+  @param[in]  Image           Descriptor image buffer.
+  @param[in]  ImageSize       Size of Image.
+  @param[out] ImageUpdatable  Result of updatability check.
+**/
 EFI_STATUS
 EFIAPI
 FmpDeviceCheckImage (
@@ -340,6 +550,17 @@ FmpDeviceCheckImage (
   return FmpDeviceCheckImageWithStatus (Image, ImageSize, ImageUpdatable, &LastAttemptStatus);
 }
 
+/**
+  Apply the SRE image: stream the staged WIM to the boot partition.
+
+  @param[in]  Image             Descriptor image buffer.
+  @param[in]  ImageSize         Size of Image.
+  @param[in]  VendorCode        Optional vendor-specific data.
+  @param[in]  Progress          Optional progress callback.
+  @param[in]  CapsuleFwVersion  Firmware version from the capsule header.
+  @param[out] AbortReason       Unused abort reason string.
+  @param[out] LastAttemptStatus Detailed status code.
+**/
 EFI_STATUS
 EFIAPI
 FmpDeviceSetImageWithStatus (
@@ -353,13 +574,11 @@ FmpDeviceSetImageWithStatus (
   )
 {
   EFI_STATUS                Status;
-  CONST SRE_WIM_DESCRIPTOR  *Descriptor;
   SRE_FMP_LAS_VARIABLE_DATA LasData;
   UINT32                    ImageUpdatable;
  
   // Input checks
   INPUT_PARAM_CHECK(Image == NULL || ImageSize == 0 || LastAttemptStatus == NULL || AbortReason == NULL);
-  Descriptor = (CONST SRE_WIM_DESCRIPTOR *)Image;
 
   // AbortReason string is not used
   *AbortReason = NULL;
@@ -377,31 +596,21 @@ FmpDeviceSetImageWithStatus (
 
   // If the image is valid, apply the WIM to the SRE storage space
   if (*LastAttemptStatus == LAST_ATTEMPT_STATUS_SUCCESS) {
-    Status = ApplyWimToSreStorage (0, Descriptor, Progress);
+    Status = ApplyWimToSreStorage (SrePartition_A, Image, ImageSize, CapsuleFwVersion, Progress);
     if (EFI_ERROR(Status)) {
       DEBUG ((DEBUG_ERROR, "[SRE %a] failed to apply WIM to partition 0 - %r\n", __FUNCTION__, Status));
       *LastAttemptStatus = LAST_ATTEMPT_STATUS_ERROR_UNSUCCESSFUL;
     }
-    Status = ApplyWimToSreStorage (1, Descriptor, Progress);
+    Status = ApplyWimToSreStorage (SrePartition_B, Image, ImageSize, CapsuleFwVersion, Progress);
     if (EFI_ERROR(Status)) {
       DEBUG ((DEBUG_ERROR, "[SRE %a] failed to apply WIM to partition 1 - %r\n", __FUNCTION__, Status));
       *LastAttemptStatus = LAST_ATTEMPT_STATUS_ERROR_UNSUCCESSFUL;
     }
   }
 
-  // The staged WIM has been committed and verified on both boot partitions;
-  // delete the ESP staging file so it is not left behind. Best-effort: a delete
-  // failure does not invalidate the already-committed image.
-  if (*LastAttemptStatus == LAST_ATTEMPT_STATUS_SUCCESS) {
-    Status = SreDeleteStagedWim ();
-    if (EFI_ERROR (Status)) {
-      DEBUG ((DEBUG_WARN, "[SRE %a] failed to delete staged WIM after commit - %r\n", __FUNCTION__, Status));
-    }
-  }
-
   // Store last attempt status and version for use in ESRT table on next boot
   LasData.LastAttemptStatus = *LastAttemptStatus;
-  LasData.LastAttemptVersion = Descriptor->WimVersion;
+  LasData.LastAttemptVersion = CapsuleFwVersion;
   Status = gRT->SetVariable (
     SRE_FMP_LAS_VARIABLE_NAME,
     &gOdpPkgTokenSpaceGuid,
@@ -416,10 +625,20 @@ FmpDeviceSetImageWithStatus (
   Status = (*LastAttemptStatus == LAST_ATTEMPT_STATUS_SUCCESS) ? EFI_SUCCESS : EFI_ABORTED;
   DEBUG ((EFI_ERROR (Status) ? DEBUG_ERROR : DEBUG_INFO, "[SRE %a] Image write status - %r\n", __FUNCTION__, Status));
   DEBUG ((EFI_ERROR (Status) ? DEBUG_ERROR : DEBUG_INFO, "    Last Attempt Status: 0x%08x\n", *LastAttemptStatus));
-  DEBUG ((EFI_ERROR (Status) ? DEBUG_ERROR : DEBUG_INFO, "    Image Version: 0x%08x\n", Descriptor->WimVersion));
+  DEBUG ((EFI_ERROR (Status) ? DEBUG_ERROR : DEBUG_INFO, "    Image Version: 0x%08x\n", CapsuleFwVersion));
   return Status;
 }
 
+/**
+  Apply the SRE image (without LastAttemptStatus).
+
+  @param[in]  Image            Descriptor image buffer.
+  @param[in]  ImageSize        Size of Image.
+  @param[in]  VendorCode       Optional vendor-specific data.
+  @param[in]  Progress         Optional progress callback.
+  @param[in]  CapsuleFwVersion Firmware version from the capsule header.
+  @param[out] AbortReason      Unused abort reason string.
+**/
 EFI_STATUS
 EFIAPI
 FmpDeviceSetImage (
@@ -435,17 +654,23 @@ FmpDeviceSetImage (
   return FmpDeviceSetImageWithStatus (Image, ImageSize, VendorCode, Progress, CapsuleFwVersion, AbortReason, &LastAttemptStatus);
 }
 
+/**
+  Lock the SRE boot partition.
+**/
 EFI_STATUS
 EFIAPI
 FmpDeviceLock (
   VOID
   )
 {
-  EFI_STATUS  Status;
+  EFI_STATUS  Status0;
+  EFI_STATUS  Status1;
 
-  Status = SreStorageLock ();
-  DEBUG (((EFI_ERROR (Status)) ? DEBUG_ERROR : DEBUG_INFO, "[SRE] boot partition lock status - %r\n", Status));
+  Status0 = SreStorageLock (SrePartition_A);
+  DEBUG (((EFI_ERROR (Status0)) ? DEBUG_ERROR : DEBUG_INFO, "[SRE] boot partition A lock status - %r\n", Status0));
 
-  return Status;
+  Status1 = SreStorageLock (SrePartition_B);
+  DEBUG (((EFI_ERROR (Status1)) ? DEBUG_ERROR : DEBUG_INFO, "[SRE] boot partition B lock status - %r\n", Status1));
+
+  return (EFI_ERROR (Status0)) ? Status0 : Status1;
 }
-
