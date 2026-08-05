@@ -15,7 +15,7 @@ For Windows on ARM (cross-compile):
 cargo build-win --release
 ```
 
-Note (Windows only): the `acpi` source requires the `ectest.sys` KMDF driver built/installed with the required ACPI entries/device instance present; the `windows` source requires the corresponding Windows class driver(s) (e.g. `HIDTime.sys`). These drivers live in [odp-windows-drivers](https://github.com/OpenDevicePartnership/odp-windows-drivers); see [test-win/README.md](../test-win/README.md) for the user-mode setup requirements.
+Note (Windows only): the `acpi` source requires the `ectest.sys` KMDF driver built/installed with the required ACPI entries/device instance present; the `windows` source requires the corresponding Windows class driver(s) (e.g. `HIDTime.sys`). These drivers live in [odp-windows-drivers](https://github.com/OpenDevicePartnership/odp-windows-drivers).
 
 ## Usage
 
