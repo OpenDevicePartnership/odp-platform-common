@@ -142,10 +142,6 @@ impl WindowsDevice {
         }
         .map_err(|e| Error::Io(e.code().0))?;
 
-        if handle.is_invalid() {
-            return Err(Error::DeviceNotFound);
-        }
-
         defer! {
             let _ = unsafe { CloseHandle(handle) };
         }
