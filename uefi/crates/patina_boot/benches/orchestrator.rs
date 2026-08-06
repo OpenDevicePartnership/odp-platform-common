@@ -235,10 +235,54 @@ fn expand_device_path_topology(c: &mut Criterion) {
     group.finish();
 }
 
+#[path = "support/fake_tables.rs"]
+mod fake_tables;
+
+/// True end-to-end bench of `BootOrchestrator::execute()` against fake
+/// firmware tables: `StandardBootServices`/`StandardRuntimeServices` wrap
+/// stub `efi::BootServices`/`efi::RuntimeServices` tables (see
+/// `support/fake_tables.rs`), and dispatch is a no-op mock. The canned
+/// behavior presents no handles, no variables, and no loadable images, so
+/// each iteration runs the full flow (connect, phase signals, console and
+/// boot-option discovery, boot attempts) and exhausts with an error.
+fn execute_e2e(c: &mut Criterion) {
+    use patina::boot_services::StandardBootServices;
+    use patina::component::service::dxe_dispatch::MockDxeDispatch;
+    use patina::runtime_services::StandardRuntimeServices;
+    use patina_boot::{boot_orchestrator::BootOrchestrator, config::BootConfig, orchestrators::SimpleBootManager};
+
+    let bs_table = Box::leak(fake_tables::fake_boot_services());
+    let rt_table = Box::leak(fake_tables::fake_runtime_services());
+    let boot_services = StandardBootServices::new(bs_table);
+    let runtime_services = StandardRuntimeServices::new(rt_table);
+
+    let mut dispatch = MockDxeDispatch::new();
+    dispatch.expect_dispatch().returning(|| Ok(false));
+
+    c.bench_function("execute_e2e", |b| {
+        b.iter(|| {
+            let config = BootConfig::new(patina::device_path::paths::DevicePathBuf::from_device_path_node_iter(
+                [patina::device_path::node_defs::Acpi::new_pci_root(0)].into_iter(),
+            ));
+            let manager = SimpleBootManager::new(config);
+            let result = manager.execute(
+                &boot_services,
+                &runtime_services,
+                &dispatch,
+                core::ptr::dangling_mut::<core::ffi::c_void>(),
+            );
+            // Exhausting every option is the expected terminal state.
+            assert!(result.is_err());
+            black_box(result.err())
+        })
+    });
+}
+
 criterion_group!(
     benches,
     bds_phase_composite,
     connect_all_topology,
-    expand_device_path_topology
+    expand_device_path_topology,
+    execute_e2e
 );
 criterion_main!(benches);
