@@ -1,6 +1,7 @@
 //! Windows data source.
 use crate::mock::Mock;
-use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold};
+use crate::ucsi::{UcsiCapability, UcsiConnectorCapability, UcsiConnectorStatus, UcsiVersion};
+use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, UcsiSource};
 use battery_service_interface::{BixFixedStrings, BstReturn};
 use scopeguard::defer;
 use time_alarm_service_interface::{
@@ -83,6 +84,8 @@ pub enum Error {
     Io(i32),
     /// The device returned a malformed or unexpected buffer.
     InvalidData,
+    /// The Windows class-driver source does not expose this operation.
+    Unsupported(&'static str),
 }
 
 impl std::fmt::Display for Error {
@@ -91,6 +94,7 @@ impl std::fmt::Display for Error {
             Self::DeviceNotFound => write!(f, "Device not found"),
             Self::Io(code) => write!(f, "HRESULT {code:#x}"),
             Self::InvalidData => write!(f, "Invalid data"),
+            Self::Unsupported(what) => write!(f, "unsupported by Windows source: {what}"),
         }
     }
 }
@@ -103,6 +107,7 @@ impl crate::Error for Error {
             Self::DeviceNotFound => crate::ErrorKind::Io,
             Self::Io(_) => crate::ErrorKind::Io,
             Self::InvalidData => crate::ErrorKind::InvalidData,
+            Self::Unsupported(_) => crate::ErrorKind::Other,
         }
     }
 }
@@ -331,5 +336,23 @@ impl BatterySource for Windows {
 
     fn set_btp(&self, trippoint: u32) -> Result<(), Error> {
         BatterySource::set_btp(&self.mock, trippoint).map_err(Into::into)
+    }
+}
+
+impl UcsiSource for Windows {
+    fn get_version(&self) -> Result<UcsiVersion, Self::Error> {
+        Err(Error::Unsupported("UCSI get_version"))
+    }
+
+    fn get_capability(&self) -> Result<UcsiCapability, Self::Error> {
+        Err(Error::Unsupported("UCSI get_capability"))
+    }
+
+    fn get_connector_capability(&self, _connector: u8) -> Result<UcsiConnectorCapability, Self::Error> {
+        Err(Error::Unsupported("UCSI get_connector_capability"))
+    }
+
+    fn get_connector_status(&self, _connector: u8) -> Result<UcsiConnectorStatus, Self::Error> {
+        Err(Error::Unsupported("UCSI get_connector_status"))
     }
 }
