@@ -323,6 +323,8 @@ STATIC BP_RESULT  gResult;
 // host OS can read the run outcome and the BP write-protection readback via
 // GetFirmwareEnvironmentVariableEx, without capturing the console. Called at
 // several points during the run so a crash still leaves the last state behind.
+// The tool itself decides what to do from content comparison at each boot;
+// the variable is output-only, never read back by the tool.
 //
 STATIC
 VOID
@@ -331,20 +333,15 @@ WriteResultToNvRam (
   VOID
   )
 {
-  EFI_STATUS  Status;
-
   gResult.Magic   = BP_RESULT_MAGIC;
   gResult.Version = BP_RESULT_VERSION;
-  Status          = gRT->SetVariable (
-                          L"NvmeBpResult",
-                          &gNvmeBpResultGuid,
-                          EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS,
-                          sizeof (gResult),
-                          &gResult
-                          );
-  if (EFI_ERROR (Status)) {
-    LogPrint (L"[warn] WriteResultToNvRam: SetVariable(NvmeBpResult) failed: %r\n", Status);
-  }
+  gRT->SetVariable (
+         L"NvmeBpResult",
+         &gNvmeBpResultGuid,
+         EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS,
+         sizeof (gResult),
+         &gResult
+         );
 }
 
 // Path to the BP image on the load volume (typically \ValidationOS.wim on
