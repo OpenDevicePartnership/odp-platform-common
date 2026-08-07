@@ -85,6 +85,20 @@ pub enum Command {
     Rtc(RtcCommand),
     #[command(subcommand)]
     Script(ScriptCommand),
+    /// Evaluate a raw ACPI method (Windows `--source acpi` only).
+    #[cfg(target_os = "windows")]
+    Eval(EvalCommand),
+}
+
+/// Raw ACPI method evaluation arguments.
+#[cfg(target_os = "windows")]
+#[derive(clap::Args)]
+pub struct EvalCommand {
+    /// ACPI method path, e.g. `\_SB.ECT0.TFST`.
+    pub method: String,
+    /// Method arguments: integers (`1`, `0x3`), GUIDs (`{...}`), or strings (`'text'`).
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<String>,
 }
 
 #[derive(Subcommand)]

@@ -25,5 +25,9 @@ time-alarm-service-interface.workspace = true
 battery-service-interface.workspace = true
 embassy-time.workspace = true
 
+# Only the Windows-only `eval` command parses GUID arguments.
+[target.'cfg(windows)'.dependencies]
+uuid = { version = "1.17.0", default-features = false }
+
 [lints]
 workspace = true
