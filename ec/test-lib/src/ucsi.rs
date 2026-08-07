@@ -52,7 +52,13 @@ pub fn control(command: CommandType, connector: u8) -> [u8; CONTROL_LEN] {
 pub(crate) fn normalize_acpi_response(bytes: &[u8]) -> Result<&[u8], MailboxError> {
     match bytes.len() {
         MAILBOX_LEN => Ok(bytes),
-        FFA_ENVELOPE_LEN => Ok(&bytes[FFA_PAYLOAD_OFFSET..FFA_PAYLOAD_OFFSET + MAILBOX_LEN]),
+        FFA_ENVELOPE_LEN => {
+            let status = u64::from_le_bytes(bytes[..8].try_into().expect("8-byte FF-A status"));
+            if status != 0 {
+                return Err(MailboxError::FfaStatus(status));
+            }
+            Ok(&bytes[FFA_PAYLOAD_OFFSET..FFA_PAYLOAD_OFFSET + MAILBOX_LEN])
+        }
         length => Err(MailboxError::WrongLength(length)),
     }
 }
@@ -72,6 +78,8 @@ impl fmt::Display for UcsiVersion {
 pub enum MailboxError {
     /// The mailbox buffer was not exactly 48 bytes.
     WrongLength(usize),
+    /// The FF-A fixed-hardware envelope reported a transport error.
+    FfaStatus(u64),
     /// The VERSION field did not match a supported UCSI version.
     UnsupportedVersion(u16),
     /// CCI did not report command-complete.
@@ -95,6 +103,7 @@ impl fmt::Display for MailboxError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::WrongLength(n) => write!(f, "mailbox length {n} bytes, expected 48"),
+            Self::FfaStatus(status) => write!(f, "FF-A transport status {status:#018x}"),
             Self::UnsupportedVersion(v) => write!(f, "unsupported UCSI version {v:#06x}"),
             Self::NotComplete => write!(f, "CCI did not report command complete"),
             Self::CommandError => write!(f, "CCI reported command error"),
@@ -220,6 +229,17 @@ mod tests {
         envelope[FFA_PAYLOAD_OFFSET..FFA_PAYLOAD_OFFSET + MAILBOX_LEN].copy_from_slice(&mailbox);
 
         assert_eq!(normalize_acpi_response(&envelope).unwrap(), mailbox);
+    }
+
+    #[test]
+    fn rejects_failed_ffa_envelope() {
+        let mut envelope = [0u8; FFA_ENVELOPE_LEN];
+        envelope[..8].copy_from_slice(&5u64.to_le_bytes());
+
+        assert_eq!(
+            normalize_acpi_response(&envelope).unwrap_err(),
+            MailboxError::FfaStatus(5)
+        );
     }
 
     #[test]
