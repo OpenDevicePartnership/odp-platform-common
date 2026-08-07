@@ -212,6 +212,8 @@ pub enum AcpiValue {
     Buffer(Vec<u8>),
     /// Package of nested values.
     Package(Vec<AcpiValue>),
+    /// Trailing bytes that could not be parsed as an argument.
+    Malformed(Vec<u8>),
 }
 
 impl std::fmt::Display for AcpiValue {
@@ -233,6 +235,13 @@ impl std::fmt::Display for AcpiValue {
                 }
                 Ok(())
             }
+            Self::Malformed(b) => {
+                write!(f, "Malformed trailing data ({} bytes):", b.len())?;
+                for byte in b {
+                    write!(f, " {byte:02X}")?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -241,15 +250,21 @@ impl std::fmt::Display for AcpiValue {
 fn parse_acpi_values(bytes: &[u8]) -> Vec<AcpiValue> {
     let mut values = Vec::new();
     let mut offset = 0;
-    while offset + 4 <= bytes.len() {
-        let type_ = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
-        let data_length = u16::from_le_bytes([bytes[offset + 2], bytes[offset + 3]]) as usize;
-        offset += 4;
-        if offset + data_length > bytes.len() {
+    while offset < bytes.len() {
+        let header = bytes.get(offset..offset + 4);
+        let body = header.and_then(|h| {
+            let data_length = u16::from_le_bytes([h[2], h[3]]) as usize;
+            bytes.get(offset + 4..offset + 4 + data_length)
+        });
+
+        // Surface a short header or an overrunning length rather than dropping the remainder.
+        let (Some(header), Some(body)) = (header, body) else {
+            values.push(AcpiValue::Malformed(bytes[offset..].to_vec()));
             break;
-        }
-        values.push(acpi_value_from(type_, &bytes[offset..offset + data_length]));
-        offset += data_length;
+        };
+
+        values.push(acpi_value_from(u16::from_le_bytes([header[0], header[1]]), body));
+        offset += 4 + body.len();
     }
     values
 }
