@@ -3,7 +3,7 @@
 //! SPDX-License-Identifier: MIT
 //!
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(name = "ec-test-cli", about = "CLI tool for EC feature testing")]
@@ -92,7 +92,7 @@ pub enum Command {
 
 /// Raw ACPI method evaluation arguments.
 #[cfg(target_os = "windows")]
-#[derive(Args)]
+#[derive(clap::Args)]
 pub struct EvalCommand {
     /// ACPI method path, e.g. `\_SB.ECT0.TFST`.
     pub method: String,
