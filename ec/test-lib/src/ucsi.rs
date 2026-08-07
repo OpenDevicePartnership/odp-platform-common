@@ -28,6 +28,10 @@ pub type UcsiConnectorStatus = get_connector_status::ResponseData;
 pub const CONTROL_LEN: usize = 8;
 
 const MAILBOX_LEN: usize = 48;
+#[cfg(any(target_os = "windows", test))]
+const FFA_ENVELOPE_LEN: usize = 144;
+#[cfg(any(target_os = "windows", test))]
+const FFA_PAYLOAD_OFFSET: usize = 32;
 const UCSI_VERSION_1_2: u16 = 0x0120;
 const MESSAGE_IN_OFFSET: usize = 16;
 
@@ -40,6 +44,17 @@ pub fn control(command: CommandType, connector: u8) -> [u8; CONTROL_LEN] {
     buf[0] = command as u8;
     buf[2] = connector;
     buf
+}
+
+/// Normalize either a direct mailbox or the full FF-A envelope returned by
+/// the Windows fixed-hardware operation region.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn normalize_acpi_response(bytes: &[u8]) -> Result<&[u8], MailboxError> {
+    match bytes.len() {
+        MAILBOX_LEN => Ok(bytes),
+        FFA_ENVELOPE_LEN => Ok(&bytes[FFA_PAYLOAD_OFFSET..FFA_PAYLOAD_OFFSET + MAILBOX_LEN]),
+        length => Err(MailboxError::WrongLength(length)),
+    }
 }
 
 /// UCSI interface version (BCD; `0x0120` == UCSI 1.2).
@@ -194,6 +209,17 @@ mod tests {
     #[test]
     fn rejects_wrong_length() {
         assert_eq!(decode_version(&[0u8; 47]).unwrap_err(), MailboxError::WrongLength(47));
+    }
+
+    #[test]
+    fn normalizes_full_ffa_envelope() {
+        const FFA_ENVELOPE_LEN: usize = 144;
+        const FFA_PAYLOAD_OFFSET: usize = 32;
+        let mailbox = mailbox(cci_complete(16), &[]);
+        let mut envelope = [0u8; FFA_ENVELOPE_LEN];
+        envelope[FFA_PAYLOAD_OFFSET..FFA_PAYLOAD_OFFSET + MAILBOX_LEN].copy_from_slice(&mailbox);
+
+        assert_eq!(normalize_acpi_response(&envelope).unwrap(), mailbox);
     }
 
     #[test]
