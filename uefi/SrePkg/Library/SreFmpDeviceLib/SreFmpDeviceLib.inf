@@ -38,7 +38,7 @@
   UefiRuntimeServicesTableLib
 
 [Guids]
-  gOdpPkgTokenSpaceGuid                   ## CONSUMES
+  gSrePkgTokenSpaceGuid                   ## CONSUMES
 
 [Pcd]
   gFmpDevicePkgTokenSpaceGuid.PcdFmpDeviceBuildTimeLowestSupportedVersion    ## CONSUMES

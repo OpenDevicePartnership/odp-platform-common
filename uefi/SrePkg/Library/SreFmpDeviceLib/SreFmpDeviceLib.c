@@ -613,7 +613,7 @@ FmpDeviceSetImageWithStatus (
   LasData.LastAttemptVersion = CapsuleFwVersion;
   Status = gRT->SetVariable (
     SRE_FMP_LAS_VARIABLE_NAME,
-    &gOdpPkgTokenSpaceGuid,
+    &gSrePkgTokenSpaceGuid,
     EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS,
     sizeof (LasData),
     &LasData);
