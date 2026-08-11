@@ -1,0 +1,965 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>patina_boot Microbenchmark Results - August 2026</title>
+  <style>
+    :root {
+      --bg: #07111f;
+      --panel: #0d1b2d;
+      --panel-2: #13243a;
+      --text: #f4f7fb;
+      --muted: #aab8ca;
+      --accent: #ff9d45;
+      --accent-2: #5ed3c4;
+      --accent-3: #80a9ff;
+      --danger: #ff6b78;
+      --line: #29415f;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+
+    body {
+      background:
+        radial-gradient(circle at 85% 10%, rgba(94, 211, 196, 0.11), transparent 30%),
+        radial-gradient(circle at 10% 90%, rgba(128, 169, 255, 0.12), transparent 35%),
+        var(--bg);
+    }
+
+    a {
+      color: var(--accent-2);
+    }
+
+    code {
+      color: #d9e5ff;
+      font-family: Consolas, "Courier New", monospace;
+    }
+
+    .deck {
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      display: none;
+      padding: 4.4vh 5vw 5.5vh;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.018), transparent 45%),
+        transparent;
+    }
+
+    .slide.active {
+      display: flex;
+      flex-direction: column;
+      animation: enter 180ms ease-out;
+    }
+
+    @keyframes enter {
+      from {
+        opacity: 0;
+        transform: translateY(6px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-size: clamp(2.7rem, 5vw, 5.3rem);
+      line-height: 0.98;
+      margin: 0;
+      letter-spacing: -0.045em;
+      max-width: 13ch;
+    }
+
+    h2 {
+      font-size: clamp(2rem, 3.2vw, 3.5rem);
+      line-height: 1.03;
+      letter-spacing: -0.035em;
+      margin: 0 0 1.4rem;
+    }
+
+    h3 {
+      margin: 0 0 0.7rem;
+      font-size: 1.25rem;
+      color: var(--accent-2);
+    }
+
+    p,
+    li {
+      font-size: clamp(1rem, 1.45vw, 1.5rem);
+      line-height: 1.45;
+    }
+
+    p {
+      margin: 0.45rem 0;
+    }
+
+    ul {
+      margin: 0.4rem 0;
+      padding-left: 1.35em;
+    }
+
+    li {
+      margin: 0.45rem 0;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: clamp(1.25rem, 2.15vw, 2.1rem);
+      max-width: 36ch;
+      margin-top: 1.5rem;
+    }
+
+    .title-layout {
+      display: grid;
+      grid-template-columns: 1.25fr 0.75fr;
+      gap: 5vw;
+      flex: 1;
+      align-items: center;
+    }
+
+    .title-mark {
+      width: min(34vw, 430px);
+      aspect-ratio: 1;
+      border-radius: 50%;
+      position: relative;
+      margin: auto;
+      border: 2px solid rgba(94, 211, 196, 0.35);
+      box-shadow:
+        0 0 0 32px rgba(94, 211, 196, 0.045),
+        0 0 0 64px rgba(128, 169, 255, 0.025);
+    }
+
+    .title-mark::before,
+    .title-mark::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      inset: 17%;
+      border: 18px solid var(--accent);
+      border-right-color: transparent;
+      transform: rotate(-28deg);
+    }
+
+    .title-mark::after {
+      inset: 38%;
+      border-width: 10px;
+      border-color: var(--accent-2);
+      border-left-color: transparent;
+      transform: rotate(42deg);
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.8rem 1.6rem;
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-top: 2rem;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.2rem;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+    }
+
+    .cards-4 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .card,
+    .panel {
+      background: linear-gradient(145deg, rgba(19, 36, 58, 0.96), rgba(13, 27, 45, 0.96));
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .card {
+      padding: 1.15rem 1.25rem;
+      min-height: 132px;
+    }
+
+    .card .value {
+      display: block;
+      font-size: clamp(1.8rem, 3vw, 3.1rem);
+      line-height: 1;
+      color: var(--accent);
+      font-weight: 750;
+      letter-spacing: -0.04em;
+    }
+
+    .card .label {
+      display: block;
+      margin-top: 0.65rem;
+      color: var(--muted);
+      font-size: 0.95rem;
+      line-height: 1.3;
+    }
+
+    .panel {
+      padding: 1.2rem 1.35rem;
+      min-height: 0;
+    }
+
+    .callout {
+      border-left: 5px solid var(--accent);
+      background: rgba(255, 157, 69, 0.08);
+      padding: 1rem 1.3rem;
+      border-radius: 8px 16px 16px 8px;
+      font-size: clamp(1.1rem, 1.6vw, 1.55rem);
+      line-height: 1.4;
+    }
+
+    .callout.danger {
+      border-left-color: var(--danger);
+      background: rgba(255, 107, 120, 0.09);
+    }
+
+    .kicker {
+      color: var(--muted);
+      font-size: 1rem;
+      margin-top: -0.7rem;
+      margin-bottom: 1rem;
+    }
+
+    .chart-wrap {
+      display: grid;
+      grid-template-columns: minmax(0, 1.6fr) minmax(260px, 0.7fr);
+      gap: 1.1rem;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .chart-panel {
+      background: rgba(13, 27, 45, 0.9);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 0.65rem;
+      min-height: 0;
+    }
+
+    svg.chart {
+      width: 100%;
+      height: 100%;
+      min-height: 380px;
+      display: block;
+    }
+
+    .result-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+
+    .result-table th,
+    .result-table td {
+      padding: 0.72rem 0.55rem;
+      border-bottom: 1px solid var(--line);
+      text-align: right;
+    }
+
+    .result-table th:first-child,
+    .result-table td:first-child {
+      text-align: left;
+    }
+
+    .result-table th {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .result-table .headline {
+      color: var(--accent);
+      font-weight: 750;
+    }
+
+    .metric-list {
+      display: grid;
+      gap: 0.65rem;
+      margin-top: 1rem;
+    }
+
+    .metric {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 1rem;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 0.6rem;
+    }
+
+    .metric span:first-child {
+      color: var(--muted);
+    }
+
+    .metric strong {
+      color: var(--accent-2);
+      font-size: 1.1rem;
+    }
+
+    .tag {
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0.35rem 0.7rem;
+      margin: 0.25rem 0.2rem 0.25rem 0;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.03);
+      font-size: 0.88rem;
+    }
+
+    .good {
+      color: var(--accent-2);
+    }
+
+    .bad {
+      color: var(--danger);
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin-top: 1.2rem;
+    }
+
+    .step {
+      padding: 1rem;
+      border-top: 4px solid var(--accent-3);
+      background: rgba(19, 36, 58, 0.8);
+      border-radius: 0 0 14px 14px;
+    }
+
+    .step .num {
+      color: var(--accent-3);
+      font-size: 1.7rem;
+      font-weight: 750;
+    }
+
+    .step p {
+      font-size: 1rem;
+      color: var(--muted);
+    }
+
+    .source-list {
+      font-size: 1rem;
+      line-height: 1.65;
+    }
+
+    .footer {
+      position: absolute;
+      left: 5vw;
+      right: 5vw;
+      bottom: 1.6vh;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: #7f91a8;
+      font-size: 0.85rem;
+    }
+
+    .progress {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      z-index: 20;
+    }
+
+    .progress > span {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width 160ms ease-out;
+    }
+
+    .help {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      padding: 0.45rem 0.7rem;
+      border-radius: 10px;
+      color: #8495aa;
+      background: rgba(7, 17, 31, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 0.8rem;
+      z-index: 30;
+    }
+
+    .notes {
+      display: none;
+      position: fixed;
+      left: 2vw;
+      right: 2vw;
+      bottom: 3vh;
+      max-height: 30vh;
+      overflow: auto;
+      padding: 1rem 1.2rem;
+      color: #dce6f5;
+      background: rgba(3, 8, 15, 0.96);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      z-index: 40;
+      box-shadow: var(--shadow);
+    }
+
+    .notes.visible {
+      display: block;
+    }
+
+    .notes p {
+      font-size: 1rem;
+    }
+
+    aside.presenter-notes {
+      display: none;
+    }
+
+    @media (max-width: 900px) {
+      .title-layout,
+      .grid-2,
+      .chart-wrap {
+        grid-template-columns: 1fr;
+      }
+
+      .title-mark {
+        display: none;
+      }
+
+      .cards-4 {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .timeline {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .slide {
+        overflow: auto;
+      }
+    }
+
+    @media print {
+      @page {
+        size: 13.333in 7.5in;
+        margin: 0;
+      }
+
+      html,
+      body {
+        overflow: visible;
+        background: var(--bg);
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+      }
+
+      .deck {
+        height: auto;
+      }
+
+      .slide,
+      .slide.active {
+        position: relative;
+        display: flex;
+        width: 13.333in;
+        height: 7.5in;
+        page-break-after: always;
+        animation: none;
+      }
+
+      .help,
+      .progress,
+      .notes {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck" id="deck">
+    <section class="slide active">
+      <div class="title-layout">
+        <div>
+          <div class="eyebrow">Boot Manager Modernization</div>
+          <h1><code>patina_boot</code> microbenchmark results</h1>
+          <p class="subtitle">What the cycle data says, what it does not, and what we need before performance gating.</p>
+          <div class="meta">
+            <span>August 11, 2026</span>
+            <span>Issue #183</span>
+            <span>Source: PR #160 / commit 7a7b5e3</span>
+          </div>
+        </div>
+        <div class="title-mark" aria-hidden="true"></div>
+      </div>
+      <aside class="presenter-notes">
+        <p>Open with the distinction between engineering characterization and a product performance claim.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Executive readout</div>
+      <h2>Predictable scaling; unstable baseline</h2>
+      <div class="cards-4">
+        <div class="card">
+          <span class="value">141 Kcyc</span>
+          <span class="label"><code>connect_all</code> at 512 handles, three-run median</span>
+        </div>
+        <div class="card">
+          <span class="value">240 Kcyc</span>
+          <span class="label"><code>expand_device_path</code> at 512 handles, three-run median</span>
+        </div>
+        <div class="card">
+          <span class="value">&gt;0.998</span>
+          <span class="label">Linear-fit R-squared for both helpers</span>
+        </div>
+        <div class="card">
+          <span class="value">6 / 8</span>
+          <span class="label">Cases with more than 10% same-host observed range</span>
+        </div>
+      </div>
+      <div class="callout danger">
+        The algorithms scale cleanly with topology size, but the current cycle harness is not stable enough for a 10% CI regression gate.
+      </div>
+      <aside class="presenter-notes">
+        <p>The headline is not "fast" or "slow." The headline is that scaling is understood, while repeatability is the next engineering constraint.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Method</div>
+      <h2>Hardware-free, synthetic, worst-case where it matters</h2>
+      <div class="grid-2">
+        <div class="panel">
+          <h3><code>connect_all</code></h3>
+          <ul>
+            <li>Topologies: 1, 16, 128, and 512 synthetic handles.</li>
+            <li>First pass connects every handle once.</li>
+            <li>Second pass confirms that no new handles were created.</li>
+            <li>Includes handle enumeration and <code>BTreeSet</code> tracking.</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <h3><code>expand_device_path</code></h3>
+          <ul>
+            <li>Topologies: 1, 16, 128, and 512 synthetic device paths.</li>
+            <li>Every handle publishes a valid GPT device path.</li>
+            <li>The matching partition is deliberately last.</li>
+            <li>Measures a full worst-case topology scan and path splice.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="meta">
+        <span>Criterion 0.5</span>
+        <span>Custom <code>rdtsc</code> cycle measurement</span>
+        <span>3 s warmup + 100 samples + approximately 5 s collection</span>
+      </div>
+      <aside class="presenter-notes">
+        <p>These are helper costs against mocks. They exclude real driver binding, storage I/O, firmware services, and platform boot policy.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Result 1</div>
+      <h2><code>connect_all</code> scales linearly after fixed setup</h2>
+      <p class="kicker">Three identical-source, identical-lockfile runs on current main. Points are medians; error bars show observed min/max.</p>
+      <div class="chart-wrap">
+        <div class="chart-panel">
+          <svg class="chart" id="connect-chart" role="img" aria-label="connect_all cycle results"></svg>
+        </div>
+        <div class="panel">
+          <table class="result-table">
+            <thead>
+              <tr><th>Handles</th><th>Median</th><th>Cycles/handle</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>1</td><td>0.88 K</td><td>876</td></tr>
+              <tr><td>16</td><td>3.43 K</td><td>215</td></tr>
+              <tr><td>128</td><td>30.16 K</td><td>236</td></tr>
+              <tr><td>512</td><td class="headline">140.91 K</td><td>275</td></tr>
+            </tbody>
+          </table>
+          <div class="metric-list">
+            <div class="metric"><span>Linear slope</span><strong>277 cyc/handle</strong></div>
+            <div class="metric"><span>Linear fit</span><strong>R2 = 0.9985</strong></div>
+            <div class="metric"><span>512-handle range</span><strong>120-149 Kcyc</strong></div>
+          </div>
+        </div>
+      </div>
+      <aside class="presenter-notes">
+        <p>Per-handle cost settles in the low hundreds of cycles. The one-handle case is dominated by fixed Criterion and helper setup.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Result 2</div>
+      <h2><code>expand_device_path</code> is also linear in the worst case</h2>
+      <p class="kicker">The target partition is last, so each result includes a complete topology scan.</p>
+      <div class="chart-wrap">
+        <div class="chart-panel">
+          <svg class="chart" id="expand-chart" role="img" aria-label="expand_device_path cycle results"></svg>
+        </div>
+        <div class="panel">
+          <table class="result-table">
+            <thead>
+              <tr><th>Handles</th><th>Median</th><th>Cycles/handle</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>1</td><td>3.02 K</td><td>3,018</td></tr>
+              <tr><td>16</td><td>11.06 K</td><td>691</td></tr>
+              <tr><td>128</td><td>60.68 K</td><td>474</td></tr>
+              <tr><td>512</td><td class="headline">240.40 K</td><td>470</td></tr>
+            </tbody>
+          </table>
+          <div class="metric-list">
+            <div class="metric"><span>Linear slope</span><strong>464 cyc/handle</strong></div>
+            <div class="metric"><span>Linear fit</span><strong>R2 = 0.9999</strong></div>
+            <div class="metric"><span>512-handle range</span><strong>228-248 Kcyc</strong></div>
+          </div>
+        </div>
+      </div>
+      <aside class="presenter-notes">
+        <p>At large N, worst-case expansion costs about 1.7 times the cycle count of connect_all on this host.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Interpretation</div>
+      <h2>The implementation shape is understandable</h2>
+      <div class="grid-3">
+        <div class="card">
+          <span class="value">1.7x</span>
+          <span class="label">Worst-case 512-handle expansion vs. 512-handle connect</span>
+        </div>
+        <div class="card">
+          <span class="value">277</span>
+          <span class="label">Median-fit cycles added per connect_all handle</span>
+        </div>
+        <div class="card">
+          <span class="value">464</span>
+          <span class="label">Median-fit cycles added per expand scan handle</span>
+        </div>
+      </div>
+      <div class="grid-2" style="margin-top: 1rem;">
+        <div class="panel">
+          <h3>What is encouraging</h3>
+          <ul>
+            <li>No super-linear growth appears through 512 handles.</li>
+            <li>Large-topology per-handle cost is stable in order of magnitude.</li>
+            <li>The harness catches early-return and fixture failures.</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <h3>What still dominates</h3>
+          <ul>
+            <li>Fixed overhead distorts tiny topologies.</li>
+            <li>Host scheduling and TSC measurement noise affect repeats.</li>
+            <li>Mocks omit real UEFI driver and protocol costs.</li>
+          </ul>
+        </div>
+      </div>
+      <aside class="presenter-notes">
+        <p>The slope is the most useful engineering result. Absolute single-run values should not be treated as contractual baselines.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Measurement quality</div>
+      <h2>Repeatability is below the epic's target</h2>
+      <div class="grid-2">
+        <div class="panel">
+          <h3>Observed range across three runs</h3>
+          <table class="result-table">
+            <thead><tr><th>Case</th><th>Range</th></tr></thead>
+            <tbody>
+              <tr><td>connect / 1</td><td class="bad">29.7%</td></tr>
+              <tr><td>connect / 16</td><td class="bad">28.9%</td></tr>
+              <tr><td>connect / 128</td><td class="bad">21.1%</td></tr>
+              <tr><td>connect / 512</td><td class="bad">20.5%</td></tr>
+              <tr><td>expand / 1</td><td class="bad">33.6%</td></tr>
+              <tr><td>expand / 16</td><td class="good">5.8%</td></tr>
+              <tr><td>expand / 128</td><td class="bad">26.9%</td></tr>
+              <tr><td>expand / 512</td><td class="good">8.0%</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="panel">
+          <h3>Before a 10% CI gate</h3>
+          <ul>
+            <li>Serialize timestamp reads with fences or <code>rdtscp</code>.</li>
+            <li>Pin CPU affinity and process priority.</li>
+            <li>Run on an isolated, fixed-power host.</li>
+            <li>Commit or otherwise pin the benchmark dependency lock.</li>
+            <li>Store multi-run distributions, not a single point baseline.</li>
+          </ul>
+          <div class="callout danger">
+            The #108 "within 5%" reproducibility criterion is not met yet.
+          </div>
+        </div>
+      </div>
+      <aside class="presenter-notes">
+        <p>This is not a failure of the algorithms. It is evidence that measurement hardening must precede regression enforcement.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Claim boundary</div>
+      <h2>What we can and cannot say today</h2>
+      <div class="grid-2">
+        <div class="panel">
+          <h3 class="good">Supported</h3>
+          <ul>
+            <li>The merged harness runs without firmware hardware.</li>
+            <li>Both helper costs grow approximately linearly with topology size.</li>
+            <li>Large-topology primitive costs are in the low hundreds of thousands of reference cycles.</li>
+            <li>We now have a concrete path to automated performance visibility.</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <h3 class="bad">Not supported yet</h3>
+          <ul>
+            <li>"Patina is X% faster than C BdsDxe."</li>
+            <li>A total <code>BootOrchestrator::execute()</code> cycle number.</li>
+            <li>A platform boot-time improvement claim.</li>
+            <li>A reliable 10% per-PR regression gate.</li>
+          </ul>
+        </div>
+      </div>
+      <aside class="presenter-notes">
+        <p>Use this slide to prevent the microbenchmarks from being quoted as end-to-end boot performance.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Roadmap</div>
+      <h2>From helper data to a credible headline</h2>
+      <div class="timeline">
+        <div class="step">
+          <div class="num">1</div>
+          <h3>Harden cycles</h3>
+          <p>Serialize TSC reads, pin the host, and demonstrate less than 5% repeatability.</p>
+        </div>
+        <div class="step">
+          <div class="num">2</div>
+          <h3>Measure execute</h3>
+          <p>Unblock #124 with a <code>StandardBootServices</code> test factory.</p>
+        </div>
+        <div class="step">
+          <div class="num">3</div>
+          <h3>Add QEMU / FPDT</h3>
+          <p>Land #118 and #119 for end-to-end BDS timing.</p>
+        </div>
+        <div class="step">
+          <div class="num">4</div>
+          <h3>Gate and compare</h3>
+          <p>Enable #120/#122/#123, then add the C baseline and OEM-facing claim.</p>
+        </div>
+      </div>
+      <div class="callout" style="margin-top: 1.2rem;">
+        Recommendation: treat the current numbers as engineering characterization, then fund measurement hardening and the execute() factory as the next two deliverables.
+      </div>
+      <aside class="presenter-notes">
+        <p>Connect this roadmap back to the remaining #108 child issues and the Boot Manager Modernization project plan.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Reproduce and discuss</div>
+      <h2>Data, command, and work items</h2>
+      <div class="grid-2">
+        <div class="panel">
+          <h3>Reproduction command</h3>
+          <p><code>cd uefi/crates/patina_boot</code></p>
+          <p><code>cargo bench --bench connect_all --bench expand_device_path -- --noplot</code></p>
+          <p style="margin-top: 1rem;">Host used for this report:</p>
+          <div>
+            <span class="tag">x86_64 workstation</span>
+            <span class="tag">8 cores / 16 logical</span>
+            <span class="tag">Windows 11 build 26220</span>
+            <span class="tag">rustc 1.90.0</span>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>Sources</h3>
+          <div class="source-list">
+            <div><a href="https://github.com/OpenDevicePartnership/odp-platform-common/issues/108">#108 Measurement Harness</a></div>
+            <div><a href="https://github.com/OpenDevicePartnership/odp-platform-common/pull/160">PR #160 merged cycle benchmarks</a></div>
+            <div><a href="https://github.com/OpenDevicePartnership/odp-platform-common/issues/116">#116 connect_all</a></div>
+            <div><a href="https://github.com/OpenDevicePartnership/odp-platform-common/issues/117">#117 expand_device_path</a></div>
+            <div><a href="https://github.com/OpenDevicePartnership/odp-platform-common/issues/124">#124 execute() follow-up</a></div>
+            <div><a href="https://github.com/OpenDevicePartnership/odp-platform-common/issues/183">#183 presentation task</a></div>
+            <div><a href="benchmark-results-2026-08.csv">Raw presentation CSV</a></div>
+          </div>
+        </div>
+      </div>
+      <div class="callout" style="margin-top: 1rem;">
+        Discussion: approve the claim boundary and prioritize measurement stability before enabling the regression gate.
+      </div>
+      <aside class="presenter-notes">
+        <p>End on a decision: characterize now, harden next, compare only after execute and QEMU baselines exist.</p>
+      </aside>
+    </section>
+
+    <div class="footer">
+      <span>Open Device Partnership - Boot Manager Modernization</span>
+      <span id="counter">1 / 10</span>
+    </div>
+  </main>
+
+  <div class="help">Arrow keys / Space: navigate &nbsp; N: notes &nbsp; P: print</div>
+  <div class="progress"><span id="progress-bar"></span></div>
+  <div class="notes" id="notes"></div>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const counter = document.getElementById("counter");
+    const progressBar = document.getElementById("progress-bar");
+    const notes = document.getElementById("notes");
+    let index = 0;
+
+    function showSlide(next) {
+      index = Math.max(0, Math.min(slides.length - 1, next));
+      slides.forEach((slide, i) => slide.classList.toggle("active", i === index));
+      counter.textContent = `${index + 1} / ${slides.length}`;
+      progressBar.style.width = `${((index + 1) / slides.length) * 100}%`;
+      const source = slides[index].querySelector(".presenter-notes");
+      notes.innerHTML = source ? source.innerHTML : "<p>No presenter notes for this slide.</p>";
+    }
+
+    document.addEventListener("keydown", (event) => {
+      if (["ArrowRight", "ArrowDown", "PageDown", " "].includes(event.key)) {
+        event.preventDefault();
+        showSlide(index + 1);
+      } else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(event.key)) {
+        event.preventDefault();
+        showSlide(index - 1);
+      } else if (event.key === "Home") {
+        showSlide(0);
+      } else if (event.key === "End") {
+        showSlide(slides.length - 1);
+      } else if (event.key.toLowerCase() === "n") {
+        notes.classList.toggle("visible");
+      } else if (event.key.toLowerCase() === "p") {
+        window.print();
+      }
+    });
+
+    function formatCycles(value) {
+      if (value >= 1000) {
+        return `${Math.round(value / 1000)}K`;
+      }
+      return `${Math.round(value)}`;
+    }
+
+    function drawChart(id, data, color) {
+      const svg = document.getElementById(id);
+      const width = 900;
+      const height = 470;
+      const margin = { left: 78, right: 42, top: 30, bottom: 58 };
+      const plotWidth = width - margin.left - margin.right;
+      const plotHeight = height - margin.top - margin.bottom;
+      const maxX = 512;
+      const maxY = Math.max(...data.map((point) => point.max)) * 1.08;
+
+      const x = (value) => margin.left + (value / maxX) * plotWidth;
+      const y = (value) => margin.top + plotHeight - (value / maxY) * plotHeight;
+
+      const parts = [];
+      parts.push(`<rect x="0" y="0" width="${width}" height="${height}" rx="14" fill="#0d1b2d"/>`);
+
+      for (let i = 0; i <= 4; i += 1) {
+        const value = (maxY / 4) * i;
+        const yy = y(value);
+        parts.push(`<line x1="${margin.left}" y1="${yy}" x2="${width - margin.right}" y2="${yy}" stroke="#29415f" stroke-width="1"/>`);
+        parts.push(`<text x="${margin.left - 12}" y="${yy + 5}" text-anchor="end" fill="#8fa0b6" font-size="15">${formatCycles(value)}</text>`);
+      }
+
+      [0, 128, 256, 384, 512].forEach((value) => {
+        const xx = x(value);
+        parts.push(`<line x1="${xx}" y1="${margin.top}" x2="${xx}" y2="${height - margin.bottom}" stroke="#1a3049" stroke-width="1"/>`);
+        parts.push(`<text x="${xx}" y="${height - 22}" text-anchor="middle" fill="#8fa0b6" font-size="15">${value}</text>`);
+      });
+
+      const line = data.map((point) => `${x(point.n)},${y(point.median)}`).join(" ");
+      parts.push(`<polyline points="${line}" fill="none" stroke="${color}" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>`);
+
+      data.forEach((point) => {
+        const xx = x(point.n);
+        const yMin = y(point.min);
+        const yMax = y(point.max);
+        const yMedian = y(point.median);
+        parts.push(`<line x1="${xx}" y1="${yMin}" x2="${xx}" y2="${yMax}" stroke="#f4f7fb" stroke-width="2"/>`);
+        parts.push(`<line x1="${xx - 7}" y1="${yMin}" x2="${xx + 7}" y2="${yMin}" stroke="#f4f7fb" stroke-width="2"/>`);
+        parts.push(`<line x1="${xx - 7}" y1="${yMax}" x2="${xx + 7}" y2="${yMax}" stroke="#f4f7fb" stroke-width="2"/>`);
+        parts.push(`<circle cx="${xx}" cy="${yMedian}" r="8" fill="${color}" stroke="#07111f" stroke-width="3"/>`);
+        parts.push(`<text x="${xx}" y="${yMedian - 15}" text-anchor="middle" fill="#f4f7fb" font-size="15" font-weight="700">${formatCycles(point.median)}</text>`);
+      });
+
+      parts.push(`<text x="${margin.left + plotWidth / 2}" y="${height - 2}" text-anchor="middle" fill="#aab8ca" font-size="16">synthetic handles</text>`);
+      parts.push(`<text x="18" y="${margin.top + plotHeight / 2}" text-anchor="middle" fill="#aab8ca" font-size="16" transform="rotate(-90 18 ${margin.top + plotHeight / 2})">reference cycles</text>`);
+      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      svg.innerHTML = parts.join("");
+    }
+
+    drawChart("connect-chart", [
+      { n: 1, median: 876.139, min: 683.352, max: 943.392 },
+      { n: 16, median: 3432.844, min: 3379.990, max: 4370.706 },
+      { n: 128, median: 30162.872, min: 27655.106, max: 34008.967 },
+      { n: 512, median: 140912.405, min: 119708.091, max: 148613.740 }
+    ], "#ff9d45");
+
+    drawChart("expand-chart", [
+      { n: 1, median: 3017.712, min: 2753.990, max: 3767.595 },
+      { n: 16, median: 11057.702, min: 10488.718, max: 11130.430 },
+      { n: 128, median: 60679.963, min: 56423.735, max: 72752.141 },
+      { n: 512, median: 240402.370, min: 228471.458, max: 247722.584 }
+    ], "#5ed3c4");
+
+    showSlide(0);
+  </script>
+</body>
+</html>

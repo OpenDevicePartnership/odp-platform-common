@@ -33,3 +33,8 @@ For custom boot flows, use the helper functions in the `helpers` module:
 - `signal_ready_to_boot()` - Signal ReadyToBoot event
 - `discover_console_devices()` - Populate console variables
 - `boot_from_device_path()` - Load and start a boot image
+
+## Performance
+
+- [August 2026 microbenchmark presentation](docs/benchmark-presentation-2026-08.html)
+- [Presentation benchmark data](docs/benchmark-results-2026-08.csv)
