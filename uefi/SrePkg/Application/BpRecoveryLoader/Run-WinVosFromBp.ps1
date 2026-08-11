@@ -39,11 +39,11 @@
   (e.g. "D"). If omitted, auto-selects the first removable FAT32 volume.
 
 .PARAMETER NvmeBpWriteEfi
-  Path to NvmeBpWrite.efi. Defaults to the latest build output under
-  Build\Msft900MaaPkg\DEBUG_VS2022.
+  Path to NvmeBpWrite.efi. Defaults to the newest matching x64 binary under
+  the repository's Build directory.
 
 .PARAMETER BpRecoveryLoaderEfi
-  Path to BpRecoveryLoader.efi. Same default location.
+  Path to BpRecoveryLoader.efi. Uses the same build-output discovery.
 
 .PARAMETER WorkDir
   Working directory for the intermediate FAT image. Default $env:TEMP.
@@ -76,11 +76,30 @@ $ErrorActionPreference = 'Stop'
 $RESULT_GUID = '{7B5A1F3E-2D8C-4A91-B6E3-D8F2C9A4E105}'
 $ESP_GPT_TYPE = '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}'
 
-function Resolve-Default {
-    param([string] $Hint, [string] $RelPath)
+function Resolve-DefaultEfi {
+    param([string] $Hint, [string] $FileName)
     if ($Hint) { return $Hint }
-    $devicesRoot = (Get-Item $PSScriptRoot).Parent.Parent.Parent.FullName
-    return Join-Path $devicesRoot $RelPath
+
+    $repoRoot = $PSScriptRoot
+    while ($repoRoot -and -not (Test-Path (Join-Path $repoRoot '.git'))) {
+        $parent = Split-Path $repoRoot -Parent
+        if ($parent -eq $repoRoot) { $repoRoot = $null; break }
+        $repoRoot = $parent
+    }
+    if (-not $repoRoot) {
+        throw "Repository root not found. Pass -$($FileName -replace '\.efi$')Efi explicitly."
+    }
+
+    $buildRoot = Join-Path $repoRoot 'Build'
+    if (Test-Path $buildRoot) {
+        $candidate = Get-ChildItem -Path $buildRoot -Filter $FileName -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '[\\/]X64[\\/]' } |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+        if ($candidate) { return $candidate.FullName }
+    }
+
+    return Join-Path $buildRoot $FileName
 }
 
 if (-not $DutCredential) {
@@ -90,10 +109,8 @@ if (-not $DutCredential) {
 
 if (-not (Test-Path $WimFile)) { throw "WimFile not found: $WimFile" }
 
-$NvmeBpWriteEfi = Resolve-Default $NvmeBpWriteEfi `
-    'Build\Msft900MaaPkg\DEBUG_VS2022\X64\MsSurfaceIntelPkg\Application\NvmeBpWrite\NvmeBpWrite\OUTPUT\NvmeBpWrite.efi'
-$BpRecoveryLoaderEfi = Resolve-Default $BpRecoveryLoaderEfi `
-    'Build\Msft900MaaPkg\DEBUG_VS2022\X64\MsSurfaceIntelPkg\Application\BpRecoveryLoader\BpRecoveryLoader\OUTPUT\BpRecoveryLoader.efi'
+$NvmeBpWriteEfi = Resolve-DefaultEfi $NvmeBpWriteEfi 'NvmeBpWrite.efi'
+$BpRecoveryLoaderEfi = Resolve-DefaultEfi $BpRecoveryLoaderEfi 'BpRecoveryLoader.efi'
 
 foreach ($p in @($NvmeBpWriteEfi, $BpRecoveryLoaderEfi)) {
     if (-not (Test-Path $p)) { throw "Required EFI not found: $p (build the platform first, or pass an override)" }

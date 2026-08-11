@@ -1,7 +1,7 @@
 # Flash a ValidationOS WIM into NVMe Boot Partition 1
 
 End-to-end procedure for writing a ValidationOS (WinVOS) WIM into the SSD's
-NVMe Boot Partition 1 (BP1) on a Surface Maa 900 unit using the
+NVMe Boot Partition 1 (BP1) on an x64 UEFI target using the
 `NvmeBpWrite.efi` UEFI application. This is the direct, manual flashing path
 — intended for bring-up, debugging, and one-off SRE WIM updates outside the
 `Run-WinVosFromBp.ps1` host orchestrator described in
@@ -51,7 +51,7 @@ platform `stuart_build` per the
 After a successful build, the binary lives at:
 
 ```
-Devices/Build/Msft900MaaPkg/DEBUG_VS2022/X64/NvmeBpWrite.efi
+<platform-repo>/Build/<PlatformPkg>/<build-profile>/X64/NvmeBpWrite.efi
 ```
 
 Use `NvmeBpWrite.efi`, **NOT** `NvmeBpWriteTest.efi` (same directory) — the
@@ -78,7 +78,7 @@ Each is also documented inline in the sections below.
 
 | Script | Where it runs | What it does |
 |---|---|---|
-| [`Stage-SreflashUsb.ps1`](./Stage-SreflashUsb.ps1) | workstation | Format-free staging: copies the tool, the WIM, and the three target-side helpers onto a removable FAT32 USB. Auto-detects `NvmeBpWrite.efi` in `<repo-root>/Build/Msft900MaaPkg/{DEBUG\|RELEASE}_VS2022/X64/`. Replaces Section 1. |
+| [`Stage-SreflashUsb.ps1`](./Stage-SreflashUsb.ps1) | workstation | Format-free staging: copies the tool, the WIM, and the three target-side helpers onto a removable FAT32 USB. Auto-detects the newest x64 `NvmeBpWrite.efi` under `<repo-root>/Build/`. Replaces Section 1. |
 | [`enable-remote.ps1`](./enable-remote.ps1) | target (once per Windows image) | Enables PSRemoting, widens the WinRM firewall to `Any` source, sets `LocalAccountTokenFilterPolicy`. Required if you want to drive the rest of the procedure over WinRM instead of at-keyboard. |
 | [`Reset-NvmeBpResult.ps1`](./Reset-NvmeBpResult.ps1) | target (local or via WinRM) | Clears the `NvmeBpResult` UEFI runtime variable via Win32 firmware API. Replaces the manual `SetFirmwareEnvironmentVariableExW` block in Section 5. |
 | [`Set-NextBootToUsb.ps1`](./Set-NextBootToUsb.ps1) | target (local or via WinRM) | Sets the firmware `BootNext` one-shot to the `SREFLASH` USB entry and reboots. Eliminates the Vol-Down hotkey dance — no on-device button timing required. |
@@ -148,10 +148,9 @@ Format-Volume -DriveLetter E -FileSystem FAT32 -NewFileSystemLabel SREFLASH -Con
 ./Stage-SreflashUsb.ps1 -WimPath <path-to-validationos.wim> -WrapWim
 ```
 
-`Stage-SreflashUsb.ps1` auto-detects the single removable FAT32 USB, the
-tool binary (in the sibling `Build/Msft900MaaPkg/{DEBUG|RELEASE}_VS2022/X64/`
-build output of the Devices repo, or via `-ToolPath`/`$env:SRE_NVMEBPWRITE_EFI`),
-and lays out:
+`Stage-SreflashUsb.ps1` auto-detects the single removable FAT32 USB and the
+newest x64 tool binary under the repository's `Build` directory (or uses
+`-ToolPath`/`$env:SRE_NVMEBPWRITE_EFI`), and lays out:
 
 ```
 <USB>:\EFI\Boot\BOOTX64.EFI       ← NvmeBpWrite.efi (firmware auto-executes)
@@ -184,9 +183,8 @@ name.
 
 ## Section 2 — Pre-flight on the target device (~2 min)
 
-1. Confirm the target is a **Maa 900 / SurfPtl** unit running a UEFI build
-   that includes the `NvmePassThru` protocol (any recent maa_900 image
-   qualifies).
+1. Confirm the target is an **x64 UEFI platform** running a build that
+   includes the `NvmePassThru` protocol.
 
 2. If the target has an existing WinVOS in BP1, this procedure **will
    overwrite it** — confirm this is what you want.
@@ -239,11 +237,11 @@ name.
    and reboots.
 
    **(b) Hotkey path (no Windows access required):** hold **Volume-Down**
-   while pressing the **power button**; keep holding Vol- until the Surface
+   while pressing the **power button**; keep holding Vol- until the firmware
    boot menu appears. Select **Boot from USB** (the entry showing `SREFLASH`
-   / `UEFI USB`). Note: on Maa 900 the SrePriorityBoot routing treats
-   **Vol-Down + USB present → USB-first alt boot**; **Vol-Up** triggers the
-   SRE flow that reads from BP1, which is **not** what we want here.
+   / `UEFI USB`). On the reference integration, `SrePriorityBoot` routes
+   **Vol-Down + USB present → USB-first alt boot**, while **Vol-Up** triggers
+   the SRE flow that reads from BP1, which is **not** what we want here.
 
 2. The screen blanks briefly, then `NvmeBpWrite` text output begins.
    Expected sequence:
@@ -337,8 +335,8 @@ will show `WRITE` and the procedure starts fresh from
 
 ### Fallback: reset firmware NVRAM
 
-If `SetFirmwareEnvironmentVariableExW` fails (Surface UEFI variable policy
-can reject deletes on some firmware revs), the last-resort path is the
+If `SetFirmwareEnvironmentVariableExW` fails (firmware variable policy can
+reject deletes on some revisions), the last-resort path is the
 firmware setup menu's "Reset to defaults". This clears all vendor NVRAM
 including `NvmeBpResult`, at the cost of losing other UEFI configuration.
 

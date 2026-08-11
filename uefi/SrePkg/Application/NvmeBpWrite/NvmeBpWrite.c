@@ -215,11 +215,9 @@ LogHexDump32 (
 //   0.2    =  Content-hash design (no NVRAM state; idempotent re-boots)
 //   0.2.1  =  Force-reflash flag (drop \force-reflash.flag on USB to skip the
 //             content check and re-WRITE even if BP1 already matches)
-//   0.2.2  =  No .efi behavior change vs 0.2.1; bump tracks the kit ship that
-//             includes x64 boot-x64/bootmgfw.efi + boot.sdi + arch guard in
-//             Stage-SreflashUsb.ps1 (fixes cross-arch FAT-wrap on non-x64
-//             staging hosts). Engineers reading the banner know which kit
-//             generation they're on even though the tool source is unchanged.
+//   0.2.2  =  No .efi behavior change vs 0.2.1; bump tracks the staging-script
+//             architecture guard and explicit x64 boot-file override used for
+//             cross-architecture FAT wrapping.
 //
 #define NVME_BP_WRITE_VERSION    "0.2.2"
 
@@ -249,7 +247,7 @@ LogHexDump32 (
 #define RUN_MODE_VERIFY  1
 #define RUN_MODE_NOOP    2
 
-// Custom vendor GUID for the NvmeBpResult variable. Surface UEFI variable
+// Custom vendor GUID for the NvmeBpResult variable. Some UEFI variable
 // services apply name/policy filters under EFI_GLOBAL_VARIABLE_GUID; using
 // a dedicated GUID sidesteps any restrictions on non-spec names.
 //   {7B5A1F3E-2D8C-4A91-B6E3-D8F2C9A4E105}
@@ -413,7 +411,7 @@ LoadWimIntoBuffer (
 
   EFI_HANDLE  LoadHandle = LoadedImage->DeviceHandle;
 
-  // Surface firmware only connects drivers for the boot-path device when
+  // Some firmware only connects drivers for the boot-path device when
   // launching a Firmware Application boot entry. USB / removable storage
   // controllers aren't bound by default, so their SimpleFileSystem handles
   // never appear in LocateHandleBuffer. Force-connect every handle to
@@ -967,8 +965,8 @@ SendDownloadBpCommit (
 
 //
 // Find the NVMe controller's PCI IO protocol by enumerating PCI IO handles
-// and matching class code 0x010802 (Mass Storage / NVM / NVMe). Surface
-// systems have a single NVMe controller, so the first match is the one.
+// and matching class code 0x010802 (Mass Storage / NVM / NVMe). The current
+// integration assumes one NVMe controller, so the first match is the one.
 //
 STATIC
 EFI_STATUS
@@ -1394,7 +1392,7 @@ WriteBpTestPattern (
   // BP re-lock is intentionally NOT done here. Lock/unlock is owned by
   // the FMP capsule update flow.
 
-  // Surface a non-zero NVMe completion as EFI_DEVICE_ERROR so the caller
+  // Return a non-zero NVMe completion as EFI_DEVICE_ERROR so the caller
   // doesn't advance to BP_PHASE_DONE on a failed write.
   EFI_STATUS  ReturnStatus = Status;
   if ((gResult.EndToEndSuccess == 0) && !EFI_ERROR (Status)) {

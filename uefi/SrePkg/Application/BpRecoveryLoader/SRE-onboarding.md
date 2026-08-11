@@ -1,4 +1,4 @@
-# SRE Boot on Surface OEM (Msft900Maa) — Onboarding
+# SRE Boot Path — Platform Onboarding
 
 End-to-end notes for getting a new engineer productive on the System Recovery
 Environment (SRE) boot path. Covers repo setup, building firmware, writing the
@@ -7,8 +7,8 @@ SRE WIM into the NVMe Boot Partition, and exercising the boot.
 ## Repos
 
 ```
-git clone <devices-internal-url> sre/Devices
-cd sre/Devices
+git clone <platform-repository-url> sre/platform
+cd sre/platform
 git checkout -b personal/<your-alias>/sre origin/main
 ```
 
@@ -17,41 +17,42 @@ feature branches to upstream.
 
 ## Build environment
 
-Windows + VS2022 only. The WSL build path is non-functional for this platform.
+Use the build host and toolchain required by the target platform. This example
+uses Windows and VS2022:
 
 ```
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r pip-requirements.txt
-stuart_setup  -c Platform/Surface/SurfPtl/Msft900MaaPkg/PlatformBuild.py TOOL_CHAIN_TAG=VS2022
-stuart_update -c Platform/Surface/SurfPtl/Msft900MaaPkg/PlatformBuild.py TOOL_CHAIN_TAG=VS2022
+$platformConfig = 'Platform/<Vendor>/<Silicon>/<PlatformPkg>/PlatformBuild.py'
+stuart_setup  -c $platformConfig TOOL_CHAIN_TAG=VS2022
+stuart_update -c $platformConfig TOOL_CHAIN_TAG=VS2022
 ```
 
 ## Build firmware
 
 ```
-stuart_build -c Platform/Surface/SurfPtl/Msft900MaaPkg/PlatformBuild.py \
-             TOOL_CHAIN_TAG=VS2022 PROFILE=DEV
+stuart_build -c $platformConfig TOOL_CHAIN_TAG=VS2022 PROFILE=DEV
 ```
 
 Output ROM:
-`Build/Msft900MaaPkg/DEBUG_VS2022/ROM/900_MAA-UEFI-<date>-<branch>-<sha>-<ver>.bin`
+`Build/<PlatformPkg>/DEBUG_VS2022/ROM/<firmware-image>.bin`
 
 Incremental builds typically 3–6 min after the first clean build (~30 min).
 
 ## Flash firmware
 
-Use the internal Surface flashing procedure (bench rig + USB → DUT). Ask
-the SRE team for the current playbook.
+Use the target platform's approved flashing procedure. Ask the platform team
+for the current playbook.
 
 ## Write the SRE WIM into NVMe Boot Partition 1
 
 Once per device (or when the WIM changes):
 
 ```
-pwsh ./MsSurfaceIntelPkg/Application/BpRecoveryLoader/Run-WinVosFromBp.ps1 `
-     -WimPath <path-to-validationos.wim> `
-     -DutAddress <dut-ip> `
+pwsh ./<path-to-SrePkg>/Application/BpRecoveryLoader/Run-WinVosFromBp.ps1 `
+     -WimFile <path-to-validationos.wim> `
+     -DutHost <dut-ip> `
      -DutCredential (Get-Credential)
 ```
 
@@ -78,26 +79,26 @@ nor any other in-tree code touches BPWPS.
 | Power on, no buttons held | Normal Windows boot |
 | Hold Vol+ while pressing Power | SRE flow: BP1 → RAM disk → bootmgfw → WinVOS |
 | Hold Vol- while pressing Power, USB plugged in | USB-first alt boot (Windows installer etc.) |
-| Hold Vol- while pressing Power, no USB | Surface FrontPage (firmware UI) |
+| Hold Vol- while pressing Power, no USB | Platform firmware UI |
 
-Total SRE boot time on Maa: ~5s end-to-end (~2s for BP read at the current
-1 MiB chunk size, plus RAM disk register + FAT mount + bootmgfw load).
+The reference integration measured ~5s end-to-end (~2s for BP read at the
+current 1 MiB chunk size, plus RAM disk register + FAT mount + bootmgfw load).
 
 ## Where the code lives
 
 | Component | Path |
 |---|---|
-| SRE hotkey routing (PCD-gated, BdsDxe-side) | `MsSurfaceIntelPkg/Library/DeviceBootManagerLib/DeviceBootManagerLib.c` — search for `SrePriorityBoot` |
-| SRE app (read BP → RAM disk → chainload bootx64.efi) | `MsSurfaceIntelPkg/Application/BpRecoveryLoader/BpRecoveryLoader.c` |
-| SRE app INF (FILE_GUID dispatched by priority-boot) | `MsSurfaceIntelPkg/Application/BpRecoveryLoader/BpRecoveryLoaderApp.inf` |
-| BP write tool (dev/bring-up) | `MsSurfaceIntelPkg/Application/NvmeBpWrite/NvmeBpWrite.c` |
-| ESP-based counterpart to BpRecoveryLoader | `MsSurfaceIntelPkg/Application/SreRecoveryLoader/SreRecoveryLoader.c` |
-| Feature flag + SRE app GUID PCD declarations | `MsSurfaceIntelPkg/MsSurfaceIntelPkg.dec` |
-| Platform opt-in (PCDs + FDF entry) | `Platform/Surface/SurfPtl/Msft900MaaPkg/Msft900MaaPkg.dsc`, `.fdf` |
-| Host orchestration script | `MsSurfaceIntelPkg/Application/BpRecoveryLoader/Run-WinVosFromBp.ps1` |
-| Host WIM-to-FAT script | `MsSurfaceIntelPkg/Application/BpRecoveryLoader/BuildBpFatImage.ps1` |
+| SRE hotkey routing (PCD-gated, BdsDxe-side) | `<PlatformPkg>/Library/DeviceBootManagerLib/DeviceBootManagerLib.c` — search for `SrePriorityBoot` |
+| SRE app (read BP → RAM disk → chainload bootx64.efi) | `SrePkg/Application/BpRecoveryLoader/BpRecoveryLoader.c` |
+| SRE app INF (FILE_GUID dispatched by priority-boot) | `SrePkg/Application/BpRecoveryLoader/BpRecoveryLoaderApp.inf` |
+| BP write tool (dev/bring-up) | `SrePkg/Application/NvmeBpWrite/NvmeBpWrite.c` |
+| ESP-based counterpart to BpRecoveryLoader | `<PlatformPkg>/Application/SreRecoveryLoader/SreRecoveryLoader.c` |
+| Feature flag + SRE app GUID PCD declarations | `SrePkg/SrePkg.dec` |
+| Platform opt-in (PCDs + FDF entry) | `<PlatformPkg>/<PlatformPkg>.dsc`, `.fdf` |
+| Host orchestration script | `SrePkg/Application/BpRecoveryLoader/Run-WinVosFromBp.ps1` |
+| Host WIM-to-FAT script | `SrePkg/Application/BpRecoveryLoader/BuildBpFatImage.ps1` |
 
-## Enabling on a new Intel Surface platform
+## Enabling on a new platform
 
 The SRE hotkey routing is FeaturePcd-gated, default off. To opt a new
 platform in:
@@ -115,8 +116,8 @@ platform in:
 And in `<YourPlatformPkg>.fdf [FV.DXE]`, include `RamDiskDxe` + your SRE app
 (or `BpRecoveryLoaderApp.inf` if you're reusing the same SRE app).
 
-Other Intel Surface platforms share the same `DeviceBootManagerLib` and will
-keep their legacy hotkey behavior because the PCD defaults to FALSE.
+Platforms that share the same `DeviceBootManagerLib` keep their existing
+hotkey behavior because the PCD defaults to FALSE.
 
 ## Serial capture (debugging)
 
@@ -146,6 +147,7 @@ that survives the reboot — readable from Windows for post-mortem.
 
 https://github.com/orgs/OpenDevicePartnership/projects/40/views/1
 
-C-track items proven on Maa are closed (see "(C-side, OEM)" suffix). The
-Patina-Rust port lives under the "Patina Port (Investigation)" milestone —
-parallel research track, not blocking the C-side ship.
+C-track items proven in the reference integration are closed (see
+"(C-side, OEM)" suffix). The Patina-Rust port lives under the "Patina Port
+(Investigation)" milestone — parallel research track, not blocking the C-side
+ship.

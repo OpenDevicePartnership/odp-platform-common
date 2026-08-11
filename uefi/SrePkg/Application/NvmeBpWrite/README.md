@@ -1,7 +1,7 @@
 # sre-bp-tools
 
 Kit for flashing a ValidationOS WIM into NVMe Boot Partition 1 (BP1) on a
-Surface Maa 900 unit and exercising the SRE recovery boot path.
+supported x64 UEFI target and exercising the SRE recovery boot path.
 
 Pre-1.0. Behavior, file layout, and command syntax may change.
 

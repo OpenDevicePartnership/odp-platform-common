@@ -4,10 +4,11 @@
 # Run elevated on the target (locally or via WinRM). Idempotent.
 #
 # Defaults to matching firmware boot entries whose description is exactly
-# "USB Storage" — the Surface firmware's generic description for the
+# "USB Storage" — the reference firmware's generic description for the
 # USB-first alt-boot entry (FAT32 volume labels and vendor strings are not
 # visible to the firmware boot manager). Override with -MatchPattern on
-# non-Surface targets. Use -DryRun to list matches without rebooting.
+# targets that use a different description. Use -DryRun to list matches
+# without rebooting.
 #
 # Examples:
 #   ./Set-NextBootToUsb.ps1                          # auto-match SREFLASH or UEFI USB, reboot
@@ -92,8 +93,8 @@ if ($LASTEXITCODE -ne 0) {
 if ($DelaySeconds -gt 0) { Start-Sleep -Seconds $DelaySeconds }
 
 # Use `shutdown /g` (graceful shutdown + restart) instead of `/r` (warm reboot).
-# `/r` leaves peripherals in their pre-reboot power state, which on Maa 900 has
-# tripped an `ASSERT(FALSE)` in the DEBUG-build LpssI2cDriver when a HID I2C
-# peripheral hadn't re-initialized cleanly. `/g` bypasses Fast Startup and
-# does a full cold-boot-equivalent power cycle of attached peripherals.
+# `/r` leaves peripherals in their pre-reboot power state, which can trip an
+# `ASSERT(FALSE)` in a DEBUG-build I2C driver when a HID peripheral has not
+# re-initialized cleanly. `/g` bypasses Fast Startup and does a full
+# cold-boot-equivalent power cycle of attached peripherals.
 shutdown /g /t 0

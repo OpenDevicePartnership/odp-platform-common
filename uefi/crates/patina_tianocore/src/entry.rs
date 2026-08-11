@@ -96,7 +96,7 @@ macro_rules! __driver_entry_shell {
         #[cfg(not(test))]
         #[panic_handler]
         fn panic(info: &core::panic::PanicInfo) -> ! {
-            // Surface the panic message before parking. By the time any
+            // Report the panic message before parking. By the time any
             // driver-execution panic occurs the logger is initialised by
             // `efi_main` above; pre-init panics fall through to the `log`
             // crate's no-op behaviour so this call is safe unconditionally.
