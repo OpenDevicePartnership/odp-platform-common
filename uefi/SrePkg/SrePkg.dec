@@ -16,8 +16,8 @@
 
 [Guids]
   
-  # ODP Package token space guid { 212D507B-7906-4CB3-B0C3-08E544E25C34 }
-  gOdpPkgTokenSpaceGuid = { 0x212d507b, 0x7906, 0x4cb3, { 0xb0, 0xc3, 0x8, 0xe5, 0x44, 0xe2, 0x5c, 0x34 } }
+  # SRE Package token space GUID { 212D507B-7906-4CB3-B0C3-08E544E25C34 }
+  gSrePkgTokenSpaceGuid = { 0x212d507b, 0x7906, 0x4cb3, { 0xb0, 0xc3, 0x8, 0xe5, 0x44, 0xe2, 0x5c, 0x34 } }
 
   # Staging UpdateImageTypeId carried by the WIM payload. No FmpDxe instance
   # claims it; it exists only so the peeler can identify the WIM and so stock
@@ -40,7 +40,7 @@
   # (mirrors the legacy AltBoot path, so the SRE WIM in BP1 survives Windows
   # reimages from a USB installer). Enable per-platform in the DSC alongside
   # PcdSreBootAppFileGuid.
-  gOdpPkgTokenSpaceGuid.PcdSreHotkeyRoutingEnabled|FALSE|BOOLEAN|0x40000300
+  gSrePkgTokenSpaceGuid.PcdSreHotkeyRoutingEnabled|FALSE|BOOLEAN|0x40000300
 
 [PcdsFixedAtBuild]
   
@@ -49,15 +49,15 @@
   # (treated as "no SRE app installed", priority-boot returns EFI_NOT_FOUND).
   # Enabling platforms must override this with their SRE app's INF FILE_GUID.
   # Default File GUID defined by SrePkg/Application/BpRecoveryLoader/BpRecoveryLoaderApp.inf
-  gOdpPkgTokenSpaceGuid.PcdSreBootAppFileGuid|{ 0xC1, 0xF2, 0x98, 0x5A, 0x3B, 0x7D, 0x8F, 0x4E, 0xA1, 0x24, 0xB6, 0xE8, 0x91, 0xD4, 0x5C, 0x03 }|VOID*|0x40000301
+  gSrePkgTokenSpaceGuid.PcdSreBootAppFileGuid|{ 0xC1, 0xF2, 0x98, 0x5A, 0x3B, 0x7D, 0x8F, 0x4E, 0xA1, 0x24, 0xB6, 0xE8, 0x91, 0xD4, 0x5C, 0x03 }|VOID*|0x40000301
 
   # Text device path identifying the SRE mass storage device.
   # Example: L"PciRoot(0x0)/Pci(0x6,0x0)/Pci(0x0,0x0)"
   #   Indicates the device is a PCIe device sitting on root bridge 0, behind a child bridge at Bus 0/Dev 6/Func 0
-  gOdpPkgTokenSpaceGuid.PcdSreDevicePathString|L""|VOID*|0x40000302
+  gSrePkgTokenSpaceGuid.PcdSreDevicePathString|L""|VOID*|0x40000302
 
   # Absolute path (from the staging volume root) of the staged SRE recovery
   # image (WIM) on the EFI System Partition. Shared between the pre-reset capsule
   # peeler (which writes the WIM here) and the post-reset SRE FmpDeviceLib (which
   # reads and later deletes it) so both target the same file. Fixed at build.
-  gOdpPkgTokenSpaceGuid.PcdSreStagingPath|L"\\ODP\\SRE\\OsImage.wim"|VOID*|0x40000303
+  gSrePkgTokenSpaceGuid.PcdSreStagingPath|L"\\ODP\\SRE\\OsImage.wim"|VOID*|0x40000303

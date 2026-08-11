@@ -105,11 +105,11 @@ platform in:
 ```
 # In <YourPlatformPkg>.dsc:
 [PcdsFeatureFlag]
-  gMsSurfaceIntelPkgTokenSpaceGuid.PcdSreHotkeyRoutingEnabled|TRUE
+  gSrePkgTokenSpaceGuid.PcdSreHotkeyRoutingEnabled|TRUE
 
 [PcdsFixedAtBuild.common]
   # Set to your SRE app's INF FILE_GUID, little-endian byte order
-  gMsSurfaceIntelPkgTokenSpaceGuid.PcdSreBootAppFileGuid|{ ... 16 bytes ... }
+  gSrePkgTokenSpaceGuid.PcdSreBootAppFileGuid|{ ... 16 bytes ... }
 ```
 
 And in `<YourPlatformPkg>.fdf [FV.DXE]`, include `RamDiskDxe` + your SRE app
