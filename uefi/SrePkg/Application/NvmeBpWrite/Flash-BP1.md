@@ -366,5 +366,5 @@ with the new WIM → [Section 3](#section-3--write-phase-35-min) →
 - [`../BpRecoveryLoader/SRE-onboarding.md`](../BpRecoveryLoader/SRE-onboarding.md)
   — the higher-level SRE flow, including the `Run-WinVosFromBp.ps1` host
   orchestrator that wraps this procedure for normal day-to-day use.
-- `OdpPkg/Application/BpRecoveryLoader/BpRecoveryLoader.c` — the in-firmware
+- `SrePkg/Application/BpRecoveryLoader/BpRecoveryLoader.c` — the in-firmware
   SRE app that reads BP1 → RAM disk → chainloads `bootmgfw.efi`.
