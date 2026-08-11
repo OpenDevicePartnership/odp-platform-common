@@ -111,7 +111,7 @@ SreStorageWriteClose (
   return EFI_UNSUPPORTED;
 }
 
-// Abort the write session without committing
+// Abort an open write session without committing
 EFI_STATUS
 EFIAPI
 SreStorageWriteAbort (

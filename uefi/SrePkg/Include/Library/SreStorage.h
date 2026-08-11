@@ -1,5 +1,5 @@
 //
-// Secure Recovery Environment (SRE) storage support for the NVME drive
+// Secure Recovery Environment (SRE) storage support
 //
 // Copyright (c) Microsoft Corporation. All rights reserved.
 //
@@ -37,8 +37,11 @@ SreStorageInfo (
 // BlockBuffer    - Buffer to receive the block data (must be BlockSize bytes and aligned to
 //                  BlockBufferAlignment as reported by SreStorageInfo)
 //
-// EFI_INVALID_PARAMETER - If Buffer is NULL, misaligned, or if Partition or Block Indexes are out of range
-// EFI_UNSUPPORTED       - If the SRE storage device is not present or supported
+// EFI_INVALID_PARAMETER - BlockBuffer is NULL, misaligned, or if Partition or Block Indexes are out of range
+// EFI_UNSUPPORTED       - The SRE storage device is not present or supported
+// EFI_ABORTED           - A write session is currently open
+// EFI_NOT_READY         - The underlying HW protocol is not ready
+// EFI_PROTOCOL_ERROR    - The underlying HW protocol reported an error
 //
 EFI_STATUS
 EFIAPI
@@ -54,7 +57,11 @@ SreStorageRead (
 //
 // PartitionIndex  - Target storage partition index
 //
-// EFI_UNSUPPORTED - If the SRE storage device is not present or supported
+// EFI_INVALID_PARAMETER - PartitionIndex is out of range
+// EFI_UNSUPPORTED       - The SRE storage device is not present or supported
+// EFI_ABORTED           - A write session is currently open
+// EFI_NOT_READY         - The underlying HW protocol is not ready
+// EFI_PROTOCOL_ERROR    - The underlying HW protocol reported an error
 //
 EFI_STATUS
 EFIAPI
@@ -69,9 +76,11 @@ SreStorageWriteOpen (
 // BlockBuffer - Buffer containing data to write to the storage area, all bytes from the block are written.
 //               Must be BlockSize bytes and aligned to BlockBufferAlignment as reported by SreStorageInfo.
 //
-// EFI_BAD_BUFFER_SIZE - If DataSize != BlockSize
-// EFI_END_OF_MEDIA    - If internal indexed block is at end of storage area
-// EFI_UNSUPPORTED - If the SRE storage device is not present or supported
+// EFI_INVALID_PARAMETER - BlockBuffer is NULL or misaligned
+// EFI_END_OF_MEDIA      - The internal indexed block is at end of storage area
+// EFI_UNSUPPORTED       - The SRE storage device is not present or supported
+// EFI_NOT_READY         - No write session is open, or the underlying HW protocol is not ready
+// EFI_PROTOCOL_ERROR    - The underlying HW protocol reported an error
 //
 EFI_STATUS
 EFIAPI
@@ -82,32 +91,43 @@ SreStorageWriteBlock (
 //
 // Close and flush a write session
 //
-// EFI_ABORTED - If internal block pointer is not currently at the end of the storage area
+// EFI_UNSUPPORTED    - The SRE storage device is not present or supported
+// EFI_ABORTED        - The internal block pointer is not currently at the end of the storage area
+// EFI_NOT_READY      - No write session is open, or the underlying HW protocol is not ready
+// EFI_PROTOCOL_ERROR - The underlying HW protocol reported an error
 //
 EFI_STATUS
 EFIAPI
-SreStorageWriteClose ();
+SreStorageWriteClose (
+  VOID
+  );
 
 //
-// Abort an open write session without committing: clears the session state and
-// restores write protection on the partition being written, so subsequent
-// read/write-open operations are not blocked by a failed apply.
+// Abort an open write session without committing
 //
-// EFI_NOT_READY - If no write session is open
+// EFI_UNSUPPORTED    - The SRE storage device is not present or supported
+// EFI_NOT_READY      - No write session is open, or the underlying HW protocol is not ready
+// EFI_PROTOCOL_ERROR - The underlying HW protocol reported an error
 //
 EFI_STATUS
 EFIAPI
-SreStorageWriteAbort ();
+SreStorageWriteAbort (
+  VOID
+  );
 
 //
 // Perform the pre-OS handoff lock that requires a power reset to unlock.
+//
+// EFI_INVALID_PARAMETER - PartitionIndex is out of range
+// EFI_UNSUPPORTED       - The SRE storage device is not present or supported
+// EFI_ABORTED           - A write session is currently open
+// EFI_NOT_READY         - The underlying HW protocol is not ready
+// EFI_PROTOCOL_ERROR    - The underlying HW protocol reported an error
 //
 EFI_STATUS
 EFIAPI
 SreStorageLock (
   IN  PARTITION_INDEX PartitionIndex
   );
-
-
 
 #endif // _SRE_STORAGE_H_

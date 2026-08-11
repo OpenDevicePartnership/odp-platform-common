@@ -1,21 +1,9 @@
-/** @file
-  Provides SRE FMP update specific information.
-
-  This header defines the small "capsule descriptor" that the SRE Firmware
-  Management Protocol (FMP) payload carries. The descriptor is what flows
-  through the stock capsule path (Capsule-On-Disk -> PEI -> DxeCapsuleLib ->
-  FmpDxe -> FmpDeviceLib::SetImage). It is only a few bytes: it records the
-  size and hash of the large recovery WIM and where to find it. The ~1 GB WIM
-  itself is NOT part of this descriptor and is never loaded into memory as a
-  single buffer; it is staged separately and streamed in chunks by the
-  FmpDeviceLib.
-
-  See plan.md (repo root) for the full design rationale.
+/**
+  SRE FMP update specific information.
 
   Copyright (c) Microsoft Corporation.<BR>
 
   SPDX-License-Identifier: BSD-2-Clause-Patent
-
 **/
 
 #ifndef __SRE_FMP_DEVICE_LIB__
@@ -42,30 +30,21 @@ typedef struct {
 // Fixed byte offset of the SRE_IMAGE_INFO descriptor from the start of the boot
 // partition. 0x00004400 == LBA 34, the first byte of the Microsoft Reserved
 // (MSR) partition. It follows the GPT entry array and carries no filesystem, so
-// the boot loader never reads it. This offset is intentionally NOT aligned to
-// the storage block size; readers locate the block that spans the offset and
-// index into it by (SRE_IMAGE_INFO_OFFSET % BlockSize).
+// the boot loader never reads it.
 //
 #define SRE_IMAGE_INFO_OFFSET  0x00004400
 
 //
-// Current descriptor structure version.
+// SRE Image reporting structure layout version
 //
 #define SRE_IMAGE_INFO_STRUCT_VER  0x00000001
-
-//
-// Hash size carried by the descriptor (SHA-256 = 32 bytes).
-//
-#define SRE_WIM_HASH_SIZE  32
 
 //
 // Image Information
 //
 // This structure is stored at a fixed byte offset (SRE_IMAGE_INFO_OFFSET) from
 // the start of the SRE image partition to record the version of the image
-// currently installed to the partition. Packed size is exactly 32 bytes
-// (4 + 4 + 4 + 5*4); the layout is an on-flash format, fixed for
-// SRE_IMAGE_INFO_STRUCT_VER 1.
+// currently installed to the partition.
 //
 #pragma pack (1)
 typedef struct {
