@@ -5,11 +5,12 @@
 
 use crate::cli::EvalCommand;
 use ec_test_lib::acpi::{Acpi, AcpiMethodArgument};
+use std::num::ParseIntError;
 
 /// Parse a single CLI token into an ACPI method argument.
 ///
 /// Mirrors the legacy C++ `ectest` parser: `{guid}`, `'string'`, or integer
-/// (decimal or `0x` hex, optionally negated).
+/// (decimal, `0x` hex, or `0b` binary, optionally negated).
 fn parse_arg(token: &str) -> Result<AcpiMethodArgument, String> {
     if let Some(inner) = token.strip_prefix('{').and_then(|t| t.strip_suffix('}')) {
         let uuid = uuid::Uuid::parse_str(inner).map_err(|e| format!("invalid GUID `{token}`: {e}"))?;
@@ -17,21 +18,25 @@ fn parse_arg(token: &str) -> Result<AcpiMethodArgument, String> {
     } else if let Some(inner) = token.strip_prefix('\'').and_then(|t| t.strip_suffix('\'')) {
         Ok(AcpiMethodArgument::String(inner.to_string()))
     } else {
-        Ok(AcpiMethodArgument::Int(parse_int(token)?))
+        let value = parse_int(token).map_err(|e| format!("invalid integer `{token}`: {e}"))?;
+        Ok(AcpiMethodArgument::Int(value))
     }
 }
 
 /// Parse an integer token as a 32-bit ACPI value; negatives use two's complement.
-fn parse_int(token: &str) -> Result<u32, String> {
+fn parse_int(token: &str) -> Result<u32, ParseIntError> {
     let (negative, body) = match token.strip_prefix('-') {
         Some(rest) => (true, rest),
         None => (false, token),
     };
-    let magnitude = match body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
-        Some(hex) => u32::from_str_radix(hex, 16),
-        None => body.parse::<u32>(),
-    }
-    .map_err(|e| format!("invalid integer `{token}`: {e}"))?;
+    let lower = body.to_ascii_lowercase();
+    let magnitude = if let Some(hex) = lower.strip_prefix("0x") {
+        u32::from_str_radix(hex, 16)
+    } else if let Some(bin) = lower.strip_prefix("0b") {
+        u32::from_str_radix(bin, 2)
+    } else {
+        body.parse::<u32>()
+    }?;
 
     Ok(if negative { magnitude.wrapping_neg() } else { magnitude })
 }
