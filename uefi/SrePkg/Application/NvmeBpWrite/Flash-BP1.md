@@ -44,8 +44,8 @@ state machine.
 ### `NvmeBpWrite.efi` (the flashing tool)
 
 Source: [`NvmeBpWrite.c`](./NvmeBpWrite.c) in this directory. The binary is
-not published as a standalone ADO artifact — build it locally as part of the
-platform build. Pass the resulting binary to the staging script:
+not published as a standalone artifact. Build it locally as part of the platform
+build, then pass the resulting binary to the staging script:
 
 ```powershell
 ./Stage-SreflashUsb.ps1 -ToolPath <build-output>\NvmeBpWrite.efi `
@@ -59,7 +59,7 @@ Use `NvmeBpWrite.efi`, **NOT** `NvmeBpWriteTest.efi` (same directory) — the
 
 Obtain a bootable recovery WIM from your platform's approved build output.
 
-The zip contains:
+A typical recovery artifact contains:
 
 ```
 ValidationOS.wim    (typically ~250 MB)

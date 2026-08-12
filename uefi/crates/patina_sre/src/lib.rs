@@ -22,9 +22,9 @@ mod sre_boot_manager;
 
 pub use sre_boot_manager::{SreBootManager, SreHotkey, fv_file_device_path, fv_volume_file_device_path};
 
-// Re-export the patina device-path types SreBootManager::new consumes, so callers
-// so platform binaries don't need to depend on the same patina
-// source patina_sre uses. Constructing DevicePathBuf via these re-exports
+// Re-export the patina device-path types SreBootManager::new consumes so
+// platform binaries don't need to depend on the same patina source patina_sre
+// uses. Constructing DevicePathBuf via these re-exports
 // guarantees type identity with SreBootManager's constructor signature.
 pub use patina::device_path::node_defs::EndEntire;
 pub use patina::device_path::paths::DevicePathBuf;
