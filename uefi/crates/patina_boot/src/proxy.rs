@@ -50,7 +50,7 @@ pub enum ConsoleType {
 /// vtable as published by the C `PatinaBootMgrLibProxy` DXE driver.
 ///
 /// Field order MUST match `_PATINA_BOOT_MGR_LIB_PROXY_PROTOCOL` in
-/// `MsSurfaceCorePkg/Include/Protocol/PatinaBootMgrLibProxy.h`.
+/// the platform's `PatinaBootMgrLibProxy.h`.
 #[repr(C)]
 pub struct Protocol {
     pub revision: u32,
@@ -217,7 +217,7 @@ pub fn start_hotkey_service<B: BootServices>(boot_services: &B) -> Result<efi::E
 
 /// `EfiBootManagerDispatchDeferredImages` — dispatch DXE images that
 /// were deferred (FFS sections with deferred-dispatch attribute).
-/// Surface platforms have deferred drivers for some networking, MM,
+/// Some platforms have deferred drivers for networking, MM,
 /// and platform-init paths that won't run without this call.
 pub fn dispatch_deferred_images<B: BootServices>(boot_services: &B) -> Result<(), EfiError> {
     let proxy = locate(boot_services)?;

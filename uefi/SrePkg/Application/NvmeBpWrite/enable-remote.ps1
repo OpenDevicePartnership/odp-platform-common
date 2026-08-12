@@ -5,8 +5,8 @@
 #   1. PSRemoting + WinRM listener + firewall (so a workstation can
 #      Invoke-Command into this machine).
 #   2. LocalAccountTokenFilterPolicy=1 so non-builtin local admin
-#      accounts (like `testuser`) keep their admin token under UAC. Without
-#      this, SetFirmwareEnvironmentVariableExW fails with LastError=1314.
+#      accounts keep their admin token under UAC. Without this,
+#      SetFirmwareEnvironmentVariableExW fails with LastError=1314.
 #
 # Reboot/relog is REQUIRED before LocalAccountTokenFilterPolicy takes effect
 # on the current session's token. The script will tell you, or you can pass
