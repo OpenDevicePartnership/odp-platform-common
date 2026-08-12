@@ -20,6 +20,7 @@ Patina native later by changing one line.
 keywords = ["uefi", "edk2", "tianocore", "patina", "firmware"]
 categories = ["embedded", "no-std"]
 readme = "README.md"
+publish = false
 
 [dependencies]
 log = { version = "0.4", default-features = false }
