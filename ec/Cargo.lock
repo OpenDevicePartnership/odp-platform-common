@@ -457,6 +457,7 @@ dependencies = [
  "ec-test-script",
  "embassy-time",
  "time-alarm-service-interface",
+ "uuid",
 ]
 
 [[package]]
