@@ -1,8 +1,7 @@
 # Stage-SreflashUsb.ps1 — workstation helper to stage everything onto a SREFLASH USB.
 #
-# Stages NvmeBpWrite.efi (as \EFI\Boot\BOOTX64.EFI), the WIM, and the
-# target-side companion scripts (Reset-NvmeBpResult.ps1 and
-# Set-NextBootToUsb.ps1) onto a removable FAT32 USB. Idempotent.
+# Stages NvmeBpWrite.efi (as \EFI\Boot\BOOTX64.EFI) and the WIM onto a
+# removable FAT32 USB. Idempotent.
 #
 # Tool path resolution (first hit wins):
 #   1. -ToolPath argument
@@ -29,7 +28,6 @@ param(
     [Parameter(Mandatory)] [string]$WimPath,
     [string]$UsbDriveLetter,
     [string]$ToolPath,
-    [string]$CompanionDir = $PSScriptRoot,
     # -WrapWim wraps the WIM in a bootable FAT32 image (via BuildBpFatImage.ps1)
     # before staging. Required when targeting the BpRecoveryLoader SRE flow,
     # which reads BP1 as a FAT volume and chainloads \EFI\Boot\bootx64.efi.
@@ -203,10 +201,6 @@ if ($WrapWim) {
 "USB:   $UsbDriveLetter"
 ""
 
-$reset    = Join-Path $CompanionDir 'Reset-NvmeBpResult.ps1'
-$setbn    = Join-Path $CompanionDir 'Set-NextBootToUsb.ps1'
-$enable   = Join-Path $CompanionDir 'enable-remote.ps1'
-
 # --- Stage ---
 $dstEfiDir = Join-Path $UsbDriveLetter 'EFI\Boot'
 $dstBoot   = Join-Path $dstEfiDir 'BOOTX64.EFI'
@@ -231,14 +225,6 @@ if ($ForceReflash) {
     Remove-Item $flagPath -Force
     Write-Host "Removed pre-existing $flagPath — tool will run normal content-hash check." -ForegroundColor Cyan
 }
-foreach ($s in @($reset, $setbn, $enable)) {
-    if (Test-Path $s) {
-        Copy-Item $s (Join-Path $UsbDriveLetter (Split-Path $s -Leaf)) -Force
-    } else {
-        Write-Host "WARN: companion script not found, skipping: $s" -ForegroundColor Yellow
-    }
-}
-
 # --- Verify ---
 "--- Staged onto $UsbDriveLetter ---"
 Get-ChildItem $UsbDriveLetter -Recurse -File |

@@ -1,80 +1,53 @@
-# sre-bp-tools
+# NVMe boot-partition development tool
 
-Kit for flashing a ValidationOS WIM into NVMe Boot Partition 1 (BP1) on a
-supported development platform and exercising the SRE recovery boot path.
+`NvmeBpWrite.efi` is an experimental UEFI application for writing an image
+to NVMe Boot Partition 1 (BP1). It is intended for firmware development and
+hardware bring-up, not for production deployment or unattended use.
 
-Pre-1.0. Behavior, file layout, and command syntax may change.
+> [!WARNING]
+> This tool performs destructive, controller-specific NVMe administrative
+> commands. An incompatible controller or interrupted write can leave BP1
+> unusable. Review the implementation and validate it on disposable hardware
+> before enabling it in a platform build.
 
-## Current state (tool v0.2.2)
+## Platform requirements
 
-`NvmeBpWrite.efi` runs as a UEFI application launched from a removable
-FAT32 USB. On every boot:
+The current implementation assumes:
 
-1. Reads the first 4 KiB of `\ValidationOS.wim` from the USB.
-2. Reads the first 4 KiB of BP1 via Get Log Page LID=0x15 (skipping the
-   16-byte preamble).
-3. Compares them.
-4. If match → cold-reset, no NVMe writes.
-5. If differ → unlock BP write protection (Set Features FID=0x85 CDW11=0x09),
-   chunked Firmware Image Download (CDW12=1), Firmware Commit (CA=110b,
-   BPID=1), re-read 4 KiB and report PASS/FAIL, cold-reset.
+- one NVMe controller is present;
+- BP1 is the intended destination;
+- the controller accepts the FID `0x85` write-enable sequence;
+- Firmware Image Download uses `CDW12=1` for boot-partition data;
+- Firmware Commit action `110b` targets BP1;
+- Get Log Page `0x15` returns a 16-byte preamble followed by BP data; and
+- BP capacity is 1 GiB.
 
-No NVRAM state is persisted between boots. Re-flashing = replace the WIM
-on the USB and boot the tool again.
+These assumptions are not guaranteed by the NVMe specification for every
+controller. Platforms should replace hard-coded values with controller
+discovery or a platform-specific implementation before production use.
 
-### Force-reflash override (v0.2.2+)
+## Staging
 
-To re-WRITE BP1 even when the content check would say MATCH (e.g., suspected
-corruption past the first 4 KiB, or you want to exercise the WRITE path for
-debugging), drop an empty file at `\force-reflash.flag` on the USB. The
-tool checks for it at startup and skips the content check if present. The
-flag is not auto-deleted — remove it manually (or re-stage without
-`-ForceReflash`) to return to normal idempotent behavior.
-
-```powershell
-./Stage-SreflashUsb.ps1 -WimPath <wim> -ForceReflash -Force
-```
-
-## Files
-
-| File | Runs on | Purpose |
-|---|---|---|
-| `NvmeBpWrite.efi`         | UEFI         | Flashing tool. Staged as `\EFI\Boot\BOOTX64.EFI` so firmware auto-loads on USB boot. |
-| `Stage-SreflashUsb.ps1`   | Workstation  | Stages the tool + WIM + companion scripts onto a removable FAT32 USB. `-WrapWim` wraps the WIM in a bootable FAT image (required for the SRE recovery flow). |
-| `BuildBpFatImage.ps1`     | Workstation  | Wraps a raw WIM in a FAT32 image with `bootmgfw.efi` + `BCD` + `boot.sdi` + the WIM. Called by `Stage-SreflashUsb.ps1 -WrapWim`. |
-| `enable-remote.ps1`       | Target (once) | Enables WinRM + sets `LocalAccountTokenFilterPolicy=1`. Needed only if driving operations from a workstation over WinRM. |
-| `Reset-NvmeBpResult.ps1`  | Target       | Legacy — clears the `NvmeBpResult` NVRAM variable used by tool v0.1. Not needed for re-flashing under v0.2. |
-| `Set-NextBootToUsb.ps1`   | Target       | Sets firmware `BootNext` to USB Storage and reboots. Optional alternative to the Vol-Down hotkey. |
-| `Flash-BP1.md`            | reference    | End-to-end procedure including content-format trade-offs and known failure modes. |
-
-## Stage and run
-
-Workstation (elevated PowerShell — `Mount-VHD` and `Format-Volume` need admin):
+`Stage-SreflashUsb.ps1` copies a locally built `NvmeBpWrite.efi` and recovery
+image to a removable FAT32 USB. It does not configure firmware boot entries,
+remote access, credentials, or target-host policy.
 
 ```powershell
-./Stage-SreflashUsb.ps1 -WimPath <path-to>\ValidationOS.wim -WrapWim -Force
+./Stage-SreflashUsb.ps1 `
+    -ToolPath <build-output>\NvmeBpWrite.efi `
+    -WimPath <recovery-image.wim> `
+    -UsbDriveLetter E: `
+    -Force
 ```
 
-> ⚠ **Run the `Stage-SreflashUsb.ps1` that's in this kit folder, not the
-> one from another checkout.** The script prefers `NvmeBpWrite.efi` next
-> to itself. Always sanity-check the displayed path, mtime, and hash. If
-> unsure, pass `-ToolPath <kit>\NvmeBpWrite.efi` explicitly.
+Use `-WrapWim` only when the recovery flow expects a FAT image containing a
+UEFI fallback loader. This option requires elevated PowerShell because it
+uses `Mount-VHD` and `Format-Volume`.
 
-Target:
+To force a write when the initial content check matches, pass
+`-ForceReflash`. Remove the generated `\force-reflash.flag` before returning
+to normal idempotent behavior.
 
-1. Plug USB
-2. Shift-shutdown (full power-off, skips Fast Startup)
-3. Hold Vol-Down + Power through POST
-
-The tool reports each step on the device screen.
-
-See `Flash-BP1.md` for the full procedure.
-
-## BP1 content formats
-
-Two formats can be written to BP1; the choice depends on what you're testing.
-
-| Format | Tool content check (v0.2) | Vol-Up SRE flow (BpRecoveryLoader → bootmgfw → WinVOS) |
-|---|---|---|
-| Raw WIM (`-WimPath <wim>`) | Works (idempotent compare) | Fails — BP1 has no FAT volume to chainload from |
-| FAT-wrapped (`-WimPath <wim> -WrapWim`) | Works (idempotent compare) | Works — firmware mounts the FAT volume in BP1, chainloads `\EFI\Boot\bootx64.efi` |
+Boot-entry creation, device reboot, remote administration, and platform
+hotkeys are deliberately out of scope. Integrators must use their platform's
+documented and reviewed recovery process.
