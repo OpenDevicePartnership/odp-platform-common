@@ -11,7 +11,6 @@ rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/OpenDevicePartnership/odp-platform-common"
 homepage = "https://github.com/OpenDevicePartnership/odp-platform-common"
-documentation = "https://docs.rs/patina_tianocore"
 description = """
 Bridge crate that lets a UEFI driver target both TianoCore and Patina through a
 single API surface — write your platform once, ship on TianoCore today, swap to
