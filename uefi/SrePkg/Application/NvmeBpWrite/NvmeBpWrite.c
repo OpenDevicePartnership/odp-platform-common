@@ -26,8 +26,8 @@
   Controller-specific (non-spec) behaviors honored by this code:
     - CDW12=1 controller-specific route hint on Firmware Image Download
       ("Data for boot partition download").
-    - Staged image MUST equal BPSIZE; sub-BPSIZE commits return SCT=1
-      SC=0x1E even after FID=0x85 unlock.
+    - Staged image MUST equal BPINFO.BPSZ * 128 KiB; shorter commits return
+      SCT=1 SC=0x1E even after FID=0x85 unlock.
     - BPMBL/BPRSEL MMIO drive loop returns BRS=ERROR regardless of
       BPID/state; LID 0x15 is the only working readback.
     - LID 0x15 response has a 16-byte header preamble before the BP
