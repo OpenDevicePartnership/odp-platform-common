@@ -9,15 +9,15 @@
 #   3. .\NvmeBpWrite.efi (sibling to this script)
 #
 # Examples:
-#   # Raw-WIM path (NvmeBpWrite VERIFY will FIND MSWIM, but BpRecoveryLoader
-#   # SRE flow will fail to chainload — BP1 contains a WIM, not a FAT volume).
+#   # Raw-WIM path. NvmeBpWrite can compare and stage the raw image, but
+#   # BpRecoveryLoader cannot chainload it because BP1 is not a FAT volume.
 #   ./Stage-SreflashUsb.ps1 -WimPath ~\Downloads\ValidationOS.wim
 #
 #   # FAT-wrapped path — required for the SRE recovery flow (Vol-Up boot).
 #   # Wraps the WIM in a bootable FAT32 image with bootmgfw + BCD + boot.sdi
-#   # via BuildBpFatImage.ps1. Run from elevated PowerShell. VERIFY will
-#   # report "MSWIM: NOT FOUND" — that's expected; BP1 now contains a FAT
-#   # volume that BpRecoveryLoader can chainload \EFI\Boot\bootx64.efi from.
+#   # via BuildBpFatImage.ps1. Run from elevated PowerShell. NvmeBpWrite
+#   # compares the staged FAT image directly; BpRecoveryLoader can then
+#   # chainload \EFI\Boot\bootx64.efi from that volume.
 #   ./Stage-SreflashUsb.ps1 -WimPath ~\Downloads\ValidationOS.wim -WrapWim
 #
 #   # Explicit USB drive + force overwrite.
@@ -31,9 +31,9 @@ param(
     # -WrapWim wraps the WIM in a bootable FAT32 image (via BuildBpFatImage.ps1)
     # before staging. Required when targeting the BpRecoveryLoader SRE flow,
     # which reads BP1 as a FAT volume and chainloads \EFI\Boot\bootx64.efi.
-    # Without this, BP1 contains a raw WIM that NvmeBpWrite VERIFY accepts
-    # (MSWIM at offset 0) but the SRE app cannot chainload from. Requires
-    # elevated PowerShell because Mount-VHD/Format-Volume need admin.
+    # Without this, NvmeBpWrite can stage and compare the raw WIM, but the
+    # SRE app cannot chainload from it. Requires elevated PowerShell because
+    # Mount-VHD/Format-Volume need admin.
     [switch]$WrapWim,
     [string]$BuildBpFatImagePath,
     # Default to the kit-bundled x64 bootmgfw if present, otherwise the host's
@@ -225,7 +225,7 @@ if ($ForceReflash) {
     Remove-Item $flagPath -Force
     Write-Host "Removed pre-existing $flagPath — tool will run normal content-hash check." -ForegroundColor Cyan
 }
-# --- Verify ---
+# --- Report staged contents ---
 "--- Staged onto $UsbDriveLetter ---"
 Get-ChildItem $UsbDriveLetter -Recurse -File |
     Where-Object { $_.Name -notmatch '^(WPSettings|IndexerVolume)' } |

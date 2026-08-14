@@ -3,10 +3,10 @@
 #  to the NVMe Boot Partition. Issues Set Features FID=0x85 BPWPS=001b to
 #  unlock BP for write, then Firmware Image Download (opcode 0x11) +
 #  Firmware Commit (opcode 0x10, CA=110b Download to BP) to deliver the
-#  payload. Verifies via BPMBL/BPRSEL MMIO and Get Log Page LID=0x15.
-#  Two-mode state machine (WRITE / VERIFY / NOOP) persisted in the
-#  NvmeBpResult NVRAM variable lets the full cycle be driven from the
-#  host OS across two reboots.
+#  payload. Get Log Page LID=0x15 provides the pre-write and post-write
+#  content checks. The flow is content-driven and idempotent: matching
+#  content skips the write, while NvmeBpResult records the current run's
+#  outcome for host diagnostics.
 #
 #  BP write protection (lock/unlock) is otherwise owned by the FMP capsule
 #  update flow; this tool only unlocks for its own write and leaves the

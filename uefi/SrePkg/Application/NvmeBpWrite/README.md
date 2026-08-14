@@ -45,8 +45,9 @@ UEFI fallback loader. This option requires elevated PowerShell because it
 uses `Mount-VHD` and `Format-Volume`.
 
 To force a write when the initial content check matches, pass
-`-ForceReflash`. Remove the generated `\force-reflash.flag` before returning
-to normal idempotent behavior.
+`-ForceReflash`. To return to normal idempotent behavior, either delete
+`\force-reflash.flag` from the USB or rerun the staging script without
+`-ForceReflash`; the script removes a pre-existing flag.
 
 Boot-entry creation, device reboot, remote administration, and platform
 hotkeys are deliberately out of scope. Integrators must use their platform's
