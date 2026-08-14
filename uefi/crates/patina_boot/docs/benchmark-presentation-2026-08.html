@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>patina_boot Microbenchmark Results - August 2026</title>
+  <title>patina_boot and patina_sre OEM Adoption Case - August 2026</title>
   <style>
     :root {
       --bg: #07111f;
@@ -526,85 +526,186 @@
       <div class="title-layout">
         <div>
           <div class="eyebrow">Boot Manager Modernization</div>
-          <h1><code>patina_boot</code> microbenchmark results</h1>
-          <p class="subtitle">What the cycle data says, what it does not, and what we need before performance gating.</p>
+          <h1>Why <code>patina_boot</code> + <code>patina_sre</code></h1>
+          <p class="subtitle">A memory-safe, customizable boot architecture with integrated recovery and measured performance on real hardware.</p>
           <div class="meta">
-            <span>August 11, 2026</span>
+            <span>August 14, 2026</span>
             <span>Issue #183</span>
-            <span>Source: PR #160 / commit 7a7b5e3</span>
+            <span>MAA FPDT: August 14, 2026</span>
+            <span>Microbench source: PR #160 / commit 7a7b5e3</span>
           </div>
         </div>
         <div class="title-mark" aria-hidden="true"></div>
       </div>
       <aside class="presenter-notes">
-        <p>Open with the distinction between engineering characterization and a product performance claim.</p>
+        <p>Lead with the OEM value: safer boot policy, explicit customization, and recovery integrated into the same architecture. Performance is supporting evidence that adoption does not require accepting an unbounded boot-time cost.</p>
       </aside>
     </section>
 
     <section class="slide">
       <div class="eyebrow">Executive readout</div>
-      <h2>Predictable scaling; unstable baseline</h2>
+      <h2>The adoption case is safety, control, and recovery</h2>
       <div class="cards-4">
         <div class="card">
-          <span class="value">141 Kcyc</span>
-          <span class="label"><code>connect_all</code> at 512 handles, three-run median</span>
+          <span class="value">Rust</span>
+          <span class="label">Memory-safe boot orchestration replaces new boot-policy logic in C</span>
         </div>
         <div class="card">
-          <span class="value">240 Kcyc</span>
-          <span class="label"><code>expand_device_path</code> at 512 handles, three-run median</span>
+          <span class="value">Policy</span>
+          <span class="label">OEMs choose device discovery, hotkeys, consoles, and boot fallbacks</span>
         </div>
         <div class="card">
-          <span class="value">&gt;0.998</span>
-          <span class="label">Linear-fit R-squared for both helpers</span>
+          <span class="value">SRE</span>
+          <span class="label">Recovery remains available when Windows or normal boot state is damaged</span>
         </div>
         <div class="card">
-          <span class="value">6 / 8</span>
-          <span class="label">Cases with more than 10% same-host observed range</span>
+          <span class="value">-0.3%</span>
+          <span class="label">Clean isolated mean delta versus C BDS on MAA</span>
         </div>
       </div>
-      <div class="callout danger">
-        The algorithms scale cleanly with topology size, but the current cycle harness is not stable enough for a 10% CI regression gate.
+      <div class="callout">
+        OEM proposition: gain a safer and more adaptable boot architecture with integrated recovery, while keeping measured firmware performance in the same operating range as the existing implementation.
       </div>
       <aside class="presenter-notes">
-        <p>The headline is not "fast" or "slow." The headline is that scaling is understood, while repeatability is the next engineering constraint.</p>
+        <p>Do not sell the migration as "Rust is faster." Sell the capabilities and engineering model, then show that performance is measurable, bounded, and tunable.</p>
       </aside>
     </section>
 
     <section class="slide">
-      <div class="eyebrow">Method</div>
-      <h2>Hardware-free, synthetic, worst-case where it matters</h2>
+      <div class="eyebrow">OEM value</div>
+      <h2>One architecture covers normal boot and recovery</h2>
       <div class="grid-2">
         <div class="panel">
-          <h3><code>connect_all</code></h3>
+          <h3><code>patina_boot</code>: explicit boot policy</h3>
           <ul>
-            <li>Topologies: 1, 16, 128, and 512 synthetic handles.</li>
-            <li>First pass connects every handle once.</li>
-            <li>Second pass confirms that no new handles were created.</li>
-            <li>Includes handle enumeration and <code>BTreeSet</code> tracking.</li>
+            <li><code>BootDispatcher</code> supplies the UEFI BDS architectural protocol.</li>
+            <li><code>BootOrchestrator</code> lets each OEM define its boot flow without forking a monolithic BDS implementation.</li>
+            <li>Device discovery, console setup, hotkeys, boot selection, and fallback behavior are independently testable.</li>
+            <li>Policy can be optimized for the platform instead of connecting every possible device by default.</li>
           </ul>
         </div>
         <div class="panel">
-          <h3><code>expand_device_path</code></h3>
+          <h3><code>patina_sre</code>: recovery in the boot flow</h3>
           <ul>
-            <li>Topologies: 1, 16, 128, and 512 synthetic device paths.</li>
-            <li>Every handle publishes a valid GPT device path.</li>
-            <li>The matching partition is deliberately last.</li>
-            <li>Measures a full worst-case topology scan and path splice.</li>
+            <li>Handles Surface recovery hotkeys before normal OS dispatch.</li>
+            <li>Can boot an SRE payload directly from NVMe BP1 when the normal OS path is unavailable.</li>
+            <li>Integrates capsule, DFCI, and recovery policy with the same sequencing and device-discovery model.</li>
+            <li>Provides a path to serviceability even when boot variables or the Windows installation are damaged.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout">
+        The differentiator is not another boot feature. It is an OEM-owned policy boundary with recovery designed into it.
+      </div>
+      <aside class="presenter-notes">
+        <p>This is the core adoption slide. Explain that patina_boot is the customization boundary and patina_sre is a concrete production use of that boundary.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Real-device method</div>
+      <h2>Clean isolated A/B on the same MAA 900</h2>
+      <div class="grid-2">
+        <div class="panel">
+          <h3>Controlled comparison</h3>
+          <ul>
+            <li>Three clean warm-reboot measurements per implementation.</li>
+            <li>Same 900_MAA device and Windows installation.</li>
+            <li>Same Patina DXE core and no <code>patina_sre</code>.</li>
+            <li>FPDT total firmware time captured after every reboot.</li>
+            <li>Advanced Logger verified equivalent normal-boot conditions.</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <h3>Compared images</h3>
+          <ul>
+            <li><code>14.65280.9</code>: Patina DXE core with C <code>BdsDxe</code>.</li>
+            <li><code>14.65282.9</code>: Patina DXE core with isolated <code>patina_boot</code>.</li>
+            <li>Metric: <code>ExitBootServicesExit - ResetEnd</code>.</li>
+            <li>Warm reboot avoids Windows Fast Startup, but is not a cold boot.</li>
           </ul>
         </div>
       </div>
       <div class="meta">
-        <span>Criterion 0.5</span>
-        <span>Custom <code>rdtsc</code> cycle measurement</span>
-        <span>3 s warmup + 100 samples + approximately 5 s collection</span>
+        <span>Platform: 900_MAA</span>
+        <span>Collection: FPDT</span>
+        <span>6 clean firmware boots</span>
       </div>
       <aside class="presenter-notes">
-        <p>These are helper costs against mocks. They exclude real driver binding, storage I/O, firmware services, and platform boot policy.</p>
+        <p>Both datasets were verified under equivalent normal-boot conditions. The two managers still execute different policy details, so the result supports a whole-boot comparison rather than exact implementation-cost attribution.</p>
       </aside>
     </section>
 
     <section class="slide">
-      <div class="eyebrow">Result 1</div>
+      <div class="eyebrow">MAA result</div>
+      <h2>No material whole-boot regression observed</h2>
+      <p class="kicker">Three clean warm reboots per image. Values are total firmware time from FPDT.</p>
+      <div class="grid-2">
+        <div class="panel">
+          <h3>Observed distribution</h3>
+          <table class="result-table">
+            <thead><tr><th>Implementation</th><th>Mean</th><th>Median</th><th>Min - Max</th></tr></thead>
+            <tbody>
+              <tr><td><code>patina_boot</code></td><td class="headline">4.306 s</td><td>4.252 s</td><td>4.245 - 4.422 s</td></tr>
+              <tr><td>C <code>BdsDxe</code></td><td>4.320 s</td><td>4.365 s</td><td>4.222 - 4.373 s</td></tr>
+            </tbody>
+          </table>
+          <div class="metric-list">
+            <div class="metric"><span>Mean delta</span><strong>-13.7 ms</strong></div>
+            <div class="metric"><span>Mean percentage</span><strong>-0.3%</strong></div>
+            <div class="metric"><span>Sample count</span><strong>3 + 3 clean boots</strong></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>What the result means</h3>
+          <ul>
+            <li>The corrected <code>patina_boot</code> arm is in the same performance band as C <code>BdsDxe</code>.</li>
+            <li>The 13.7 ms mean difference is smaller than run-to-run variation.</li>
+            <li>This smoke run supports parity, not a claim that Rust is faster.</li>
+            <li>The next run should use matched policy and randomized, interleaved image order.</li>
+          </ul>
+          <div class="callout">Engineering headline: no material <code>patina_boot</code> whole-boot penalty was observed under the measured normal-boot conditions.</div>
+        </div>
+      </div>
+      <aside class="presenter-notes">
+        <p>The clean Rust samples were 4.2516, 4.4224, and 4.2449 seconds. The valid C samples were 4.3648, 4.2224, and 4.3728 seconds. Treat the -0.3% mean delta as parity because the sample is small and the managers are not yet policy-identical.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Performance claim boundary</div>
+      <h2>The current result proves parity, not exact cost</h2>
+      <div class="grid-2">
+        <div class="panel">
+          <h3>What was measured</h3>
+          <ul>
+            <li>FPDT covers the whole firmware interval from ResetEnd through ExitBootServices.</li>
+            <li>Both images use the same Patina DXE core and exclude <code>patina_sre</code>.</li>
+            <li>Both datasets were verified under equivalent normal-boot conditions.</li>
+            <li>The paths do not yet execute an identical phase-by-phase platform policy.</li>
+            <li>The observed total difference is negligible relative to run-to-run spread.</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <h3>What we must prove next</h3>
+          <ul>
+            <li>Finalize a common minimal-policy contract for C <code>BdsDxe</code> and <code>BootDispatcher</code>.</li>
+            <li>OEM-policy A/B: equivalent console, capsule, DFCI, hotkey, recovery, and boot-option behavior.</li>
+            <li>Common phase markers that reconcile device connection, policy, image loading, and handoff to total FPDT time.</li>
+            <li>At least 10 randomized and interleaved boots per arm.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout danger">
+        We can claim no material whole-boot regression in the clean isolated smoke test. We cannot yet assign an exact implementation-only delta.
+      </div>
+      <aside class="presenter-notes">
+        <p>The normal-boot checks make the total firmware measurements comparable. Matching connection, console, BootNext, event, and failure policy is still required before assigning the measured difference to C versus Rust implementation cost.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Supporting microbenchmark 1</div>
       <h2><code>connect_all</code> scales linearly after fixed setup</h2>
       <p class="kicker">Three identical-source, identical-lockfile runs on current main. Points are medians; error bars show observed min/max.</p>
       <div class="chart-wrap">
@@ -636,7 +737,7 @@
     </section>
 
     <section class="slide">
-      <div class="eyebrow">Result 2</div>
+      <div class="eyebrow">Supporting microbenchmark 2</div>
       <h2><code>expand_device_path</code> is also linear in the worst case</h2>
       <p class="kicker">The target partition is last, so each result includes a complete topology scan.</p>
       <div class="chart-wrap">
@@ -753,57 +854,58 @@
         <div class="panel">
           <h3 class="good">Supported</h3>
           <ul>
+            <li><code>patina_boot</code> provides an explicit, customizable boot-policy boundary.</li>
+            <li><code>patina_sre</code> demonstrates integrated recovery on real MAA hardware.</li>
+            <li>The clean isolated MAA run shows no material whole-boot regression versus C <code>BdsDxe</code>.</li>
             <li>The merged harness runs without firmware hardware.</li>
             <li>Both helper costs grow approximately linearly with topology size.</li>
-            <li>Large-topology primitive costs are in the low hundreds of thousands of reference cycles.</li>
-            <li>We now have a concrete path to automated performance visibility.</li>
           </ul>
         </div>
         <div class="panel">
           <h3 class="bad">Not supported yet</h3>
           <ul>
             <li>"Patina is X% faster than C BdsDxe."</li>
-            <li>A total <code>BootOrchestrator::execute()</code> cycle number.</li>
-            <li>A platform boot-time improvement claim.</li>
+            <li>That the observed -14 ms mean difference proves <code>patina_boot</code> is faster.</li>
+            <li>Phase-by-phase parity between the measured firmware images.</li>
             <li>A reliable 10% per-PR regression gate.</li>
           </ul>
         </div>
       </div>
       <aside class="presenter-notes">
-        <p>Use this slide to prevent the microbenchmarks from being quoted as end-to-end boot performance.</p>
+        <p>Separate the adoption case, which is already concrete, from performance attribution, which still needs controlled A/B evidence.</p>
       </aside>
     </section>
 
     <section class="slide">
       <div class="eyebrow">Roadmap</div>
-      <h2>From helper data to a credible headline</h2>
+      <h2>Prove parity, isolate cost, then optimize</h2>
       <div class="timeline">
         <div class="step">
           <div class="num">1</div>
-          <h3>Harden cycles</h3>
-          <p>Serialize TSC reads, pin the host, and demonstrate less than 5% repeatability.</p>
+          <h3>Clean baseline</h3>
+          <p>Completed: same DXE core, equivalent normal-boot conditions, and no <code>patina_sre</code>.</p>
         </div>
         <div class="step">
           <div class="num">2</div>
-          <h3>Measure execute</h3>
-          <p>Unblock #124 with a <code>StandardBootServices</code> test factory.</p>
+          <h3>Match minimal policy</h3>
+          <p>Align connection scope, BootNext, console, events, and failure handling between both managers.</p>
         </div>
         <div class="step">
           <div class="num">3</div>
-          <h3>Add QEMU / FPDT</h3>
-          <p>Land #118 and #119 for end-to-end BDS timing.</p>
+          <h3>Instrument and scale</h3>
+          <p>Flash shared loader markers and run at least 10 randomized, interleaved boots per arm.</p>
         </div>
         <div class="step">
           <div class="num">4</div>
-          <h3>Gate and compare</h3>
-          <p>Enable #120/#122/#123, then add the C baseline and OEM-facing claim.</p>
+          <h3>Optimize and gate</h3>
+          <p>Tune device discovery, harden repeatability, and gate regressions after attribution is stable.</p>
         </div>
       </div>
       <div class="callout" style="margin-top: 1.2rem;">
-        Recommendation: treat the current numbers as engineering characterization, then fund measurement hardening and the execute() factory as the next two deliverables.
+        Recommendation: adopt based on safety, customization, and recovery value; use the controlled A/B work to establish the final performance envelope.
       </div>
       <aside class="presenter-notes">
-        <p>Connect this roadmap back to the remaining #108 child issues and the Boot Manager Modernization project plan.</p>
+        <p>The clean smoke result removes the suspected performance regression. Remaining work increases confidence and attributes time to phases rather than chasing an unexplained whole-boot penalty.</p>
       </aside>
     </section>
 
@@ -833,14 +935,16 @@
             <div><a href="https://github.com/OpenDevicePartnership/odp-platform-common/issues/124">#124 execute() follow-up</a></div>
             <div><a href="https://github.com/OpenDevicePartnership/odp-platform-common/issues/183">#183 presentation task</a></div>
             <div><a href="benchmark-results-2026-08.csv">Raw presentation CSV</a></div>
+            <div><code>isolated-patina-bds-clean-20260814-summary.csv</code></div>
+            <div><code>advlog-current-14.65282.9.txt</code></div>
           </div>
         </div>
       </div>
       <div class="callout" style="margin-top: 1rem;">
-        Discussion: approve the claim boundary and prioritize measurement stability before enabling the regression gate.
+        Discussion: align on the OEM parity checklist, performance acceptance threshold, and recovery scenarios required for adoption.
       </div>
       <aside class="presenter-notes">
-        <p>End on a decision: characterize now, harden next, compare only after execute and QEMU baselines exist.</p>
+        <p>End on the updated decision: accept the clean parity evidence, then fund the matched-policy and phase-attribution work needed for a final implementation-cost bound.</p>
       </aside>
     </section>
 

@@ -36,5 +36,9 @@ For custom boot flows, use the helper functions in the `helpers` module:
 
 ## Performance
 
-- [August 2026 microbenchmark presentation](docs/benchmark-presentation-2026-08.html)
-- [Presentation benchmark data](docs/benchmark-results-2026-08.csv)
+- [Boot Manager Modernization deck](docs/boot-manager-modernization-presentation-2026-08.html)
+- [Patina upstream proposal](docs/patina-upstream-proposal-2026-08.html)
+- [OEM adoption presentation](docs/oem-adoption-presentation-2026-08.html)
+- [Technical benchmark appendix](docs/benchmark-presentation-2026-08.html)
+- [Matched-policy benchmark contract](docs/matched-policy-benchmark-contract-2026-08.md)
+- [Host microbenchmark data](docs/benchmark-results-2026-08.csv)

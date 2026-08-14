@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Upstream patina_boot into Patina</title>
+  <style>
+    :root {
+      --bg: #08111f;
+      --panel: #101d2f;
+      --line: #263b55;
+      --text: #f5f7fb;
+      --muted: #a8b5c7;
+      --blue: #5ab7ff;
+      --green: #61d6a3;
+      --orange: #ffb45c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+    code { color: var(--blue); font-family: "Cascadia Code", Consolas, monospace; }
+    .deck { position: relative; width: 100vw; height: 100vh; }
+    .slide {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      padding: 7vh 8vw;
+    }
+    .slide.active { display: flex; }
+    .eyebrow {
+      margin-bottom: 1rem;
+      color: var(--blue);
+      font-size: clamp(0.85rem, 1.4vw, 1.15rem);
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+    h1, h2 { margin: 0; max-width: 1100px; line-height: 1.02; letter-spacing: -0.04em; }
+    h1 { font-size: clamp(3.6rem, 7vw, 7rem); }
+    h2 { font-size: clamp(2.8rem, 5.3vw, 5.2rem); }
+    h3 { margin: 0 0 0.7rem; font-size: clamp(1.25rem, 2vw, 1.9rem); }
+    p { margin: 0; line-height: 1.4; }
+    .subtitle {
+      max-width: 950px;
+      margin-top: 1.8rem;
+      color: var(--muted);
+      font-size: clamp(1.25rem, 2.2vw, 2rem);
+    }
+    .accent { color: var(--green); }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.2rem;
+      margin-top: 3rem;
+    }
+    .card {
+      min-height: 220px;
+      padding: 1.7rem;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+    }
+    .card .number {
+      display: block;
+      margin-bottom: 1rem;
+      color: var(--green);
+      font-size: clamp(2.3rem, 4vw, 4.2rem);
+      font-weight: 800;
+      letter-spacing: -0.04em;
+    }
+    .card p { color: var(--muted); font-size: clamp(1.05rem, 1.55vw, 1.4rem); }
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto 1fr;
+      align-items: stretch;
+      gap: 1rem;
+      margin-top: 3rem;
+    }
+    .flow-box {
+      display: flex;
+      min-height: 230px;
+      flex-direction: column;
+      justify-content: center;
+      padding: 1.8rem;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+      text-align: center;
+    }
+    .flow-box strong { margin-bottom: 0.8rem; font-size: clamp(1.6rem, 2.7vw, 2.5rem); }
+    .flow-box span { color: var(--muted); font-size: clamp(1rem, 1.5vw, 1.35rem); line-height: 1.4; }
+    .arrow { display: flex; align-items: center; color: var(--blue); font-size: 2.4rem; font-weight: 700; }
+    .callout {
+      margin-top: 2rem;
+      padding: 1.4rem 1.7rem;
+      border-left: 5px solid var(--orange);
+      background: var(--panel);
+      font-size: clamp(1.25rem, 2vw, 1.8rem);
+      font-weight: 700;
+      line-height: 1.35;
+    }
+    .ask {
+      margin-top: 2rem;
+      color: var(--text);
+      font-size: clamp(1.45rem, 2.7vw, 2.5rem);
+      font-weight: 700;
+    }
+    .footer {
+      position: absolute;
+      right: 3vw;
+      bottom: 2.5vh;
+      left: 3vw;
+      display: flex;
+      justify-content: space-between;
+      color: #728197;
+      font-size: 0.9rem;
+    }
+    .progress { position: fixed; right: 0; bottom: 0; left: 0; height: 5px; background: #122238; }
+    .progress span { display: block; width: 0; height: 100%; background: var(--blue); transition: width 160ms ease; }
+    .help { position: fixed; top: 2vh; right: 3vw; color: #728197; font-size: 0.85rem; }
+    .notes {
+      position: fixed;
+      right: 2vw;
+      bottom: 5vh;
+      left: 2vw;
+      display: none;
+      max-height: 28vh;
+      overflow: auto;
+      padding: 1rem 1.3rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(5, 11, 20, 0.96);
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .notes.visible { display: block; }
+    .presenter-notes { display: none; }
+    @media print {
+      body { overflow: visible; }
+      .deck { width: auto; height: auto; }
+      .slide { position: relative; display: flex; width: 13.333in; height: 7.5in; break-after: page; }
+      .help, .progress, .notes { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck">
+    <section class="slide active">
+      <div class="eyebrow">Patina upstream proposal</div>
+      <h1>Make boot policy a<br><span class="accent">first-class component.</span></h1>
+      <p class="subtitle"><code>patina_boot</code> gives Patina a reusable BDS architecture instead of leaving every platform to rebuild boot orchestration.</p>
+      <aside class="presenter-notes">
+        <p>This is an upstream architecture proposal, not a request to merge Surface policy. The reusable contribution is BootDispatcher, BootOrchestrator, helpers, strategies, and tests.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">The gap</div>
+      <h2>Patina reaches DXE. Platforms still need a boot manager.</h2>
+      <div class="cards">
+        <div class="card">
+          <span class="number">BDS</span>
+          <h3>Required architecture</h3>
+          <p>A Patina firmware still needs the BDS architectural protocol and UEFI boot sequencing.</p>
+        </div>
+        <div class="card">
+          <span class="number">N</span>
+          <h3>Platform reinvention</h3>
+          <p>Without a shared component, each adopter builds or retains a separate C boot manager.</p>
+        </div>
+        <div class="card">
+          <span class="number">API</span>
+          <h3>Missing policy boundary</h3>
+          <p>Patina needs a stable place for platform boot decisions without coupling them to DXE core.</p>
+        </div>
+      </div>
+      <aside class="presenter-notes">
+        <p>Patina's value is weakened if every platform must leave the architecture for C BdsDxe or invent an incompatible Rust BDS stack.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">The contribution</div>
+      <h2>Mechanism upstream. Policy downstream.</h2>
+      <div class="flow">
+        <div class="flow-box">
+          <strong><code>BootDispatcher</code></strong>
+          <span>Installs BDS and enters orchestration</span>
+        </div>
+        <div class="arrow">-&gt;</div>
+        <div class="flow-box">
+          <strong><code>BootOrchestrator</code></strong>
+          <span>Small platform-owned policy contract</span>
+        </div>
+        <div class="arrow">-&gt;</div>
+        <div class="flow-box">
+          <strong>Helpers + strategies</strong>
+          <span>Reusable UEFI sequencing and device discovery</span>
+        </div>
+      </div>
+      <div class="callout">Upstream does not own OEM policy. It owns a tested framework that makes OEM policy composable.</div>
+      <aside class="presenter-notes">
+        <p>This separation is the central maintainability argument. Surface-specific recovery remains in patina_sre; generic boot primitives belong in Patina.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Evidence</div>
+      <h2>It combines real-firmware proof with testable invariants.</h2>
+      <div class="cards">
+        <div class="card">
+          <span class="number">-0.3%</span>
+          <h3>Whole-boot parity</h3>
+          <p>4.306 s versus 4.320 s mean on the same MAA and Patina DXE core.</p>
+        </div>
+        <div class="card">
+          <span class="number">78+</span>
+          <h3>Host tests</h3>
+          <p>Malformed variables, cleanup, events, device paths, and sequencing execute without hardware.</p>
+        </div>
+        <div class="card">
+          <span class="number">Type</span>
+          <h3>Lifecycle invariant</h3>
+          <p><code>Result&lt;!, EfiError&gt;</code> prevents BDS from reporting success by returning.</p>
+        </div>
+      </div>
+      <div class="callout">The value is architectural reuse with measured performance parity—not a claim that Rust wins a stopwatch contest.</div>
+      <aside class="presenter-notes">
+        <p>Both arms were verified under normal-boot conditions on the same device and Patina DXE core, making the total firmware measurements comparable. The result does not isolate the boot-manager implementation because the C and Rust managers still differ in connection, console, BootNext, event, and failure policy.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Bug prevention</div>
+      <h2>The design targets recurring firmware failure modes.</h2>
+      <div class="cards">
+        <div class="card">
+          <span class="number">Bounds</span>
+          <h3>Corrupt variable data</h3>
+          <p>EFI load-option offsets and every device-path node length are checked before unsafe conversion.</p>
+        </div>
+        <div class="card">
+          <span class="number">Own</span>
+          <h3>Lifetime mistakes</h3>
+          <p>Owned device paths and buffers replace long-lived borrowed pointers and manual allocation pairing.</p>
+        </div>
+        <div class="card">
+          <span class="number">CI</span>
+          <h3>Cleanup and ordering</h3>
+          <p>Watchdog disable, event behavior, fallback, and connect/dispatch convergence have deterministic tests.</p>
+        </div>
+      </div>
+      <div class="callout">Rust does not remove policy bugs. It makes more invalid states impossible and more remaining states reproducible.</div>
+      <aside class="presenter-notes">
+        <p>The C BDS + UefiBootManagerLib surface inspected for comparison is about 9.8K lines with 176 allocation/free call sites and 71 assertions. The Rust framework is not yet feature-equivalent, so do not present this as a size win. Present it as evidence for explicit ownership and smaller review boundaries.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Upstream quality bar</div>
+      <h2>Merge the framework with explicit acceptance gates.</h2>
+      <div class="cards">
+        <div class="card">
+          <span class="number">2</span>
+          <h3>Reference consumers</h3>
+          <p>Keep the MAA integration and add a QEMU or second-platform orchestrator; SRE is one consumer, not the architecture.</p>
+        </div>
+        <div class="card">
+          <span class="number">UEFI</span>
+          <h3>Compliance matrix</h3>
+          <p>Document BootNext, BootOrder, events, watchdog, failure, and console behavior.</p>
+        </div>
+        <div class="card">
+          <span class="number">CI</span>
+          <h3>Regression gates</h3>
+          <p>Test feature combinations, unsafe boundaries, code size, and host benchmarks.</p>
+        </div>
+      </div>
+      <aside class="presenter-notes">
+        <p>These gates make the proposal low-risk for maintainers. They demonstrate genericity, specification coverage, and a sustainable maintenance plan.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Upstream decision</div>
+      <h2>Accept <code>patina_boot</code> as Patina's boot-policy framework.</h2>
+      <div class="cards">
+        <div class="card">
+          <span class="number">Core</span>
+          <h3>Merge upstream</h3>
+          <p>Dispatcher, orchestrator trait, generic helpers, strategies, documentation, and tests.</p>
+        </div>
+        <div class="card">
+          <span class="number">OEM</span>
+          <h3>Keep policy external</h3>
+          <p>Platform-specific recovery, UI, device choices, and business logic remain downstream.</p>
+        </div>
+        <div class="card">
+          <span class="number">Own</span>
+          <h3>Define maintainers</h3>
+          <p>Name reviewers, compatibility expectations, and the path for new generic helpers.</p>
+        </div>
+      </div>
+      <div class="ask">Upstream the reusable mechanism; let platforms prove the policy.</div>
+      <aside class="presenter-notes">
+        <p>The ask is intentionally bounded. Patina gains a complete architectural story through BDS, while maintainers avoid taking ownership of Surface-specific behavior.</p>
+      </aside>
+    </section>
+
+    <div class="footer">
+      <span>Open Device Partnership - Patina</span>
+      <span id="counter">1 / 6</span>
+    </div>
+  </main>
+
+  <div class="help">Arrows / Space: navigate &nbsp; N: notes &nbsp; P: print</div>
+  <div class="progress"><span id="progress-bar"></span></div>
+  <div class="notes" id="notes"></div>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const counter = document.getElementById("counter");
+    const progressBar = document.getElementById("progress-bar");
+    const notes = document.getElementById("notes");
+    let index = 0;
+
+    function showSlide(next) {
+      index = Math.max(0, Math.min(slides.length - 1, next));
+      slides.forEach((slide, i) => slide.classList.toggle("active", i === index));
+      counter.textContent = `${index + 1} / ${slides.length}`;
+      progressBar.style.width = `${((index + 1) / slides.length) * 100}%`;
+      const source = slides[index].querySelector(".presenter-notes");
+      notes.innerHTML = source ? source.innerHTML : "";
+    }
+
+    document.addEventListener("keydown", (event) => {
+      if (["ArrowRight", "ArrowDown", "PageDown", " "].includes(event.key)) {
+        event.preventDefault();
+        showSlide(index + 1);
+      } else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(event.key)) {
+        event.preventDefault();
+        showSlide(index - 1);
+      } else if (event.key.toLowerCase() === "n") {
+        notes.classList.toggle("visible");
+      } else if (event.key.toLowerCase() === "p") {
+        window.print();
+      } else if (event.key === "Home") {
+        showSlide(0);
+      } else if (event.key === "End") {
+        showSlide(slides.length - 1);
+      }
+    });
+
+    showSlide(0);
+  </script>
+</body>
+</html>
