@@ -36,6 +36,7 @@ For custom boot flows, use the helper functions in the `helpers` module:
 
 ## Performance
 
+- [Upstream readiness progress review](docs/boot-manager-modernization-progress-review-2026-08.html)
 - [Boot Manager Modernization deck](docs/boot-manager-modernization-presentation-2026-08.html)
 - [Patina upstream proposal](docs/patina-upstream-proposal-2026-08.html)
 - [OEM adoption presentation](docs/oem-adoption-presentation-2026-08.html)

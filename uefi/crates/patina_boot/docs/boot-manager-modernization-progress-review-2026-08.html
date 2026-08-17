@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Boot Manager Modernization Progress Review</title>
+  <style>
+    :root {
+      --bg: #08111f;
+      --panel: #101d2f;
+      --line: #263b55;
+      --text: #f5f7fb;
+      --muted: #a8b5c7;
+      --blue: #5ab7ff;
+      --green: #61d6a3;
+      --orange: #ffb45c;
+      --red: #ff7c83;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+
+    code {
+      color: var(--blue);
+      font-family: "Cascadia Code", Consolas, monospace;
+    }
+
+    .deck { position: relative; width: 100vw; height: 100vh; }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      padding: 6.5vh 7vw;
+    }
+
+    .slide.active { display: flex; }
+
+    .eyebrow {
+      margin-bottom: 1rem;
+      color: var(--blue);
+      font-size: clamp(0.8rem, 1.3vw, 1.1rem);
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    h1, h2 {
+      margin: 0;
+      max-width: 1180px;
+      line-height: 1.02;
+      letter-spacing: -0.04em;
+    }
+
+    h1 { font-size: clamp(3.5rem, 6.7vw, 6.7rem); }
+    h2 { font-size: clamp(2.7rem, 4.9vw, 4.9rem); }
+    h3 { margin: 0 0 0.65rem; font-size: clamp(1.2rem, 1.9vw, 1.8rem); }
+    p { margin: 0; line-height: 1.4; }
+
+    .subtitle {
+      max-width: 1050px;
+      margin-top: 1.7rem;
+      color: var(--muted);
+      font-size: clamp(1.2rem, 2.05vw, 1.9rem);
+    }
+
+    .accent { color: var(--green); }
+    .caution { color: var(--orange); }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.1rem;
+      margin-top: 2.55rem;
+    }
+
+    .cards.two { grid-template-columns: repeat(2, 1fr); }
+
+    .card {
+      min-height: 205px;
+      padding: 1.55rem;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+    }
+
+    .card .number {
+      display: block;
+      margin-bottom: 0.8rem;
+      color: var(--green);
+      font-size: clamp(2.05rem, 3.7vw, 3.9rem);
+      font-weight: 800;
+      letter-spacing: -0.04em;
+    }
+
+    .card p, .card li {
+      color: var(--muted);
+      font-size: clamp(1rem, 1.4vw, 1.27rem);
+      line-height: 1.4;
+    }
+
+    .card ul {
+      margin: 0;
+      padding-left: 1.25rem;
+    }
+
+    .answer {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.3rem;
+      margin-top: 2.6rem;
+    }
+
+    .answer-box {
+      padding: 2rem;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+    }
+
+    .answer-box.yes { border-top: 6px solid var(--green); }
+    .answer-box.not-yet { border-top: 6px solid var(--orange); }
+
+    .answer-box strong {
+      display: block;
+      margin-bottom: 0.8rem;
+      font-size: clamp(1.65rem, 2.8vw, 2.6rem);
+    }
+
+    .answer-box p {
+      color: var(--muted);
+      font-size: clamp(1.05rem, 1.55vw, 1.42rem);
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.2rem;
+      margin-top: 2.7rem;
+    }
+
+    .metric {
+      padding: 1.85rem;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+    }
+
+    .metric strong {
+      display: block;
+      font-size: clamp(2.7rem, 4.8vw, 5rem);
+      letter-spacing: -0.05em;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: clamp(1rem, 1.42vw, 1.28rem);
+      line-height: 1.4;
+    }
+
+    .callout {
+      margin-top: 1.75rem;
+      padding: 1.2rem 1.5rem;
+      border-left: 5px solid var(--orange);
+      background: var(--panel);
+      font-size: clamp(1.15rem, 1.8vw, 1.65rem);
+      font-weight: 700;
+      line-height: 1.35;
+    }
+
+    .scorecard {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.55rem;
+      margin-top: 2rem;
+    }
+
+    .score-row {
+      display: grid;
+      grid-template-columns: 145px 1fr 1.25fr;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.72rem 1rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+
+    .status {
+      display: inline-block;
+      width: fit-content;
+      padding: 0.35rem 0.7rem;
+      border-radius: 999px;
+      font-size: clamp(0.78rem, 1vw, 0.92rem);
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .status.complete { background: rgba(97, 214, 163, 0.15); color: var(--green); }
+    .status.active { background: rgba(90, 183, 255, 0.15); color: var(--blue); }
+    .status.open { background: rgba(255, 180, 92, 0.15); color: var(--orange); }
+
+    .score-row strong { font-size: clamp(1rem, 1.35vw, 1.25rem); }
+    .score-row span:last-child {
+      color: var(--muted);
+      font-size: clamp(0.9rem, 1.15vw, 1.06rem);
+    }
+
+    .stages {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0.75rem;
+      margin-top: 2.5rem;
+    }
+
+    .stage {
+      position: relative;
+      min-height: 250px;
+      padding: 1.25rem;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel);
+    }
+
+    .stage.done { border-top: 6px solid var(--green); }
+    .stage.current { border-top: 6px solid var(--blue); }
+    .stage.future { border-top: 6px solid var(--line); }
+
+    .stage .index {
+      display: block;
+      margin-bottom: 0.8rem;
+      color: var(--muted);
+      font-size: 1rem;
+      font-weight: 800;
+    }
+
+    .stage strong {
+      display: block;
+      margin-bottom: 0.7rem;
+      font-size: clamp(1.15rem, 1.6vw, 1.5rem);
+    }
+
+    .stage p {
+      color: var(--muted);
+      font-size: clamp(0.9rem, 1.12vw, 1.05rem);
+    }
+
+    .ask {
+      margin-top: 1.9rem;
+      font-size: clamp(1.35rem, 2.35vw, 2.2rem);
+      font-weight: 700;
+    }
+
+    .footer {
+      position: absolute;
+      right: 3vw;
+      bottom: 2.3vh;
+      left: 3vw;
+      display: flex;
+      justify-content: space-between;
+      color: #728197;
+      font-size: 0.88rem;
+    }
+
+    .progress {
+      position: fixed;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      height: 5px;
+      background: #122238;
+    }
+
+    .progress span {
+      display: block;
+      width: 0;
+      height: 100%;
+      background: var(--blue);
+      transition: width 160ms ease;
+    }
+
+    .help { position: fixed; top: 2vh; right: 3vw; color: #728197; font-size: 0.85rem; }
+
+    .notes {
+      position: fixed;
+      right: 2vw;
+      bottom: 5vh;
+      left: 2vw;
+      display: none;
+      max-height: 28vh;
+      overflow: auto;
+      padding: 1rem 1.3rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(5, 11, 20, 0.96);
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .notes.visible { display: block; }
+    .presenter-notes { display: none; }
+
+    @media print {
+      body { overflow: visible; }
+      .deck { width: auto; height: auto; }
+      .slide {
+        position: relative;
+        display: flex;
+        width: 13.333in;
+        height: 7.5in;
+        break-after: page;
+      }
+      .slide:last-of-type { break-after: auto; }
+      .help, .progress, .notes { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck">
+    <section class="slide active">
+      <div class="eyebrow">Boot Manager Modernization progress review</div>
+      <h1>From working component to<br><span class="accent">upstream-ready framework.</span></h1>
+      <p class="subtitle">What has been delivered, what the evidence supports today, and which gates remain before <code>patina_boot</code> should be accepted upstream.</p>
+      <aside class="presenter-notes">
+        <p>This is a progress and readiness review. It is intentionally different from the OEM decision deck: the objective is to show completed engineering, current proof, and the exact distance to upstream acceptance.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Executive answer</div>
+      <h2>Is <code>patina_boot</code> ready for upstreaming?</h2>
+      <div class="answer">
+        <div class="answer-box yes">
+          <strong>Yes—for upstream design review</strong>
+          <p>The reusable architecture runs on hardware, has bounded interfaces, host tests, documentation, and no observed whole-boot regression.</p>
+        </div>
+        <div class="answer-box not-yet">
+          <strong>Not yet—for final acceptance as a complete BDS replacement</strong>
+          <p>Portability, semantic scope, fail-closed security ordering, and a second consumer still need accepted evidence.</p>
+        </div>
+      </div>
+      <div class="callout">The right next step is upstream review against explicit gates—not waiting until every OEM policy is implemented.</div>
+      <aside class="presenter-notes">
+        <p>The scope matters. The framework is ready to be reviewed as generic Patina mechanism. It is not yet defensible to call it a feature-complete drop-in replacement for EDK2 BdsDxe or a production-qualified OEM boot manager.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Architecture delivered</div>
+      <h2>The reusable component boundary now exists.</h2>
+      <div class="cards">
+        <div class="card">
+          <span class="number">Dispatch</span>
+          <h3><code>BootDispatcher</code></h3>
+          <p>Installs the BDS architectural protocol and transfers control into a Patina component.</p>
+        </div>
+        <div class="card">
+          <span class="number">Policy</span>
+          <h3><code>BootOrchestrator</code></h3>
+          <p>Separates platform decisions from shared boot mechanism through a small explicit contract.</p>
+        </div>
+        <div class="card">
+          <span class="number">Reuse</span>
+          <h3>Helpers + strategies</h3>
+          <p>Provide parsing, connection, events, device-path expansion, image launch, and test seams.</p>
+        </div>
+      </div>
+      <div class="callout">The upstream contribution is generic mechanism and compatibility expectations—not downstream product policy.</div>
+      <aside class="presenter-notes">
+        <p>This is the primary architectural accomplishment. Patina can own a stable BDS framework while platforms continue to own recovery, UI, provisioning, hotkeys, and product-specific source selection.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Evidence delivered</div>
+      <h2>The component is measured on hosts and real firmware.</h2>
+      <div class="metrics">
+        <div class="metric">
+          <strong>78+</strong>
+          <span>host tests for malformed variables, device paths, cleanup, events, and sequencing</span>
+        </div>
+        <div class="metric">
+          <strong>4.306 s</strong>
+          <span><code>patina_boot</code> mean across three verified normal warm boots</span>
+        </div>
+        <div class="metric">
+          <strong>4.320 s</strong>
+          <span>stock C BDS mean on the same device and Patina DXE core</span>
+        </div>
+      </div>
+      <div class="callout">The observed -13.7 ms (-0.3%) difference is smaller than run-to-run variation: no material whole-firmware regression was observed.</div>
+      <aside class="presenter-notes">
+        <p>This proves that the architecture can boot production hardware without an observable total-boot penalty in the clean sample. It does not prove intrinsic Rust speed because policy is not yet identical between arms.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Engineering rigor</div>
+      <h2>The work improved the quality of the claim—not only the code.</h2>
+      <div class="cards">
+        <div class="card">
+          <span class="number">A/B</span>
+          <h3>Controlled firmware arms</h3>
+          <p>Held the physical device, Patina DXE core, platform firmware, OS target, and build profile constant.</p>
+        </div>
+        <div class="card">
+          <span class="number">Reject</span>
+          <h3>Invalid samples removed</h3>
+          <p>Non-equivalent boot-state samples were discarded instead of being used to publish a false regression.</p>
+        </div>
+        <div class="card">
+          <span class="number">Bound</span>
+          <h3>Claims made objective</h3>
+          <p>Whole-firmware parity is separated from implementation cost, security, and feature-equivalence claims.</p>
+        </div>
+      </div>
+      <aside class="presenter-notes">
+        <p>This is important program work. The benchmark process found and corrected a confounder, established provenance rules, and left the project with a more credible result than a favorable but invalid comparison.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Assurance delivered</div>
+      <h2>The architecture targets firmware defects directly.</h2>
+      <div class="cards">
+        <div class="card">
+          <span class="number">Type</span>
+          <h3>Lifecycle invariant</h3>
+          <p><code>Result&lt;!, EfiError&gt;</code> makes successful BDS return unrepresentable.</p>
+        </div>
+        <div class="card">
+          <span class="number">Bounds</span>
+          <h3>Untrusted firmware data</h3>
+          <p>Load-option offsets, UTF-16 termination, and device-path node lengths are checked before conversion.</p>
+        </div>
+        <div class="card">
+          <span class="number">Own</span>
+          <h3>Resource lifetime</h3>
+          <p>Owned device paths and bounded enumeration narrow pointer, cleanup, and convergence risks.</p>
+        </div>
+      </div>
+      <div class="callout">The supported security argument is enforceable invariants plus adversarial tests—not “Rust is automatically secure.”</div>
+      <aside class="presenter-notes">
+        <p>The review also identified open security work: EndOfDxe must fail closed, ReadyToLock must be required, partition identity must be complete, and fallback sources must be explicit OEM policy.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Upstream readiness scorecard</div>
+      <h2>Five gates complete, two active, three open.</h2>
+      <div class="scorecard">
+        <div class="score-row"><span class="status complete">Complete</span><strong>Generic architecture</strong><span>Dispatcher, orchestrator, helpers, strategies, and policy boundary</span></div>
+        <div class="score-row"><span class="status complete">Complete</span><strong>Host test foundation</strong><span>Malformed inputs, event behavior, cleanup, and sequencing</span></div>
+        <div class="score-row"><span class="status complete">Complete</span><strong>Hardware consumer</strong><span>Patina firmware reaches the OS through the Rust BDS provider</span></div>
+        <div class="score-row"><span class="status complete">Complete</span><strong>Whole-boot regression check</strong><span>No material regression observed in the clean same-device sample</span></div>
+        <div class="score-row"><span class="status complete">Complete</span><strong>Architecture documentation</strong><span>Upstream proposal, OEM case, technical appendix, and claim boundaries</span></div>
+        <div class="score-row"><span class="status active">Active</span><strong>UEFI semantic contract</strong><span>#196 classifies supported, platform-policy, partial, and planned behavior</span></div>
+        <div class="score-row"><span class="status active">Active</span><strong>Platform-neutral audit</strong><span>#158 removes vendor assumptions and documents integration requirements</span></div>
+        <div class="score-row"><span class="status open">Open</span><strong>Security transition</strong><span>#191/#192: fail closed, ReadyToLock, partition identity, and fallback policy</span></div>
+        <div class="score-row"><span class="status open">Open</span><strong>Second reference consumer</strong><span>#118: QEMU or another platform proves the API is not shaped around one device</span></div>
+        <div class="score-row"><span class="status open">Open</span><strong>Continuous evidence</strong><span>#120/#124/#195: CI regression gate and matched-policy implementation attribution</span></div>
+      </div>
+      <aside class="presenter-notes">
+        <p>This is a gate count, not an invented percentage. Completion of all ten is the proposed upstream acceptance target. Maintainers may decide that matched-policy attribution belongs after merge, but the decision should be explicit.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Program position</div>
+      <h2>We are in Stage 3 of 5: upstream hardening.</h2>
+      <div class="stages">
+        <div class="stage done">
+          <span class="index">Stage 1</span>
+          <strong>Build the component</strong>
+          <p>Architecture, helpers, test seams, and a default orchestrator.</p>
+        </div>
+        <div class="stage done">
+          <span class="index">Stage 2</span>
+          <strong>Prove the platform</strong>
+          <p>Boot real firmware, establish A/B images, and collect clean evidence.</p>
+        </div>
+        <div class="stage current">
+          <span class="index">Stage 3 - Current</span>
+          <strong>Harden for upstream</strong>
+          <p>Semantic scope, portability, security ordering, and review-ready documentation.</p>
+        </div>
+        <div class="stage future">
+          <span class="index">Stage 4</span>
+          <strong>Review and merge</strong>
+          <p>Maintainer feedback, second consumer, accepted compatibility contract, ownership.</p>
+        </div>
+        <div class="stage future">
+          <span class="index">Stage 5</span>
+          <strong>Qualify adoption</strong>
+          <p>OEM security matrix, product policy, release gates, and production validation.</p>
+        </div>
+      </div>
+      <aside class="presenter-notes">
+        <p>Stages 1 and 2 are complete. Stage 3 is active and bounded by the scorecard. Upstream review should begin during Stage 3 so maintainer decisions shape the remaining work rather than arriving after the implementation is considered finished.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Remaining upstream work</div>
+      <h2>The path to acceptance is concrete.</h2>
+      <div class="cards">
+        <div class="card">
+          <span class="number">1</span>
+          <h3>Close semantic decisions</h3>
+          <p>Finish #196 and agree which EDK2 behaviors are generic mechanism, optional policy modules, or intentionally excluded.</p>
+        </div>
+        <div class="card">
+          <span class="number">2</span>
+          <h3>Enforce security ordering</h3>
+          <p>Complete #191/#192 so image launch cannot proceed through an incomplete lockdown or ambiguous source.</p>
+        </div>
+        <div class="card">
+          <span class="number">3</span>
+          <h3>Prove genericity</h3>
+          <p>Land a QEMU or second-platform consumer, finish the neutral audit, and define maintainers and CI gates.</p>
+        </div>
+      </div>
+      <div class="callout">Matched-policy performance improves attribution, but whole-boot parity already removes performance as a reason to reject architecture review.</div>
+      <aside class="presenter-notes">
+        <p>The security and second-consumer gates are the strongest remaining blockers. The performance follow-up is still valuable, but the current result is sufficient to say the framework has not shown a material platform regression.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Decision request</div>
+      <h2>Begin upstream review now, with acceptance gated on the scorecard.</h2>
+      <div class="answer">
+        <div class="answer-box yes">
+          <strong>Request from Patina</strong>
+          <p>Review the architecture and proposed semantic scope; agree which remaining gates are pre-merge versus post-merge follow-up.</p>
+        </div>
+        <div class="answer-box not-yet">
+          <strong>Commitment from the program</strong>
+          <p>Close security ordering, portability, test evidence, and ownership gaps before claiming complete BDS replacement readiness.</p>
+        </div>
+      </div>
+      <div class="ask">The crate is ready to enter upstream—not ready to declare the modernization program finished.</div>
+      <aside class="presenter-notes">
+        <p>This is the bounded conclusion. The work completed so far justifies maintainer engagement and an upstream path. It does not justify skipping the remaining acceptance gates or making an unconditional production-security claim.</p>
+      </aside>
+    </section>
+
+    <div class="footer">
+      <span>Open Device Partnership - Boot Manager Modernization</span>
+      <span id="counter">1 / 10</span>
+    </div>
+  </main>
+
+  <div class="help">Arrows / Space: navigate &nbsp; N: notes &nbsp; P: print</div>
+  <div class="progress"><span id="progress-bar"></span></div>
+  <div class="notes" id="notes"></div>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const counter = document.getElementById("counter");
+    const progressBar = document.getElementById("progress-bar");
+    const notes = document.getElementById("notes");
+    let index = 0;
+
+    function showSlide(next) {
+      index = Math.max(0, Math.min(slides.length - 1, next));
+      slides.forEach((slide, i) => slide.classList.toggle("active", i === index));
+      counter.textContent = `${index + 1} / ${slides.length}`;
+      progressBar.style.width = `${((index + 1) / slides.length) * 100}%`;
+      const source = slides[index].querySelector(".presenter-notes");
+      notes.innerHTML = source ? source.innerHTML : "";
+    }
+
+    document.addEventListener("keydown", (event) => {
+      if (["ArrowRight", "ArrowDown", "PageDown", " "].includes(event.key)) {
+        event.preventDefault();
+        showSlide(index + 1);
+      } else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(event.key)) {
+        event.preventDefault();
+        showSlide(index - 1);
+      } else if (event.key.toLowerCase() === "n") {
+        notes.classList.toggle("visible");
+      } else if (event.key.toLowerCase() === "p") {
+        window.print();
+      } else if (event.key === "Home") {
+        showSlide(0);
+      } else if (event.key === "End") {
+        showSlide(slides.length - 1);
+      }
+    });
+
+    showSlide(0);
+  </script>
+</body>
+</html>
