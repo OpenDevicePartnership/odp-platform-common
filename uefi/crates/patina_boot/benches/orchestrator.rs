@@ -248,6 +248,7 @@ mod fake_tables;
 fn execute_e2e(c: &mut Criterion) {
     use patina::boot_services::StandardBootServices;
     use patina::component::service::dxe_dispatch::MockDxeDispatch;
+    use patina::error::EfiError;
     use patina::runtime_services::StandardRuntimeServices;
     use patina_boot::{boot_orchestrator::BootOrchestrator, config::BootConfig, orchestrators::SimpleBootManager};
 
@@ -259,12 +260,13 @@ fn execute_e2e(c: &mut Criterion) {
     let mut dispatch = MockDxeDispatch::new();
     dispatch.expect_dispatch().returning(|| Ok(false));
 
+    let config = BootConfig::new(patina::device_path::paths::DevicePathBuf::from_device_path_node_iter(
+        [patina::device_path::node_defs::Acpi::new_pci_root(0)].into_iter(),
+    ));
+    let manager = SimpleBootManager::new(config);
+
     c.bench_function("execute_e2e", |b| {
         b.iter(|| {
-            let config = BootConfig::new(patina::device_path::paths::DevicePathBuf::from_device_path_node_iter(
-                [patina::device_path::node_defs::Acpi::new_pci_root(0)].into_iter(),
-            ));
-            let manager = SimpleBootManager::new(config);
             let result = manager.execute(
                 &boot_services,
                 &runtime_services,
@@ -272,7 +274,7 @@ fn execute_e2e(c: &mut Criterion) {
                 core::ptr::dangling_mut::<core::ffi::c_void>(),
             );
             // Exhausting every option is the expected terminal state.
-            assert!(result.is_err());
+            assert!(matches!(result, Err(EfiError::NotFound)));
             black_box(result.err())
         })
     });

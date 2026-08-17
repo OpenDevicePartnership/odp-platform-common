@@ -319,18 +319,20 @@ unsafe extern "efiapi" fn bs_locate_handle_buffer(
     _a3: *mut usize,
     _a4: *mut *mut r_efi::base::Handle,
 ) -> r_efi::base::Status {
-    // No handles: connect_all converges immediately; discovery finds no volumes.
+    // No handles: connect/dispatch converges after one pass and discovery finds
+    // no volumes. SUCCESS ensures the orchestrator exercises that loop.
     // SAFETY: out-pointers come from the wrapped table caller per the UEFI
-    // contract; writes are null-checked or spec-required single writes.
+    // contract. A non-null dangling pointer is required because the wrapper
+    // constructs a zero-length Rust slice from this successful result.
     unsafe {
         if !_a3.is_null() {
             *_a3 = 0;
         }
         if !_a4.is_null() {
-            *_a4 = core::ptr::null_mut();
+            *_a4 = core::ptr::NonNull::<r_efi::base::Handle>::dangling().as_ptr();
         }
     }
-    efi::Status::NOT_FOUND
+    efi::Status::SUCCESS
 }
 
 unsafe extern "efiapi" fn bs_locate_protocol(
