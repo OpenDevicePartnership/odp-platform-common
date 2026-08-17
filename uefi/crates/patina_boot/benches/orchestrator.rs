@@ -235,8 +235,8 @@ fn expand_device_path_topology(c: &mut Criterion) {
     group.finish();
 }
 
-#[path = "support/fake_tables.rs"]
-mod fake_tables;
+#[path = "support/mock_tables.rs"]
+mod mock_tables;
 
 /// True end-to-end bench of `BootOrchestrator::execute()` against fake
 /// firmware tables: `StandardBootServices`/`StandardRuntimeServices` wrap
@@ -252,8 +252,8 @@ fn execute_e2e(c: &mut Criterion) {
     use patina::runtime_services::StandardRuntimeServices;
     use patina_boot::{boot_orchestrator::BootOrchestrator, config::BootConfig, orchestrators::SimpleBootManager};
 
-    let bs_table = Box::leak(fake_tables::fake_boot_services());
-    let rt_table = Box::leak(fake_tables::fake_runtime_services());
+    let bs_table = Box::leak(mock_tables::mock_boot_services());
+    let rt_table = Box::leak(mock_tables::mock_runtime_services());
     let boot_services = StandardBootServices::new(bs_table);
     let runtime_services = StandardRuntimeServices::new(rt_table);
 

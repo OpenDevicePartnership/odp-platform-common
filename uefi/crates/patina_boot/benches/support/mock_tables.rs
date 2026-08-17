@@ -1,9 +1,14 @@
-//! Fake `efi::BootServices` / `efi::RuntimeServices` tables for driving
+//! Mock `efi::BootServices` / `efi::RuntimeServices` tables for driving
 //! `BootOrchestrator::execute()` (which takes the concrete `StandardBootServices`
-//! wrappers) without firmware. Every slot is populated with a correctly typed
-//! stub; slots the execute flow exercises carry canned behavior, the rest log
-//! and return `UNSUPPORTED`. Prototype for a `StandardBootServices` test
-//! factory to propose upstream in patina.
+//! wrappers) without firmware.
+//!
+//! Rust function pointers cannot be null, so every UEFI table slot must contain
+//! a correctly typed function. Only slots exercised by the benchmark have mock
+//! behavior; the rest log and return `UNSUPPORTED`. This is the single
+//! maintenance point for the table shape: an `r-efi` API change intentionally
+//! fails compilation here rather than leaving an invalid service table.
+//!
+//! This is a prototype for a reusable standard-service mock factory in Patina.
 //!
 //! ## License
 //!
@@ -508,7 +513,7 @@ unsafe extern "efiapi" fn rt_query_variable_info(
     efi::Status::UNSUPPORTED
 }
 
-pub fn fake_boot_services() -> Box<efi::BootServices> {
+pub fn mock_boot_services() -> Box<efi::BootServices> {
     Box::new(efi::BootServices {
         hdr: zero_header(),
         reserved: core::ptr::null_mut(),
@@ -558,7 +563,7 @@ pub fn fake_boot_services() -> Box<efi::BootServices> {
     })
 }
 
-pub fn fake_runtime_services() -> Box<efi::RuntimeServices> {
+pub fn mock_runtime_services() -> Box<efi::RuntimeServices> {
     Box::new(efi::RuntimeServices {
         hdr: zero_header(),
         get_time: rt_get_time,
