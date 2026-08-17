@@ -190,13 +190,101 @@ struct AcpiMethodInput<'a, 'b> {
 
 /// A user-friendly ACPI method argument
 #[derive(Debug, Clone)]
-pub(crate) enum AcpiMethodArgument {
+pub enum AcpiMethodArgument {
     /// Arbitrary u32 integer (DWORD)
     Int(u32),
     /// GUID in mixed-endian format
     Guid(uuid::Bytes),
+    /// Null-terminated ASCII string
+    String(String),
     /// Arbitrary-length byte buffer
     Buffer(Vec<u8>),
+}
+
+/// A value returned by an ACPI method evaluation.
+#[derive(Debug, Clone)]
+pub enum AcpiValue {
+    /// 32-bit integer.
+    Integer(u32),
+    /// Null-terminated string.
+    String(String),
+    /// Raw byte buffer.
+    Buffer(Vec<u8>),
+    /// Package of nested values.
+    Package(Vec<AcpiValue>),
+    /// Trailing bytes that could not be parsed as an argument.
+    Malformed(Vec<u8>),
+}
+
+impl std::fmt::Display for AcpiValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Integer(i) => write!(f, "Integer: {i} (0x{i:08X})"),
+            Self::String(s) => write!(f, "String: {s}"),
+            Self::Buffer(b) => {
+                write!(f, "Buffer ({} bytes):", b.len())?;
+                for byte in b {
+                    write!(f, " {byte:02X}")?;
+                }
+                Ok(())
+            }
+            Self::Package(items) => {
+                write!(f, "Package ({} items):", items.len())?;
+                for item in items {
+                    write!(f, " ({item})")?;
+                }
+                Ok(())
+            }
+            Self::Malformed(b) => {
+                write!(f, "Malformed trailing data ({} bytes):", b.len())?;
+                for byte in b {
+                    write!(f, " {byte:02X}")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+// Parse a packed sequence of ACPI method arguments into values (used for nested packages).
+fn parse_acpi_values(bytes: &[u8]) -> Vec<AcpiValue> {
+    let mut values = Vec::new();
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let header = bytes.get(offset..offset + 4);
+        let body = header.and_then(|h| {
+            let data_length = u16::from_le_bytes([h[2], h[3]]) as usize;
+            bytes.get(offset + 4..offset + 4 + data_length)
+        });
+
+        // Surface a short header or an overrunning length rather than dropping the remainder.
+        let (Some(header), Some(body)) = (header, body) else {
+            values.push(AcpiValue::Malformed(bytes[offset..].to_vec()));
+            break;
+        };
+
+        values.push(acpi_value_from(u16::from_le_bytes([header[0], header[1]]), body));
+        offset += 4 + body.len();
+    }
+    values
+}
+
+// Convert a single raw ACPI argument (type tag + data bytes) into an AcpiValue.
+// An integer's value shares storage with its data bytes (union in ACPI_METHOD_ARGUMENT).
+fn acpi_value_from(type_: u16, data: &[u8]) -> AcpiValue {
+    match AcpiArgumentType::try_from(type_) {
+        Ok(AcpiArgumentType::Integer) => {
+            let mut bytes = [0u8; 4];
+            let len = data.len().min(4);
+            bytes[..len].copy_from_slice(&data[..len]);
+            AcpiValue::Integer(u32::from_le_bytes(bytes))
+        }
+        Ok(AcpiArgumentType::String) => {
+            AcpiValue::String(String::from_utf8_lossy(data).trim_end_matches('\0').to_string())
+        }
+        Ok(AcpiArgumentType::Package | AcpiArgumentType::PackageEx) => AcpiValue::Package(parse_acpi_values(data)),
+        _ => AcpiValue::Buffer(data.to_vec()),
+    }
 }
 
 #[derive(Debug, Default)]
@@ -224,6 +312,16 @@ impl TryFrom<AcpiMethodArgument> for AcpiMethodArgumentV1 {
                 data_32: i,
                 data: i.to_le_bytes().to_vec(),
             },
+            AcpiMethodArgument::String(s) => {
+                let mut data = s.into_bytes();
+                data.push(0); // null terminator
+                Self {
+                    type_: AcpiArgumentType::String as u16,
+                    data_length: u16::try_from(data.len()).map_err(|_| AcpiParseError::InvalidFormat)?,
+                    data_32: 0,
+                    data,
+                }
+            }
             AcpiMethodArgument::Buffer(b) => Self {
                 type_: AcpiArgumentType::Buffer as u16,
                 data_length: u16::try_from(b.len()).map_err(|_| AcpiParseError::InvalidFormat)?,
@@ -382,6 +480,16 @@ impl Acpi {
             fan_instance,
             device_path,
         }
+    }
+
+    /// Evaluates an arbitrary ACPI method by name and returns its results as [`AcpiValue`]s.
+    pub fn eval(&self, name: &str, args: &[AcpiMethodArgument]) -> Result<Vec<AcpiValue>, Error> {
+        Ok(self
+            .evaluate(name, Some(args))?
+            .arguments
+            .iter()
+            .map(|arg| acpi_value_from(arg.type_, &arg.data))
+            .collect())
     }
 
     fn evaluate(

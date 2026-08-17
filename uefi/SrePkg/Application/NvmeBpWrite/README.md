@@ -1,7 +1,7 @@
 # sre-bp-tools
 
 Kit for flashing a ValidationOS WIM into NVMe Boot Partition 1 (BP1) on a
-Surface Maa 900 unit and exercising the SRE recovery boot path.
+supported development platform and exercising the SRE recovery boot path.
 
 Pre-1.0. Behavior, file layout, and command syntax may change.
 
@@ -56,15 +56,9 @@ Workstation (elevated PowerShell — `Mount-VHD` and `Format-Volume` need admin)
 ```
 
 > ⚠ **Run the `Stage-SreflashUsb.ps1` that's in this kit folder, not the
-> one inside your Devices repo.** The script auto-detects
-> `NvmeBpWrite.efi` and prefers a sibling next to itself. If you run the
-> repo-resident copy of the script from inside a Devices clone, it walks
-> up to find a `.git`, then picks up your local `stuart_build` output —
-> which may be a different (and possibly stale) version than the kit's
-> binary. The script now prints the resolved path + size + mtime +
-> SHA-256 prefix prominently, with a yellow warning if walk-up fires —
-> always sanity-check the displayed mtime and hash before continuing.
-> If unsure, pass `-ToolPath <kit>\NvmeBpWrite.efi` explicitly.
+> one from another checkout.** The script prefers `NvmeBpWrite.efi` next
+> to itself. Always sanity-check the displayed path, mtime, and hash. If
+> unsure, pass `-ToolPath <kit>\NvmeBpWrite.efi` explicitly.
 
 Target:
 

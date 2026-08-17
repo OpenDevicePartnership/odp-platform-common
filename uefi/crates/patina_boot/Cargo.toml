@@ -41,3 +41,11 @@ std = []
 [[bench]]
 name = "orchestrator"
 harness = false
+
+[[bench]]
+name = "connect_all"
+harness = false
+
+[[bench]]
+name = "expand_device_path"
+harness = false

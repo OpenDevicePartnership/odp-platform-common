@@ -1,13 +1,20 @@
 {
-    "editor.formatOnSave": true,
     "rust-analyzer.checkOnSave": true,
     "rust-analyzer.check.allTargets": false,
     "rust-analyzer.check.command": "clippy",
-    "[toml]": {
-        "editor.defaultFormatter": "tamasfe.even-better-toml"
+    "[c]": {
+        "editor.formatOnSave": false
+    },
+    "[cpp]": {
+        "editor.formatOnSave": false
     },
     "[rust]": {
-        "editor.defaultFormatter": "rust-lang.rust-analyzer"
+        "editor.defaultFormatter": "rust-lang.rust-analyzer",
+        "editor.formatOnSave": true
+    },
+    "[toml]": {
+        "editor.defaultFormatter": "tamasfe.even-better-toml",
+        "editor.formatOnSave": true
     },
     "rust-analyzer.linkedProjects": [
         "ec/test-tui/Cargo.toml",

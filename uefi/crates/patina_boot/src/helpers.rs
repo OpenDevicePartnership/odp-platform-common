@@ -842,6 +842,64 @@ fn parse_load_option(data: &[u8]) -> Option<DevicePathBuf> {
     }
 }
 
+/// OS loader file paths tried by [`fallback_boot_options`], in priority order:
+/// the Windows Boot Manager location first, then the removable-media default
+/// loader for the target architecture.
+#[cfg(target_arch = "aarch64")]
+const FALLBACK_OS_LOADER_PATHS: [&str; 2] = ["\\EFI\\Microsoft\\Boot\\bootmgfw.efi", "\\EFI\\Boot\\bootaa64.efi"];
+#[cfg(target_arch = "x86_64")]
+const FALLBACK_OS_LOADER_PATHS: [&str; 2] = ["\\EFI\\Microsoft\\Boot\\bootmgfw.efi", "\\EFI\\Boot\\bootx64.efi"];
+#[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+compile_error!("unsupported target architecture: no default OS loader path defined");
+
+/// Synthesize boot options from connected filesystem volumes.
+///
+/// For each handle publishing SimpleFileSystem, builds device paths that
+/// append each entry of `FALLBACK_OS_LOADER_PATHS` to the volume's device
+/// path, ordered so every volume is tried for the first loader path before
+/// any volume is tried for the second. Existence is not probed here — a
+/// candidate whose file is absent fails the subsequent `load_image` and the
+/// caller moves on to the next.
+///
+/// This is the fallback for a device whose `BootOrder`/`Boot####` variables
+/// are missing or empty (e.g. after a full flash cleared NVRAM), where
+/// [`discover_boot_options`] returns `NotFound`. Provisioned `Boot####`
+/// entries always take priority; callers should only reach for this after
+/// variable-based discovery yields nothing bootable.
+///
+/// Returns the error from SimpleFileSystem handle enumeration; how to react
+/// (log, retry, fall through) is the caller's policy decision.
+pub fn fallback_boot_options<B: BootServices>(boot_services: &B) -> Result<Vec<DevicePathBuf>> {
+    use patina::device_path::node_defs::FilePath;
+    use r_efi::protocols::simple_file_system;
+
+    let handles =
+        boot_services.locate_handle_buffer(HandleSearchType::ByProtocol(&simple_file_system::PROTOCOL_GUID))?;
+
+    let volumes: Vec<DevicePathBuf> = handles
+        .iter()
+        .filter_map(|&handle| {
+            // SAFETY: handle is valid from locate_handle_buffer, requesting device path protocol.
+            let dp_ptr = unsafe { boot_services.handle_protocol::<device_path::Protocol>(handle) }.ok()?;
+            // SAFETY: The device path pointer comes from a valid protocol interface.
+            let volume_path = unsafe { DevicePath::try_from_ptr(dp_ptr as *const _ as *const u8) }.ok()?;
+            Some(DevicePathBuf::from(volume_path))
+        })
+        .collect();
+
+    let mut options: Vec<DevicePathBuf> = Vec::with_capacity(volumes.len() * FALLBACK_OS_LOADER_PATHS.len());
+    for loader in FALLBACK_OS_LOADER_PATHS {
+        for volume in &volumes {
+            let mut candidate = volume.clone();
+            let file_node = DevicePathBuf::from_device_path_node_iter([FilePath::new(loader)].into_iter());
+            candidate.append_device_path(&file_node);
+            options.push(candidate);
+        }
+    }
+
+    Ok(options)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate alloc;
@@ -1891,5 +1949,59 @@ mod tests {
         let result = discover_boot_options(&runtime_mock);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().devices().count(), 1);
+    }
+
+    #[test]
+    fn test_fallback_boot_options_no_filesystem_handles() {
+        let mut mock = MockBootServices::new();
+        mock.expect_locate_handle_buffer()
+            .returning(|_| Err(efi::Status::NOT_FOUND));
+
+        let result = fallback_boot_options(&mock);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fallback_boot_options_orders_loaders_across_volumes() {
+        use patina::device_path::node_defs::FilePath;
+
+        let dp1 = DevicePathBuf::from_device_path_node_iter([Acpi::new_pci_root(0)].into_iter());
+        let dp2 = DevicePathBuf::from_device_path_node_iter([Acpi::new_pci_root(1)].into_iter());
+        let dp1_addr = dp1.as_ref() as *const DevicePath as *const u8 as usize;
+        let dp2_addr = dp2.as_ref() as *const DevicePath as *const u8 as usize;
+        let box_mock = leaked_boot_services_for_box();
+
+        let mut mock = MockBootServices::new();
+        mock.expect_locate_handle_buffer()
+            .returning(move |_| Ok(mock_handle_buffer(&[1, 2], box_mock)));
+
+        // SAFETY: Test code — returning pointers to valid DevicePathBufs.
+        unsafe {
+            mock.expect_handle_protocol::<device_path::Protocol>()
+                .returning(move |handle| {
+                    let addr = if handle as usize == 1 { dp1_addr } else { dp2_addr };
+                    Ok((addr as *mut device_path::Protocol).as_mut().unwrap())
+                });
+        }
+
+        let options = fallback_boot_options(&mock).unwrap();
+
+        // Two volumes x two loader paths, every volume tried for the first
+        // loader before any volume is tried for the second.
+        assert_eq!(options.len(), 4);
+        let expected: Vec<DevicePathBuf> = FALLBACK_OS_LOADER_PATHS
+            .iter()
+            .flat_map(|loader| {
+                [&dp1, &dp2].into_iter().map(|base| {
+                    let mut candidate = base.clone();
+                    let node = DevicePathBuf::from_device_path_node_iter([FilePath::new(*loader)].into_iter());
+                    candidate.append_device_path(&node);
+                    candidate
+                })
+            })
+            .collect();
+        for (built, expected) in options.iter().zip(expected.iter()) {
+            assert_eq!(built.as_ref().as_bytes(), expected.as_ref().as_bytes());
+        }
     }
 }

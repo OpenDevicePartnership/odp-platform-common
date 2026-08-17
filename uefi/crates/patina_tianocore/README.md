@@ -95,31 +95,19 @@ A `patina-native` feature for the Patina-native runtime will be added when the c
 
 ## Working example
 
-A complete example driver that uses this crate to publish an SMBIOS record via the native `Service<dyn Smbios>` from `patina_smbios` will land in a follow-up PR under `uefi/OdpPkg/Drivers/`.
+See `uefi/OdpPkg/Drivers/ODP_PatinaSmbiosDemo` for an example driver that
+publishes an SMBIOS record through the native `Service<dyn Smbios>` from
+`patina_smbios`.
 
 ## A note on `Cargo.lock`
 
 This crate is a library and intentionally does **not** commit a `Cargo.lock`. Consumers (binaries that depend on it) commit their own lockfile and choose their own resolved versions. Standard Rust convention.
 
-## Publishing to crates.io
+## Distribution
 
-Releases follow the ODP convention used by [`OpenDevicePartnership/patina`](https://github.com/OpenDevicePartnership/patina): three reusable workflows from [`patina-devops`](https://github.com/OpenDevicePartnership/patina-devops) cooperate to draft, version-bump, and publish.
-
-| Workflow | Trigger | Action |
-|---|---|---|
-| `update-release-draft.yml` | push to `main` | Maintains a draft GitHub release; derives the next semver from PR labels. |
-| `crate-version-update.yml` | after `Update Release Draft` | Opens a PR bumping `Cargo.toml` `version` fields to match the draft. |
-| `publish-release.yml` | push to `main` modifying `Cargo.toml` | Calls `patina-devops`'s `ReleaseWorkflow.yml`, which runs `cargo publish` for every crate using org-level secrets. |
-
-**Wiring these into `odp-platform-common` is a separate follow-up** — they require org-level secrets and a root Cargo workspace, neither of which is in scope for this PR. Until that lands, an ODP maintainer with crates.io rights can publish ad-hoc:
-
-```bash
-cd uefi/crates/patina_tianocore
-cargo publish --dry-run    # verified clean as of this PR
-cargo publish
-```
-
-The first publish reserves the crate name on crates.io; subsequent publishes require maintainer addition via `cargo owner`.
+This crate is not intended for publication to crates.io or another public
+registry. Consume it from this repository using a Git or path dependency.
+The manifest sets `publish = false` to prevent accidental publication.
 
 ## License
 
