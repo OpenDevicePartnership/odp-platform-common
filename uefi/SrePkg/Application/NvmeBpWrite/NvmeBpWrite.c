@@ -249,7 +249,7 @@ LogHexDump32 (
 #define RUN_MODE_VERIFY  1
 #define RUN_MODE_NOOP    2
 
-// Custom vendor GUID for the NvmeBpResult variable. Surface UEFI variable
+// Custom vendor GUID for the NvmeBpResult variable. Some UEFI variable
 // services apply name/policy filters under EFI_GLOBAL_VARIABLE_GUID; using
 // a dedicated GUID sidesteps any restrictions on non-spec names.
 //   {7B5A1F3E-2D8C-4A91-B6E3-D8F2C9A4E105}
@@ -413,7 +413,7 @@ LoadWimIntoBuffer (
 
   EFI_HANDLE  LoadHandle = LoadedImage->DeviceHandle;
 
-  // Surface firmware only connects drivers for the boot-path device when
+  // Some firmware only connects drivers for the boot-path device when
   // launching a Firmware Application boot entry. USB / removable storage
   // controllers aren't bound by default, so their SimpleFileSystem handles
   // never appear in LocateHandleBuffer. Force-connect every handle to
@@ -967,7 +967,7 @@ SendDownloadBpCommit (
 
 //
 // Find the NVMe controller's PCI IO protocol by enumerating PCI IO handles
-// and matching class code 0x010802 (Mass Storage / NVM / NVMe). Surface
+// and matching class code 0x010802 (Mass Storage / NVM / NVMe). Supported
 // systems have a single NVMe controller, so the first match is the one.
 //
 STATIC

@@ -29,21 +29,20 @@
   Path to ValidationOS.wim (or any bootable Windows WIM from CI).
 
 .PARAMETER DutHost
-  DUT host or IP. Default 192.168.1.81.
+  DUT host or IP.
 
 .PARAMETER DutCredential
-  PSCredential for the DUT. If omitted, prompts for testuser password.
+  PSCredential for the DUT. If omitted, prompts for credentials.
 
 .PARAMETER UsbDrive
   Drive letter of the USB stick where \ValidationOS.wim should be staged
   (e.g. "D"). If omitted, auto-selects the first removable FAT32 volume.
 
 .PARAMETER NvmeBpWriteEfi
-  Path to NvmeBpWrite.efi. Defaults to the latest build output under
-  Build\Msft900MaaPkg\DEBUG_VS2022.
+  Path to NvmeBpWrite.efi.
 
 .PARAMETER BpRecoveryLoaderEfi
-  Path to BpRecoveryLoader.efi. Same default location.
+  Path to BpRecoveryLoader.efi.
 
 .PARAMETER WorkDir
   Working directory for the intermediate FAT image. Default $env:TEMP.
@@ -56,16 +55,19 @@
   Use when iterating on firmware/EFI deploy without rebuilding the image.
 
 .EXAMPLE
-  .\Run-WinVosFromBp.ps1 -WimFile "C:\path\to\ValidationOS.wim"
+  .\Run-WinVosFromBp.ps1 -WimFile "C:\path\to\ValidationOS.wim" `
+      -DutHost <target-host> `
+      -NvmeBpWriteEfi "C:\path\to\NvmeBpWrite.efi" `
+      -BpRecoveryLoaderEfi "C:\path\to\BpRecoveryLoader.efi"
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)] [string] $WimFile,
-    [string] $DutHost           = '192.168.1.81',
+    [Parameter(Mandatory = $true)] [string] $DutHost,
     [System.Management.Automation.PSCredential] $DutCredential,
     [string] $UsbDrive,
-    [string] $NvmeBpWriteEfi,
-    [string] $BpRecoveryLoaderEfi,
+    [Parameter(Mandatory = $true)] [string] $NvmeBpWriteEfi,
+    [Parameter(Mandatory = $true)] [string] $BpRecoveryLoaderEfi,
     [string] $WorkDir           = $env:TEMP,
     [long]   $ImageSizeBytes    = 280MB,
     [switch] $SkipBuild
@@ -76,27 +78,14 @@ $ErrorActionPreference = 'Stop'
 $RESULT_GUID = '{7B5A1F3E-2D8C-4A91-B6E3-D8F2C9A4E105}'
 $ESP_GPT_TYPE = '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}'
 
-function Resolve-Default {
-    param([string] $Hint, [string] $RelPath)
-    if ($Hint) { return $Hint }
-    $devicesRoot = (Get-Item $PSScriptRoot).Parent.Parent.Parent.FullName
-    return Join-Path $devicesRoot $RelPath
-}
-
 if (-not $DutCredential) {
-    Write-Host "Enter DUT password for testuser:"
-    $DutCredential = Get-Credential -UserName 'testuser' -Message "DUT $DutHost"
+    $DutCredential = Get-Credential -Message "DUT $DutHost"
 }
 
 if (-not (Test-Path $WimFile)) { throw "WimFile not found: $WimFile" }
 
-$NvmeBpWriteEfi = Resolve-Default $NvmeBpWriteEfi `
-    'Build\Msft900MaaPkg\DEBUG_VS2022\X64\MsSurfaceIntelPkg\Application\NvmeBpWrite\NvmeBpWrite\OUTPUT\NvmeBpWrite.efi'
-$BpRecoveryLoaderEfi = Resolve-Default $BpRecoveryLoaderEfi `
-    'Build\Msft900MaaPkg\DEBUG_VS2022\X64\MsSurfaceIntelPkg\Application\BpRecoveryLoader\BpRecoveryLoader\OUTPUT\BpRecoveryLoader.efi'
-
 foreach ($p in @($NvmeBpWriteEfi, $BpRecoveryLoaderEfi)) {
-    if (-not (Test-Path $p)) { throw "Required EFI not found: $p (build the platform first, or pass an override)" }
+    if (-not (Test-Path $p)) { throw "Required EFI not found: $p" }
 }
 
 $ImagePath = Join-Path $WorkDir 'bp1-winvos.img'

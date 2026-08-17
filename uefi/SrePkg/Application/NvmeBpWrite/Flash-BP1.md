@@ -1,11 +1,10 @@
 # Flash a ValidationOS WIM into NVMe Boot Partition 1
 
 End-to-end procedure for writing a ValidationOS (WinVOS) WIM into the SSD's
-NVMe Boot Partition 1 (BP1) on a Surface Maa 900 unit using the
+NVMe Boot Partition 1 (BP1) on a supported development platform using the
 `NvmeBpWrite.efi` UEFI application. This is the direct, manual flashing path
 — intended for bring-up, debugging, and one-off SRE WIM updates outside the
-`Run-WinVosFromBp.ps1` host orchestrator described in
-[`../BpRecoveryLoader/SRE-onboarding.md`](../BpRecoveryLoader/SRE-onboarding.md).
+`Run-WinVosFromBp.ps1` host orchestrator.
 
 ## What this procedure does
 
@@ -35,8 +34,8 @@ state machine.
 > | **Raw WIM** (`-WimPath <wim>`) | `MSWIM` magic + WIM bytes at offset 0 | ✅ Works (idempotent reflash via hash compare) | ❌ Fails — BP1 has no FAT volume, no `\EFI\Boot\bootx64.efi` to chainload |
 > | **FAT-wrapped** (`-WimPath <wim> -WrapWim`) | FAT32 volume (label `SRE_BP`) containing `bootmgfw.efi` + `BCD` + `boot.sdi` + the WIM | ✅ Works (same idempotent compare) | ✅ Works — firmware partition driver mounts the FAT, BpRecoveryLoader chainloads `bootmgfw.efi` |
 >
-> If your goal is **just to verify BP1 persistence** (e.g., Leon's BMR
-> isolation test), raw WIM is sufficient and simpler. If your goal is to
+> If your goal is **just to verify BP1 persistence**, raw WIM is sufficient
+> and simpler. If your goal is to
 > actually **boot WinVOS from BP1 via the SRE recovery flow**, use
 > `-WrapWim`. The two flows can't share the same BP1 contents.
 
@@ -45,13 +44,12 @@ state machine.
 ### `NvmeBpWrite.efi` (the flashing tool)
 
 Source: [`NvmeBpWrite.c`](./NvmeBpWrite.c) in this directory. The binary is
-not published as a standalone ADO artifact — build it locally as part of the
-platform `stuart_build` per the
-[SRE-onboarding build steps](../BpRecoveryLoader/SRE-onboarding.md#build-firmware).
-After a successful build, the binary lives at:
+not published as a standalone artifact. Build it locally as part of the platform
+build, then pass the resulting binary to the staging script:
 
-```
-Devices/Build/Msft900MaaPkg/DEBUG_VS2022/X64/NvmeBpWrite.efi
+```powershell
+./Stage-SreflashUsb.ps1 -ToolPath <build-output>\NvmeBpWrite.efi `
+    -WimPath <path-to-validationos.wim>
 ```
 
 Use `NvmeBpWrite.efi`, **NOT** `NvmeBpWriteTest.efi` (same directory) — the
@@ -59,11 +57,9 @@ Use `NvmeBpWrite.efi`, **NOT** `NvmeBpWriteTest.efi` (same directory) — the
 
 ### `ValidationOS.wim` (the SRE WIM)
 
-Latest successful run of the ValidationOS-SRE workflow in
-[`gim-home/SREPOC`](https://github.com/gim-home/SREPOC/actions) — download
-the `ValidationOS-SRE-release-*.zip` artifact attached to the run.
+Obtain a bootable recovery WIM from your platform's approved build output.
 
-The zip contains:
+A typical recovery artifact contains:
 
 ```
 ValidationOS.wim    (typically ~250 MB)
@@ -78,7 +74,7 @@ Each is also documented inline in the sections below.
 
 | Script | Where it runs | What it does |
 |---|---|---|
-| [`Stage-SreflashUsb.ps1`](./Stage-SreflashUsb.ps1) | workstation | Format-free staging: copies the tool, the WIM, and the three target-side helpers onto a removable FAT32 USB. Auto-detects `NvmeBpWrite.efi` in `<repo-root>/Build/Msft900MaaPkg/{DEBUG\|RELEASE}_VS2022/X64/`. Replaces Section 1. |
+| [`Stage-SreflashUsb.ps1`](./Stage-SreflashUsb.ps1) | workstation | Format-free staging: copies the tool, the WIM, and the three target-side helpers onto a removable FAT32 USB. Accepts `-ToolPath`, `SRE_NVMEBPWRITE_EFI`, or a sibling binary. Replaces Section 1. |
 | [`enable-remote.ps1`](./enable-remote.ps1) | target (once per Windows image) | Enables PSRemoting, widens the WinRM firewall to `Any` source, sets `LocalAccountTokenFilterPolicy`. Required if you want to drive the rest of the procedure over WinRM instead of at-keyboard. |
 | [`Reset-NvmeBpResult.ps1`](./Reset-NvmeBpResult.ps1) | target (local or via WinRM) | Clears the `NvmeBpResult` UEFI runtime variable via Win32 firmware API. Replaces the manual `SetFirmwareEnvironmentVariableExW` block in Section 5. |
 | [`Set-NextBootToUsb.ps1`](./Set-NextBootToUsb.ps1) | target (local or via WinRM) | Sets the firmware `BootNext` one-shot to the `SREFLASH` USB entry and reboots. Eliminates the Vol-Down hotkey dance — no on-device button timing required. |
@@ -149,8 +145,7 @@ Format-Volume -DriveLetter E -FileSystem FAT32 -NewFileSystemLabel SREFLASH -Con
 ```
 
 `Stage-SreflashUsb.ps1` auto-detects the single removable FAT32 USB, the
-tool binary (in the sibling `Build/Msft900MaaPkg/{DEBUG|RELEASE}_VS2022/X64/`
-build output of the Devices repo, or via `-ToolPath`/`$env:SRE_NVMEBPWRITE_EFI`),
+tool binary (via `-ToolPath`, `$env:SRE_NVMEBPWRITE_EFI`, or a sibling file),
 and lays out:
 
 ```
@@ -184,9 +179,8 @@ name.
 
 ## Section 2 — Pre-flight on the target device (~2 min)
 
-1. Confirm the target is a **Maa 900 / SurfPtl** unit running a UEFI build
-   that includes the `NvmePassThru` protocol (any recent maa_900 image
-   qualifies).
+1. Confirm the target is a supported x64 platform running a UEFI build that
+   includes the `NvmePassThru` protocol.
 
 2. If the target has an existing WinVOS in BP1, this procedure **will
    overwrite it** — confirm this is what you want.
@@ -239,11 +233,9 @@ name.
    and reboots.
 
    **(b) Hotkey path (no Windows access required):** hold **Volume-Down**
-   while pressing the **power button**; keep holding Vol- until the Surface
+   while pressing the **power button**; keep holding Vol- until the firmware
    boot menu appears. Select **Boot from USB** (the entry showing `SREFLASH`
-   / `UEFI USB`). Note: on Maa 900 the SrePriorityBoot routing treats
-   **Vol-Down + USB present → USB-first alt boot**; **Vol-Up** triggers the
-   SRE flow that reads from BP1, which is **not** what we want here.
+   / `UEFI USB`). Platform hotkeys vary; consult the platform documentation.
 
 2. The screen blanks briefly, then `NvmeBpWrite` text output begins.
    Expected sequence:
@@ -337,8 +329,8 @@ will show `WRITE` and the procedure starts fresh from
 
 ### Fallback: reset firmware NVRAM
 
-If `SetFirmwareEnvironmentVariableExW` fails (Surface UEFI variable policy
-can reject deletes on some firmware revs), the last-resort path is the
+If `SetFirmwareEnvironmentVariableExW` fails (platform variable policy can
+reject deletes on some firmware revisions), the last-resort path is the
 firmware setup menu's "Reset to defaults". This clears all vendor NVRAM
 including `NvmeBpResult`, at the cost of losing other UEFI configuration.
 
@@ -363,8 +355,7 @@ with the new WIM → [Section 3](#section-3--write-phase-35-min) →
 
 ## Related procedures
 
-- [`../BpRecoveryLoader/SRE-onboarding.md`](../BpRecoveryLoader/SRE-onboarding.md)
-  — the higher-level SRE flow, including the `Run-WinVosFromBp.ps1` host
-  orchestrator that wraps this procedure for normal day-to-day use.
+- `../BpRecoveryLoader/Run-WinVosFromBp.ps1` — the host orchestrator that
+  wraps this procedure.
 - `SrePkg/Application/BpRecoveryLoader/BpRecoveryLoader.c` — the in-firmware
   SRE app that reads BP1 → RAM disk → chainloads `bootmgfw.efi`.
