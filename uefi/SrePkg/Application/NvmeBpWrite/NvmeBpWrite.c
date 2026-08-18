@@ -15,8 +15,9 @@
       CDW12=1 ("Data for boot partition download") on every chunk.
     - Firmware Commit (admin opcode 0x10) with CA=110b (Download to BP) and
       BPID selector in CDW10 bit 31. Per the controller this requires the
-      staged image to equal BPINFO.BPSZ * 128 KiB; upload is zero-padded
-      to that byte size accordingly.
+      staged image to equal the 1 GiB boot-partition capacity reported as
+      BPINFO.BPSZ=0x2000. The current implementation fixes that target size
+      at 1 GiB and zero-pads the upload accordingly.
     - Readback via EFI_PCI_IO_PROTOCOL MMIO against the NVMe controller's
       BAR0 (BPINFO=0x40 / BPRSEL=0x44 / BPMBL=0x48), the NVMe 1.4 §3.1.21
       drive loop.
@@ -26,8 +27,9 @@
   Controller-specific (non-spec) behaviors honored by this code:
     - CDW12=1 controller-specific route hint on Firmware Image Download
       ("Data for boot partition download").
-    - Staged image MUST equal BPINFO.BPSZ * 128 KiB; shorter commits return
-      SCT=1 SC=0x1E even after FID=0x85 unlock.
+    - Staged image MUST equal the controller's 1 GiB boot-partition capacity
+      (reported as BPINFO.BPSZ=0x2000); shorter commits return SCT=1 SC=0x1E
+      even after FID=0x85 unlock.
     - BPMBL/BPRSEL MMIO drive loop returns BRS=ERROR regardless of
       BPID/state; LID 0x15 is the only working readback.
     - LID 0x15 response has a 16-byte header preamble before the BP
