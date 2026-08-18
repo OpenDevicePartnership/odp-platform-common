@@ -1,18 +1,19 @@
+##
+# SizeStudy baseline DXE driver that prints a debug message and exits, written in Rust.
+#
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+
 [package]
   name = "HelloWorldRustDxe"
   version = "0.1.0"
   edition = "2024"
   license = "MIT"
 
-[[bin]]
-  name = "HelloWorldRustDxe"
-  path = "src/main.rs"
-
-[workspace]
-
 [dependencies]
   arm-pl011-uart = { version = "0.5.0", default-features = false }
-  log = "^0.4"
+  log = { version = "0.4" }
   spin = { version = "0.10.0", default-features = false, features = ["mutex", "spin_mutex"] }
 
 [profile.dev]

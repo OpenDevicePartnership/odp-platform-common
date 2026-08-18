@@ -1,14 +1,9 @@
-//! Hello World Rust DXE Driver
-//!
-//! Demonstrates how to build a DXE driver written in Rust.
-//!
-//! ## License
+//! SizeStudy baseline DXE driver that prints a debug message and exits, written in Rust.
 //!
 //! Copyright (c) Microsoft Corporation. All rights reserved.
 //!
-//! SPDX-License-Identifier: BSD-2-Clause-Patent
+//! SPDX-License-Identifier: MIT
 //!
-
 #![cfg(target_os = "uefi")]
 #![no_std]
 #![no_main]
@@ -21,7 +16,9 @@ const UART_BASE: usize = 0x040D_0000;
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    loop {}
+    loop {
+        core::hint::spin_loop();
+    }
 }
 
 //
