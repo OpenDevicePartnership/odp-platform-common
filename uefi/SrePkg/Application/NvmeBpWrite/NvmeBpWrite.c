@@ -11,13 +11,13 @@
       power cycle, and Firmware Commit CA=110b against a locked BP returns
       SCT=1 SC=0x1E "Boot Partition Write Prohibited".
     - Firmware Image Download (admin opcode 0x11) of the image file in
-      FWUG-granularity chunks. Sends the vendor route hint CDW12=1
-      ("Data for boot partition download") on every chunk per the Kioxia
-      documented example.
+      FWUG-granularity chunks. Sends the controller-specific route hint
+      CDW12=1 ("Data for boot partition download") on every chunk.
     - Firmware Commit (admin opcode 0x10) with CA=110b (Download to BP) and
       BPID selector in CDW10 bit 31. Per the controller this requires the
-      staged image to equal the BP size (BPSZ); upload is zero-padded to
-      BPSIZE accordingly.
+      staged image to equal the 1 GiB boot-partition capacity reported as
+      BPINFO.BPSZ=0x2000. The current implementation fixes that target size
+      at 1 GiB and zero-pads the upload accordingly.
     - Readback via EFI_PCI_IO_PROTOCOL MMIO against the NVMe controller's
       BAR0 (BPINFO=0x40 / BPRSEL=0x44 / BPMBL=0x48), the NVMe 1.4 §3.1.21
       drive loop.
@@ -25,10 +25,11 @@
       a 64 KiB scan for the WIM signature.
 
   Controller-specific (non-spec) behaviors honored by this code:
-    - CDW12=1 vendor route hint on Firmware Image Download (Kioxia "Data
-      for boot partition download").
-    - Staged image MUST equal BPSIZE; sub-BPSIZE commits return SCT=1
-      SC=0x1E even after FID=0x85 unlock.
+    - CDW12=1 controller-specific route hint on Firmware Image Download
+      ("Data for boot partition download").
+    - Staged image MUST equal the controller's 1 GiB boot-partition capacity
+      (reported as BPINFO.BPSZ=0x2000); shorter commits return SCT=1 SC=0x1E
+      even after FID=0x85 unlock.
     - BPMBL/BPRSEL MMIO drive loop returns BRS=ERROR regardless of
       BPID/state; LID 0x15 is the only working readback.
     - LID 0x15 response has a 16-byte header preamble before the BP
@@ -47,9 +48,9 @@
        Cold-reset to Windows.
 
   This makes the tool self-resetting: re-flashing is "drop a new
-  ValidationOS.wim on the USB and boot the tool again". No Windows-side
-  Reset-NvmeBpResult.ps1 is required, which matters for factory / field /
-  no-OS / corrupted-OS scenarios where Windows can't be assumed.
+  ValidationOS.wim on the USB and boot the tool again". No host-side state
+  reset is required, which matters for factory, field, no-OS, and
+  corrupted-OS scenarios.
 
   Firmware Commit CA=110b returns EFI_WARN_RESET_REQUIRED per spec; BP
   contents become host-visible after the cold reset.
@@ -349,8 +350,8 @@ WriteResultToNvRam (
 // the chunked download loop has no FS I/O.
 #define WIM_FILE_PATH                       L"\\ValidationOS.wim"
 
-// CDW12 vendor route hint on Firmware Image Download (per Kioxia documented
-// example): 1 = "Data for boot partition download", 0 = "SSD FW download".
+// CDW12 controller-specific route hint on Firmware Image Download:
+// 1 = "Data for boot partition download", 0 = "SSD FW download".
 #define FW_IMG_DOWNLOAD_CDW12_BP_DATA       0x00000001
 
 // Firmware Commit CA=110b on this controller requires the staged image to

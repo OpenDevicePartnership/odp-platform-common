@@ -24,7 +24,7 @@
 .PARAMETER BootEfi
   Path to the .efi file to install as \EFI\Boot\bootx64.efi inside the FAT
   volume. For first-iteration testing, the platform Shell.efi works as a
-  visual confirmation that chainload happened (DUT lands at the shell
+  visual confirmation that chainload happened (the target reaches the shell
   prompt instead of returning to Windows).
 
 .PARAMETER WimFile
@@ -46,12 +46,13 @@
   Path for the produced raw .img file.
 
 .PARAMETER SizeBytes
-  Final image size in bytes. Defaults to 1 GiB (BPSIZE on the Kioxia
-  KBG8HZNS we target). Must match the BP write tool's expected size.
+  Final image size in bytes. Defaults to 1 GiB. Must match the target
+  controller's boot-partition size and the BP write tool's expected size.
 
 .PARAMETER PayloadDir
   Optional directory whose contents are recursively copied into the FAT
-  volume root. Use for adding fonts, locale data, drivers, etc.
+  volume root. Use it to add any payload needed to make the resulting FAT
+  image bootable, such as fonts, locale data, drivers, or loader resources.
 
 .EXAMPLE
   # Smoke test: chainload Shell.efi

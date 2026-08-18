@@ -5,8 +5,9 @@
   chainloads \EFI\Boot\bootx64.efi from the resulting FAT volume.
 
   Assumes the WIM has already been committed into BP1: vendor unlock
-  (FID 0x85, BPxWPS=001b) + Firmware Image Download with the Kioxia
-  CDW12=1 BP route hint + Firmware Commit CA=110b BPID=1.
+  (FID 0x85, BPxWPS=001b) + Firmware Image Download with a
+  controller-specific CDW12=1 BP route hint + Firmware Commit CA=110b
+  BPID=1.
 
   Two controller-specific behaviors are accommodated:
    - The LID 0x15 response prepends a 16-byte header before the BP
@@ -52,7 +53,7 @@
 #define READ_PROGRESS_INTERVAL       (16ULL * SIZE_1MB)
 
 // Recovery payload boot file — UEFI fallback removable-media convention.
-// The customer's bootable layout (Windows bootmgfw+BCD+WIM, systemd-boot,
+// The bootable layout (Windows bootmgfw+BCD+WIM, systemd-boot,
 // custom EFI loader) ships inside a FAT32 image stored in BP; we chainload
 // whatever sits at this path on that volume.
 #define CHAINLOAD_FILE_PATH          L"\\EFI\\Boot\\bootx64.efi"
@@ -510,4 +511,3 @@ AppEntry (
   gRT->ResetSystem (EfiResetCold, EFI_SUCCESS, 0, NULL);
   return EFI_SUCCESS;
 }
-
