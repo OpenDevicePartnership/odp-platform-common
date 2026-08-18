@@ -46,8 +46,9 @@
   Path for the produced raw .img file.
 
 .PARAMETER SizeBytes
-  Final image size in bytes. Defaults to 1 GiB. Must match the target
-  controller's boot-partition size and the BP write tool's expected size.
+  Final image size in bytes. Defaults to 1 GiB. The image must fit within
+  the BP write tool's configured upload size; NvmeBpWrite zero-pads smaller
+  images to that size and rejects larger images.
 
 .PARAMETER PayloadDir
   Optional directory whose contents are recursively copied into the FAT

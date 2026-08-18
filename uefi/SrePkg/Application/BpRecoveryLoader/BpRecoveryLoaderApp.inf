@@ -1,7 +1,7 @@
 ## @file
 #  BpRecoveryLoaderApp - SRE entry application. A platform may dispatch it
-#  as a BootOption after applying its own recovery policy. Reads the SRE WIM
-#  from NVMe Boot Partition 1, registers the payload
+#  as a BootOption after applying its own recovery policy. Reads a bootable
+#  FAT image from NVMe Boot Partition 1, registers the payload
 #  as a RAM disk via EFI_RAM_DISK_PROTOCOL, and chainloads
 #  \EFI\Boot\bootx64.efi from the resulting FAT volume.
 #
