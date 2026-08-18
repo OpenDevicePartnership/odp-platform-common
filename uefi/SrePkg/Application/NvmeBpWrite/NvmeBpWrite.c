@@ -249,7 +249,7 @@ LogHexDump32 (
 #define RUN_MODE_VERIFY  1
 #define RUN_MODE_NOOP    2
 
-// Custom vendor GUID for the NvmeBpResult variable. Surface UEFI variable
+// Custom vendor GUID for the NvmeBpResult variable. Some UEFI variable
 // services apply name/policy filters under EFI_GLOBAL_VARIABLE_GUID; using
 // a dedicated GUID sidesteps any restrictions on non-spec names.
 //   {7B5A1F3E-2D8C-4A91-B6E3-D8F2C9A4E105}
@@ -323,6 +323,8 @@ STATIC BP_RESULT  gResult;
 // host OS can read the run outcome and the BP write-protection readback via
 // GetFirmwareEnvironmentVariableEx, without capturing the console. Called at
 // several points during the run so a crash still leaves the last state behind.
+// The tool itself decides what to do from content comparison at each boot;
+// the variable is output-only, never read back by the tool.
 //
 STATIC
 VOID
@@ -331,20 +333,15 @@ WriteResultToNvRam (
   VOID
   )
 {
-  EFI_STATUS  Status;
-
   gResult.Magic   = BP_RESULT_MAGIC;
   gResult.Version = BP_RESULT_VERSION;
-  Status          = gRT->SetVariable (
-                          L"NvmeBpResult",
-                          &gNvmeBpResultGuid,
-                          EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS,
-                          sizeof (gResult),
-                          &gResult
-                          );
-  if (EFI_ERROR (Status)) {
-    LogPrint (L"[warn] WriteResultToNvRam: SetVariable(NvmeBpResult) failed: %r\n", Status);
-  }
+  gRT->SetVariable (
+         L"NvmeBpResult",
+         &gNvmeBpResultGuid,
+         EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS,
+         sizeof (gResult),
+         &gResult
+         );
 }
 
 // Path to the BP image on the load volume (typically \ValidationOS.wim on
@@ -416,7 +413,7 @@ LoadWimIntoBuffer (
 
   EFI_HANDLE  LoadHandle = LoadedImage->DeviceHandle;
 
-  // Surface firmware only connects drivers for the boot-path device when
+  // Some firmware only connects drivers for the boot-path device when
   // launching a Firmware Application boot entry. USB / removable storage
   // controllers aren't bound by default, so their SimpleFileSystem handles
   // never appear in LocateHandleBuffer. Force-connect every handle to
@@ -970,7 +967,7 @@ SendDownloadBpCommit (
 
 //
 // Find the NVMe controller's PCI IO protocol by enumerating PCI IO handles
-// and matching class code 0x010802 (Mass Storage / NVM / NVMe). Surface
+// and matching class code 0x010802 (Mass Storage / NVM / NVMe). Supported
 // systems have a single NVMe controller, so the first match is the one.
 //
 STATIC

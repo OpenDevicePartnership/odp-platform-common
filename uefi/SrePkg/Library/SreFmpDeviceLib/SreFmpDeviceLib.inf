@@ -1,13 +1,7 @@
 ## @file
 #  Secure Recovery Environment (SRE) FMP Device Library.
 #
-#  Shell instance of FmpDeviceLib used by FmpDevicePkg/FmpDxe/FmpDxe.inf to
-#  publish the Firmware Management Protocol for the SRE firmware device. The
-#  apply path streams the staged WIM from the EFI System Partition to NVMe
-#  Boot Partition 1, verifying it against the signed descriptor's SHA-256.
-#
 #  Copyright (c) Microsoft Corporation. All rights reserved.<BR>
-#
 #  SPDX-License-Identifier: BSD-2-Clause-Patent
 ##
 
@@ -27,16 +21,13 @@
 
 [Sources]
   SreFmpDeviceLib.c
-  SreImageSupport.c
 
 [Packages]
   MdePkg/MdePkg.dec
-  CryptoPkg/CryptoPkg.dec
   FmpDevicePkg/FmpDevicePkg.dec
   SrePkg/SrePkg.dec
 
 [LibraryClasses]
-  BaseCryptLib
   BaseLib
   BaseMemoryLib
   DebugLib
@@ -44,20 +35,13 @@
   PcdLib
   PrintLib
   SreStorageLib
-  UefiBootServicesTableLib
   UefiRuntimeServicesTableLib
 
 [Guids]
-  gEfiFileInfoGuid                        ## CONSUMES
-  gEfiPartTypeSystemPartGuid              ## SOMETIMES_CONSUMES ## GUID # ESP selection
-  gOdpPkgTokenSpaceGuid                   ## CONSUMES
-
-[Protocols]
-  gEfiSimpleFileSystemProtocolGuid        ## CONSUMES
+  gSrePkgTokenSpaceGuid                   ## CONSUMES
 
 [Pcd]
   gFmpDevicePkgTokenSpaceGuid.PcdFmpDeviceBuildTimeLowestSupportedVersion    ## CONSUMES
-  gOdpPkgTokenSpaceGuid.PcdSreStagingPath       ## CONSUMES
 
 [Depex]
   gEfiPciEnumerationCompleteProtocolGuid

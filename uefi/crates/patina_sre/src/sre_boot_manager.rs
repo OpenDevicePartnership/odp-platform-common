@@ -689,7 +689,9 @@ impl BootOrchestrator for SreBootManager {
                             log::error!("signal_ready_to_boot failed: {:?}", e);
                         }
                         match helpers::boot_from_device_path(boot_services, image_handle, device_path) {
-                            Ok(()) => log::warn!("Boot option returned control (path={:?}), trying next...", device_path),
+                            Ok(()) => {
+                                log::warn!("Boot option returned control (path={:?}), trying next...", device_path)
+                            }
                             Err(e) => log::warn!("Boot option failed (path={:?}): {:?}", device_path, e),
                         }
                     }
@@ -704,6 +706,33 @@ impl BootOrchestrator for SreBootManager {
                 match helpers::boot_from_device_path(boot_services, image_handle, &self.main_os_path) {
                     Ok(()) => log::warn!("Main OS fallback returned control (path={:?})", self.main_os_path),
                     Err(e) => log::warn!("Main OS fallback failed (path={:?}): {:?}", self.main_os_path, e),
+                }
+
+                // No boot option was attempted (Boot#### discovery found
+                // nothing or failed outright, e.g. NVRAM cleared by a full
+                // flash) and the configured main OS path did not boot.
+                // Enumerate filesystem volumes and try the standard OS loader
+                // locations so the device still reaches the OS.
+                match helpers::fallback_boot_options(boot_services) {
+                    Ok(candidates) => {
+                        for device_path in candidates {
+                            if bp_has_sre && device_path_has_usb_node(&device_path) {
+                                log::info!(
+                                    "Skipping USB fallback option (BP1 has SRE payload); path={:?}",
+                                    device_path
+                                );
+                                continue;
+                            }
+                            match helpers::boot_from_device_path(boot_services, image_handle, &device_path) {
+                                Ok(()) => log::warn!(
+                                    "Fallback option returned control (path={:?}), trying next...",
+                                    device_path
+                                ),
+                                Err(e) => log::warn!("Fallback option failed (path={:?}): {:?}", device_path, e),
+                            }
+                        }
+                    }
+                    Err(e) => log::warn!("fallback_boot_options failed: {:?}", e),
                 }
             }
         }
@@ -811,7 +840,11 @@ mod tests {
             ("usb_wwid", synth_path(&[&NODE_USB_WWID]), true),
             ("sata only", synth_path(&[&NODE_PCI_ROOT, &NODE_SATA]), false),
             ("end only", synth_path(&[]), false),
-            ("media node with usb sub-type value", synth_path(&[&NODE_MEDIA_SUB5]), false),
+            (
+                "media node with usb sub-type value",
+                synth_path(&[&NODE_MEDIA_SUB5]),
+                false,
+            ),
             ("usb after media", synth_path(&[&NODE_MEDIA_VENDOR, &NODE_USB]), true),
         ];
         for (name, bytes, expected) in cases {

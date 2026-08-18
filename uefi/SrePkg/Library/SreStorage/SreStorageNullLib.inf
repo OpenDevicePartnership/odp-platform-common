@@ -34,4 +34,4 @@
   gEfiDevicePathProtocolGuid              ## CONSUMES
 
 [Pcd]
-  gOdpPkgTokenSpaceGuid.PcdSreDevicePathString  ## CONSUMES
+  gSrePkgTokenSpaceGuid.PcdSreDevicePathString  ## CONSUMES

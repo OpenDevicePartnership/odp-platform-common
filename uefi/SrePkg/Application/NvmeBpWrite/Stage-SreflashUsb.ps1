@@ -8,8 +8,6 @@
 #   1. -ToolPath argument
 #   2. $env:SRE_NVMEBPWRITE_EFI
 #   3. .\NvmeBpWrite.efi (sibling to this script)
-#   4. <repo-root>\Build\Msft900MaaPkg\{DEBUG,RELEASE}_VS2022\X64\NvmeBpWrite.efi
-#      (where <repo-root> is found by walking up from this script for a .git dir)
 #
 # Examples:
 #   # Raw-WIM path (NvmeBpWrite VERIFY will FIND MSWIM, but BpRecoveryLoader
@@ -41,11 +39,8 @@ param(
     [switch]$WrapWim,
     [string]$BuildBpFatImagePath,
     # Default to the kit-bundled x64 bootmgfw if present, otherwise the host's
-    # local Windows files. The kit-bundled copy matters when the staging host
-    # is a different architecture than the target (e.g., an ARM64 dev box
-    # staging for an x64 Maa 900 — the host's C:\Windows\Boot\EFI\bootmgfw.efi
-    # would be AARCH64 and produce a BP1 image that the x64 Maa firmware can't
-    # chainload). Auto-resolved at runtime — see Resolve-BootmgfwEfi.
+    # local Windows files. The bundled copy matters when the staging host has
+    # a different architecture than the x64 target.
     [string]$BootmgfwEfi,
     [string]$BootSdi,
     # -ForceReflash drops \force-reflash.flag on the USB. The tool (v0.2.1+)
@@ -65,16 +60,9 @@ function Fail($msg) { Write-Error $msg; exit 1 }
 #   1. -ToolPath argument (explicit, always wins)
 #   2. $env:SRE_NVMEBPWRITE_EFI
 #   3. Sibling NvmeBpWrite.efi (next to this script — kit layout)
-#   4. Walk up for .git, then Build\Msft900MaaPkg\{DEBUG,RELEASE}_VS2022\X64\
-#      (in-repo case — picks up local stuart_build output)
-#   5. $PSScriptRoot\Devices\Build\... (script-next-to-repo case)
 #
 # Whichever wins, the selection (path / size / mtime / hash prefix) is
-# printed prominently so the operator can sanity-check. The walk-up
-# fallback prints a yellow warning, because that path can silently pick
-# up a *different* binary than the engineer thinks they're using — the
-# exact failure mode Leon hit on 2026-06-11 where his repo's stale v0.1
-# build was used in place of the v0.2 kit binary.
+# printed prominently so the operator can sanity-check it.
 
 function Format-ToolSelection {
     param([string]$Source, [string]$Path)
@@ -109,34 +97,6 @@ function Resolve-ToolPath {
         return $p
     }
 
-    # No sibling — fall back to walk-up. This is the dangerous case:
-    # silent pick-up of a build output from whatever Devices repo encloses
-    # this script. Warn prominently before consuming.
-    $dir = $PSScriptRoot
-    while ($dir -and -not (Test-Path (Join-Path $dir '.git'))) {
-        $parent = Split-Path $dir -Parent
-        if ($parent -eq $dir) { $dir = $null; break }
-        $dir = $parent
-    }
-    $roots = @()
-    if ($dir) { $roots += $dir }
-    $devicesChild = Join-Path $PSScriptRoot 'Devices'
-    if (Test-Path $devicesChild) { $roots += $devicesChild }
-    foreach ($root in $roots) {
-        foreach ($cfg in 'DEBUG','RELEASE') {
-            $p = Join-Path $root "Build\Msft900MaaPkg\${cfg}_VS2022\X64\NvmeBpWrite.efi"
-            if (Test-Path $p) {
-                $resolved = (Resolve-Path $p).Path
-                Write-Host ""
-                Write-Host "WARNING: Auto-detected NvmeBpWrite.efi from a local stuart_build output." -ForegroundColor Yellow
-                Write-Host "         Script's sibling NvmeBpWrite.efi was not present, so the resolver" -ForegroundColor Yellow
-                Write-Host "         walked up and picked the build below. If you intended to use a" -ForegroundColor Yellow
-                Write-Host "         packaged kit's tool, abort (Ctrl+C) and pass -ToolPath explicitly." -ForegroundColor Yellow
-                Format-ToolSelection "walk-up to Build output in $root" $resolved
-                return $resolved
-            }
-        }
-    }
     return $null
 }
 
@@ -147,8 +107,6 @@ NvmeBpWrite.efi not found. Provide it one of:
   - Pass -ToolPath <path>
   - Set `$env:SRE_NVMEBPWRITE_EFI = '<path>'`
   - Drop NvmeBpWrite.efi next to this script
-  - Run from inside a Devices repo where stuart_build has produced
-    Build\Msft900MaaPkg\{DEBUG|RELEASE}_VS2022\X64\NvmeBpWrite.efi
 "@
 }
 
@@ -173,13 +131,12 @@ if ($WrapWim) {
     $isAdmin = ([Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     if (-not $isAdmin) { Fail "-WrapWim requires elevated PowerShell (Mount-VHD/Format-Volume need admin)." }
 
-    # Resolve BuildBpFatImage.ps1: explicit > sibling > sister-app dir > Devices-child layout.
+    # Resolve BuildBpFatImage.ps1: explicit > sibling > sister-app directory.
     $bbfi = $BuildBpFatImagePath
     if (-not $bbfi) {
         $candidates = @(
             (Join-Path $PSScriptRoot 'BuildBpFatImage.ps1'),
-            (Join-Path $PSScriptRoot '..\BpRecoveryLoader\BuildBpFatImage.ps1'),
-            (Join-Path $PSScriptRoot 'Devices\Common\WSSI_ODP\OdpPkg\Application\BpRecoveryLoader\BuildBpFatImage.ps1')
+            (Join-Path $PSScriptRoot '..\BpRecoveryLoader\BuildBpFatImage.ps1')
         )
         foreach ($c in $candidates) {
             if (Test-Path $c) { $bbfi = (Resolve-Path $c).Path; break }
@@ -188,11 +145,8 @@ if ($WrapWim) {
     if (-not $bbfi -or -not (Test-Path $bbfi)) {
         Fail "BuildBpFatImage.ps1 not found. Pass -BuildBpFatImagePath, or place the script next to this one / in the sibling BpRecoveryLoader directory."
     }
-    # Resolve bootmgfw.efi + boot.sdi. Target arch for Maa 900 is x64, so
-    # prefer the kit-bundled x64 copies (boot-x64/ next to this script, or
-    # in Devices/Common/.../boot-x64/) before falling back to the host's
-    # local Windows files. This matters when the staging host is a
-    # different arch than the target (e.g., ARM64 dev box -> x64 Maa 900).
+    # Resolve bootmgfw.efi + boot.sdi. Prefer the kit-bundled x64 copies
+    # before falling back to the host's local Windows files.
     function Resolve-BootFile {
         param($Explicit, $KitRelative, $HostDefault, $Label)
         if ($Explicit) {
@@ -201,7 +155,6 @@ if ($WrapWim) {
         }
         $candidates = @(
             (Join-Path $PSScriptRoot $KitRelative),
-            (Join-Path $PSScriptRoot "Devices\Common\WSSI_ODP\OdpPkg\Application\NvmeBpWrite\$KitRelative"),
             $HostDefault
         )
         foreach ($c in $candidates) {
@@ -212,11 +165,8 @@ if ($WrapWim) {
     $BootmgfwEfi = Resolve-BootFile -Explicit $BootmgfwEfi -KitRelative 'boot-x64\bootmgfw.efi' -HostDefault 'C:\Windows\Boot\EFI\bootmgfw.efi' -Label 'BootmgfwEfi'
     $BootSdi     = Resolve-BootFile -Explicit $BootSdi     -KitRelative 'boot-x64\boot.sdi'    -HostDefault 'C:\Windows\Boot\DVD\EFI\boot.sdi' -Label 'BootSdi'
 
-    # Sanity-check the resolved bootmgfw.efi is actually x64. The target's
-    # firmware loads this via BpRecoveryLoader chainload; if it's AARCH64
-    # (e.g., from an ARM staging host's Windows install) the x64 firmware
-    # will reject it. This guard was added after Leon hit exactly that on
-    # 2026-06-11 — silent arch mismatch wasted ~2h of debugging.
+    # Sanity-check the resolved bootmgfw.efi is actually x64. The target
+    # firmware rejects a binary built for a different architecture.
     function Get-PeMachineSafe($path) {
         try {
             $b = [System.IO.File]::ReadAllBytes($path)
@@ -233,7 +183,7 @@ if ($WrapWim) {
     Write-Host "  SDI:   $BootSdi"
     Write-Host ""
     if ($bootmgfwArch -ne 'x64') {
-        Fail "bootmgfw.efi at '$BootmgfwEfi' is $bootmgfwArch, not x64. The Maa 900 firmware needs an x64 bootmgfw to chainload. Either:`n  - Run from a kit folder that has boot-x64/bootmgfw.efi (preferred), or`n  - Pass -BootmgfwEfi <path> pointing at an x64 bootmgfw.efi."
+        Fail "bootmgfw.efi at '$BootmgfwEfi' is $bootmgfwArch, not x64. Either:`n  - Run from a kit folder that has boot-x64/bootmgfw.efi (preferred), or`n  - Pass -BootmgfwEfi <path> pointing at an x64 bootmgfw.efi."
     }
 
     $imgOut = Join-Path $env:TEMP ("bp1-$([IO.Path]::GetFileNameWithoutExtension($wim.Name))-{0}.img" -f (Get-Date -Format yyyyMMdd-HHmmss))
