@@ -1,0 +1,16 @@
+##
+# SizeStudy baseline DXE driver that prints a debug message and exits, written in Rust.
+#
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+
+[build]
+target = "aarch64-unknown-uefi"
+
+[target.aarch64-unknown-uefi]
+rustflags = [
+    "-C", "link-arg=/base:0x0",
+    "-C", "link-arg=/subsystem:efi_boot_service_driver",
+    "-C", "force-unwind-tables", # Generates .pdata section for stack tracing
+]

@@ -1,0 +1,26 @@
+##
+# SizeStudy baseline DXE driver that prints a debug message and exits, written in C.
+#
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = CHelloWorldDxe
+  FILE_GUID                      = 4EE2724D-4500-459E-9305-648C61908CBD
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = CHelloWorldEntryPoint
+
+[Sources]
+  CHelloWorld.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[LibraryClasses]
+  DebugLib
+  UefiDriverEntryPoint
+
+[Depex]
+  TRUE
