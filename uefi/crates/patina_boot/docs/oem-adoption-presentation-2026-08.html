@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Patina + patina_boot OEM adoption</title>
+  <style>
+    :root {
+      --bg: #08111f;
+      --panel: #101d2f;
+      --line: #263b55;
+      --text: #f5f7fb;
+      --muted: #a8b5c7;
+      --blue: #5ab7ff;
+      --green: #61d6a3;
+      --orange: #ffb45c;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+
+    code {
+      color: var(--blue);
+      font-family: "Cascadia Code", Consolas, monospace;
+    }
+
+    .deck {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      padding: 7vh 8vw;
+    }
+
+    .slide.active {
+      display: flex;
+    }
+
+    .eyebrow {
+      margin-bottom: 1rem;
+      color: var(--blue);
+      font-size: clamp(0.85rem, 1.4vw, 1.15rem);
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2 {
+      margin: 0;
+      max-width: 1100px;
+      line-height: 1.02;
+      letter-spacing: -0.04em;
+    }
+
+    h1 {
+      font-size: clamp(3.6rem, 7vw, 7rem);
+    }
+
+    h2 {
+      font-size: clamp(2.8rem, 5.3vw, 5.2rem);
+    }
+
+    h3 {
+      margin: 0 0 0.7rem;
+      font-size: clamp(1.25rem, 2vw, 1.9rem);
+    }
+
+    p {
+      margin: 0;
+      line-height: 1.4;
+    }
+
+    .subtitle {
+      max-width: 950px;
+      margin-top: 1.8rem;
+      color: var(--muted);
+      font-size: clamp(1.25rem, 2.2vw, 2rem);
+    }
+
+    .accent {
+      color: var(--green);
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.2rem;
+      margin-top: 3rem;
+    }
+
+    .card {
+      min-height: 220px;
+      padding: 1.7rem;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+    }
+
+    .card .number {
+      display: block;
+      margin-bottom: 1rem;
+      color: var(--green);
+      font-size: clamp(2.3rem, 4vw, 4.2rem);
+      font-weight: 800;
+      letter-spacing: -0.04em;
+    }
+
+    .card p {
+      color: var(--muted);
+      font-size: clamp(1.05rem, 1.55vw, 1.4rem);
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto 1fr;
+      align-items: stretch;
+      gap: 1rem;
+      margin-top: 3rem;
+    }
+
+    .flow-box {
+      display: flex;
+      min-height: 240px;
+      flex-direction: column;
+      justify-content: center;
+      padding: 1.8rem;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+      text-align: center;
+    }
+
+    .flow-box strong {
+      margin-bottom: 0.8rem;
+      font-size: clamp(1.6rem, 2.7vw, 2.5rem);
+    }
+
+    .flow-box span {
+      color: var(--muted);
+      font-size: clamp(1rem, 1.5vw, 1.35rem);
+      line-height: 1.4;
+    }
+
+    .arrow {
+      display: flex;
+      align-items: center;
+      color: var(--blue);
+      font-size: 2.4rem;
+      font-weight: 700;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.4rem;
+      margin-top: 2.8rem;
+    }
+
+    .metric {
+      padding: 2.2rem;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+    }
+
+    .metric strong {
+      display: block;
+      font-size: clamp(3rem, 6vw, 6rem);
+      letter-spacing: -0.05em;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: clamp(1.05rem, 1.6vw, 1.45rem);
+    }
+
+    .delta {
+      margin-top: 1.4rem;
+      color: var(--orange);
+      font-size: clamp(1.35rem, 2.3vw, 2.1rem);
+      font-weight: 700;
+    }
+
+    .note {
+      max-width: 1100px;
+      margin-top: 1.1rem;
+      color: var(--muted);
+      font-size: clamp(1rem, 1.45vw, 1.3rem);
+    }
+
+    .decision {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.4rem;
+      margin-top: 2.8rem;
+    }
+
+    .decision-box {
+      padding: 2rem;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+    }
+
+    .decision-box strong {
+      display: block;
+      margin-bottom: 0.7rem;
+      color: var(--green);
+      font-size: clamp(1.5rem, 2.5vw, 2.3rem);
+    }
+
+    .decision-box span {
+      color: var(--muted);
+      font-size: clamp(1.05rem, 1.6vw, 1.45rem);
+      line-height: 1.4;
+    }
+
+    .ask {
+      margin-top: 2rem;
+      color: var(--text);
+      font-size: clamp(1.45rem, 2.7vw, 2.5rem);
+      font-weight: 700;
+    }
+
+    .footer {
+      position: absolute;
+      right: 3vw;
+      bottom: 2.5vh;
+      left: 3vw;
+      display: flex;
+      justify-content: space-between;
+      color: #728197;
+      font-size: 0.9rem;
+    }
+
+    .progress {
+      position: fixed;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      height: 5px;
+      background: #122238;
+    }
+
+    .progress span {
+      display: block;
+      height: 100%;
+      background: var(--blue);
+      transition: width 160ms ease;
+    }
+
+    .help {
+      position: fixed;
+      top: 1rem;
+      right: 1.2rem;
+      color: #64748a;
+      font-size: 0.85rem;
+    }
+
+    .presenter-notes {
+      display: none;
+    }
+
+    .notes {
+      position: fixed;
+      right: 2vw;
+      bottom: 4vh;
+      left: 2vw;
+      display: none;
+      max-height: 30vh;
+      overflow: auto;
+      padding: 1.2rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(4, 10, 18, 0.96);
+      color: var(--muted);
+      font-size: 1rem;
+    }
+
+    .notes.visible {
+      display: block;
+    }
+
+    @media (max-width: 900px) {
+      .cards,
+      .metrics,
+      .decision {
+        grid-template-columns: 1fr;
+      }
+
+      .flow {
+        grid-template-columns: 1fr;
+      }
+
+      .arrow {
+        display: none;
+      }
+    }
+
+    @media print {
+      body {
+        overflow: visible;
+      }
+
+      .deck {
+        height: auto;
+      }
+
+      .slide,
+      .slide.active {
+        position: relative;
+        display: flex;
+        width: 13.333in;
+        height: 7.5in;
+        page-break-after: always;
+      }
+
+      .help,
+      .progress,
+      .notes {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck">
+    <section class="slide active">
+      <div class="eyebrow">Boot Manager Modernization</div>
+      <h1>Safer boot.<br><span class="accent">Explicit policy.</span></h1>
+      <p class="subtitle">Patina + <code>patina_boot</code> encode boot invariants, isolate unsafe firmware boundaries, and make platform policy testable without hardware.</p>
+      <aside class="presenter-notes">
+        <p>This is the thesis. Recovery is one possible policy built on the architecture, not the primary reason to replace C BDS.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Why change</div>
+      <h2>Boot policy should not be a C monolith.</h2>
+      <div class="cards">
+        <div class="card">
+          <span class="number">1</span>
+          <h3>Risk</h3>
+          <p>Boot-critical policy is difficult to change safely.</p>
+        </div>
+        <div class="card">
+          <span class="number">2</span>
+          <h3>Rigidity</h3>
+          <p>Platform customization becomes patching, not composition.</p>
+        </div>
+        <div class="card">
+          <span class="number">3</span>
+          <h3>Hidden state</h3>
+          <p>Raw pointers, global state, and manual cleanup make failure paths difficult to prove.</p>
+        </div>
+      </div>
+      <aside class="presenter-notes">
+        <p>Keep this short. The problem is not that C BDS lacks features. The problem is the engineering model for changing and validating platform boot policy.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">The architecture</div>
+      <h2>Mechanism, policy, and firmware boundaries are separate.</h2>
+      <div class="flow">
+        <div class="flow-box">
+          <strong><code>BootDispatcher</code></strong>
+          <span>UEFI BDS lifecycle and one-time context</span>
+        </div>
+        <div class="arrow">-&gt;</div>
+        <div class="flow-box">
+          <strong><code>BootOrchestrator</code></strong>
+          <span>Small OEM-owned policy contract</span>
+        </div>
+        <div class="arrow">-&gt;</div>
+        <div class="flow-box">
+          <strong>Typed helpers</strong>
+          <span>Device paths, variables, events, image launch</span>
+        </div>
+      </div>
+      <aside class="presenter-notes">
+        <p>Unsafe UEFI calls stay in narrow helpers; platform policy composes those helpers; the dispatcher owns the BDS lifecycle.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">What the OEM gets</div>
+      <h2>Boot bugs move from hardware discovery to review and CI.</h2>
+      <div class="cards">
+        <div class="card">
+          <span class="number">Type</span>
+          <h3>Invalid lifecycle blocked</h3>
+          <p><code>Result&lt;!, EfiError&gt;</code> makes a successful BDS return unrepresentable.</p>
+        </div>
+        <div class="card">
+          <span class="number">Bounds</span>
+          <h3>Malformed NVRAM rejected</h3>
+          <p>Boot options and device-path node lengths are validated before pointer conversion.</p>
+        </div>
+        <div class="card">
+          <span class="number">78+</span>
+          <h3>Failure paths tested</h3>
+          <p>Watchdog cleanup, bad variables, events, device paths, and dispatch convergence run on the host.</p>
+        </div>
+      </div>
+      <aside class="presenter-notes">
+        <p>Concrete examples: BootConfig requires an initial device; optional behavior uses Option rather than sentinel pointers; load-option parsing checks every offset and node length; tests verify watchdog cleanup when StartImage fails.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Architecture evidence</div>
+      <h2>Specific bug classes have explicit defenses.</h2>
+      <div class="cards">
+        <div class="card">
+          <span class="number">Own</span>
+          <h3>Lifetime and cleanup bugs</h3>
+          <p>Owned buffers and device paths reduce leaks, use-after-free, and stale-pointer reuse.</p>
+        </div>
+        <div class="card">
+          <span class="number">Bound</span>
+          <h3>Runaway enumeration</h3>
+          <p>Controller discovery tracks attempted handles, detects convergence, and has iteration limits.</p>
+        </div>
+        <div class="card">
+          <span class="number">Mock</span>
+          <h3>Sequencing regressions</h3>
+          <p>Connect/dispatch ordering and failure propagation are deterministic unit tests.</p>
+        </div>
+      </div>
+      <p class="note">The inspected C BDS + UefiBootManagerLib surface spans about 9.8K lines with 176 allocation/free call sites and 71 assertions. This is not a feature-equivalent size comparison; it shows why narrow ownership and test boundaries matter.</p>
+      <aside class="presenter-notes">
+        <p>Do not claim Rust eliminates logic bugs. Claim that memory lifetime, buffer bounds, invalid states, and cleanup obligations are either encoded or concentrated into reviewable boundaries. The remaining logic is easier to exercise in CI.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Equivalence proof</div>
+      <h2>Same contract. One implementation change.</h2>
+      <div class="cards">
+        <div class="card">
+          <span class="number">Same</span>
+          <h3>Firmware base</h3>
+          <p>Patina DXE core, platform drivers, configuration, and device.</p>
+        </div>
+        <div class="card">
+          <span class="number">Same</span>
+          <h3>Boot outcome</h3>
+          <p>Normal BootOrder path to the same Windows target.</p>
+        </div>
+        <div class="card">
+          <span class="number">Gate</span>
+          <h3>Policy behavior</h3>
+          <p>Connection scope, BootNext, console, events, and failure handling.</p>
+        </div>
+      </div>
+      <div class="delta">No performance claim until every parity row passes.</div>
+      <aside class="presenter-notes">
+        <p>The two release images already share the Patina DXE core, platform firmware, device, and no-patina_sre boundary. They are not yet policy-equivalent: stock C BdsDxe performs BootNext, console, hotkey, recovery, variable, and platform-hook work that the isolated Rust manager currently skips. Close or explicitly exclude those gaps before presenting timing as implementation cost.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Clean benchmark</div>
+      <h2>Measured normal-boot totals overlap.</h2>
+      <div class="metrics">
+        <div class="metric">
+          <strong>4.320 s</strong>
+          <span>C BDS mean, three warm boots</span>
+        </div>
+        <div class="metric">
+          <strong>4.306 s</strong>
+          <span><code>patina_boot</code> mean, three clean warm boots</span>
+        </div>
+      </div>
+      <div class="delta">Observed difference: -14 ms / -0.3%, inside run-to-run variation.</div>
+      <p class="note">Both arms were verified under normal-boot conditions on the same device and Patina DXE core. The whole-firmware totals can be compared, but the 14 ms difference cannot be assigned solely to C versus Rust because the managers still execute different policy details.</p>
+      <aside class="presenter-notes">
+        <p>The C samples were 4.3648, 4.2224, and 4.3728 seconds, averaging 4.3200 seconds. The patina_boot samples were 4.2516, 4.4224, and 4.2449 seconds, averaging 4.3063 seconds. Both datasets were verified as normal boots under the same platform state. The 13.7 ms mean difference is smaller than either arm's run-to-run spread. It is a whole-firmware observation; assigning it to the boot-manager implementation requires identical connection, console, BootNext, event, and failure policy.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Where time goes</div>
+      <h2>The valid C baseline is dominated by shared work.</h2>
+      <div class="cards">
+        <div class="card">
+          <span class="number">3.067 s</span>
+          <h3>Platform to OS loader</h3>
+          <p>71% of the C-arm firmware interval.</p>
+        </div>
+        <div class="card">
+          <span class="number">1.022 s</span>
+          <h3>OS loader to EBS</h3>
+          <p>LoadImage, StartImage, and loader execution.</p>
+        </div>
+        <div class="card">
+          <span class="number">0.231 s</span>
+          <h3>ExitBootServices</h3>
+          <p>Only 5% of the valid C baseline.</p>
+        </div>
+      </div>
+      <div class="delta">The clean total is at parity; shared phase markers are the next attribution step.</div>
+      <p class="note">The C trace shows the likely optimization areas: platform/device initialization and OS-loader execution, not <code>ExitBootServices</code>.</p>
+      <aside class="presenter-notes">
+        <p>These are wall-clock phase durations, not CPU instruction counts. In the valid C arm, ResetEnd to OS Loader LoadImage averages 3,066.8 ms; LoadImage to StartImage averages 29.4 ms; StartImage to ExitBootServices Entry averages 992.9 ms; ExitBootServices averages 230.9 ms. The corrected Rust total is comparable, but its current firmware does not populate the two OS-loader FPDT fields. An instrumented Rust EFI now reports the same progress codes around LoadImage and StartImage for the next phase-level run.</p>
+      </aside>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">OEM decision</div>
+      <h2>Adopt Patina for the policy model, not a speed claim.</h2>
+      <div class="decision">
+        <div class="decision-box">
+          <strong>What is proven</strong>
+          <span>Normal-boot performance is at parity; lifecycle, bounds, cleanup, and sequencing have explicit defenses.</span>
+        </div>
+        <div class="decision-box">
+          <strong>What OEMs gain</strong>
+          <span>Composable policy, hardware-free tests, smaller unsafe boundaries, and optional recovery implementations.</span>
+        </div>
+      </div>
+      <div class="ask">Pilot Patina + <code>patina_boot</code>; evaluate recovery policy separately.</div>
+      <aside class="presenter-notes">
+        <p>The OEM case is the architecture and assurance model. Gate adoption on required boot outcomes, malformed-variable tests, fault injection, firmware resource budgets, and a larger randomized performance run. patina_sre can remain a reference consumer rather than the headline.</p>
+      </aside>
+    </section>
+
+    <div class="footer">
+      <span>Open Device Partnership</span>
+      <span id="counter">1 / 9</span>
+    </div>
+  </main>
+
+  <div class="help">Arrows / Space: navigate &nbsp; N: notes &nbsp; P: print</div>
+  <div class="progress"><span id="progress-bar"></span></div>
+  <div class="notes" id="notes"></div>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const counter = document.getElementById("counter");
+    const progressBar = document.getElementById("progress-bar");
+    const notes = document.getElementById("notes");
+    let index = 0;
+
+    function showSlide(next) {
+      index = Math.max(0, Math.min(slides.length - 1, next));
+      slides.forEach((slide, i) => slide.classList.toggle("active", i === index));
+      counter.textContent = `${index + 1} / ${slides.length}`;
+      progressBar.style.width = `${((index + 1) / slides.length) * 100}%`;
+      const source = slides[index].querySelector(".presenter-notes");
+      notes.innerHTML = source ? source.innerHTML : "";
+    }
+
+    document.addEventListener("keydown", (event) => {
+      if (["ArrowRight", "ArrowDown", "PageDown", " "].includes(event.key)) {
+        event.preventDefault();
+        showSlide(index + 1);
+      } else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(event.key)) {
+        event.preventDefault();
+        showSlide(index - 1);
+      } else if (event.key === "Home") {
+        showSlide(0);
+      } else if (event.key === "End") {
+        showSlide(slides.length - 1);
+      } else if (event.key.toLowerCase() === "n") {
+        notes.classList.toggle("visible");
+      } else if (event.key.toLowerCase() === "p") {
+        window.print();
+      }
+    });
+
+    showSlide(0);
+  </script>
+</body>
+</html>
