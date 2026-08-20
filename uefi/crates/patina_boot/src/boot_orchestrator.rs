@@ -57,9 +57,10 @@ pub trait BootOrchestrator: Send + Sync + 'static {
     /// the BDS architectural protocol. This method should:
     ///
     /// 1. Enumerate devices (e.g., `connect_all()`)
-    /// 2. Signal BDS phase events (EndOfDxe, ReadyToBoot)
-    /// 3. Attempt to boot from configured device paths
-    /// 4. Handle boot failures
+    /// 2. Complete the fail-closed EndOfDxe and DxeSmmReadyToLock transition
+    /// 3. Signal ReadyToBoot before boot attempts
+    /// 4. Attempt to boot from configured device paths
+    /// 5. Handle boot failures
     ///
     /// A successful boot transfers control to the boot image and never returns.
     /// If all boot options are exhausted, the implementation returns

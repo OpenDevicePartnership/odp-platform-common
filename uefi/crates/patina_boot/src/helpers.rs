@@ -35,8 +35,33 @@ use r_efi::{
     },
 };
 
+use crate::proxy;
+use crate::{BootSourcePolicy, SecureBootState};
+
 /// Watchdog timeout in seconds per UEFI Specification Section 3.1.2.
 const WATCHDOG_TIMEOUT_SECONDS: usize = 300; // 5 minutes
+
+/// Capability proving the boot security transition completed successfully.
+///
+/// Instances are created only by [`enter_locked_boot`], after EndOfDxe has
+/// been signaled and DxeSmmReadyToLock has been installed. Image loading is
+/// exposed through this type so callers cannot accidentally continue boot
+/// dispatch after either security transition step fails.
+pub struct LockedBoot<'a, B: BootServices> {
+    boot_services: &'a B,
+}
+
+impl<'a, B: BootServices> LockedBoot<'a, B> {
+    /// Return the boot services associated with this locked boot session.
+    pub fn boot_services(&self) -> &'a B {
+        self.boot_services
+    }
+
+    /// Load and start a boot image after the security transition.
+    pub fn boot_from_device_path(&self, parent_handle: efi::Handle, device_path: &DevicePathBuf) -> Result<()> {
+        boot_from_device_path(self.boot_services, parent_handle, device_path)
+    }
+}
 
 /// Check if a hotkey was pressed during boot.
 ///
@@ -112,6 +137,25 @@ unsafe fn detect_hotkey_from_handles<B: BootServices>(
     false
 }
 
+/// Complete the fail-closed boot security transition.
+///
+/// EndOfDxe is signaled first, followed immediately by installation of
+/// DxeSmmReadyToLock. Failure of either step is returned to the caller and no
+/// [`LockedBoot`] capability is produced.
+pub fn enter_locked_boot<B: BootServices>(boot_services: &B) -> Result<LockedBoot<'_, B>> {
+    enter_locked_boot_with(boot_services, proxy::install_dxe_smm_ready_to_lock)
+}
+
+fn enter_locked_boot_with<B, F>(boot_services: &B, install_ready_to_lock: F) -> Result<LockedBoot<'_, B>>
+where
+    B: BootServices,
+    F: FnOnce(&B) -> Result<()>,
+{
+    signal_bds_phase_entry(boot_services)?;
+    install_ready_to_lock(boot_services)?;
+    Ok(LockedBoot { boot_services })
+}
+
 /// Load and start a boot image with UEFI spec compliance.
 ///
 /// Enables a 5-minute watchdog timer before `StartImage()` per UEFI Specification
@@ -127,7 +171,7 @@ unsafe fn detect_hotkey_from_handles<B: BootServices>(
 ///
 /// Returns `Ok(())` if the boot image was successfully started (which typically
 /// means it returned control). Returns an error if loading or starting fails.
-pub fn boot_from_device_path<B: BootServices>(
+fn boot_from_device_path<B: BootServices>(
     boot_services: &B,
     parent_handle: efi::Handle,
     device_path: &DevicePathBuf,
@@ -548,8 +592,8 @@ pub fn is_partial_device_path(device_path: &DevicePath) -> bool {
 /// Expands a partial device path to a full device path by matching against device topology.
 ///
 /// This function takes a partial (short-form) device path and finds the corresponding
-/// full device path by enumerating all device handles and matching against the partial
-/// path's identifying characteristics (e.g., partition GUID for HardDrive nodes).
+/// full device path by enumerating all device handles and matching the complete
+/// HardDrive identity: partition number, partition format, signature type, and signature.
 ///
 /// If the input is already a full device path (starts with Hardware or ACPI node),
 /// it is returned unchanged.
@@ -568,7 +612,7 @@ pub fn is_partial_device_path(device_path: &DevicePath) -> bool {
 /// # Supported Partial Path Types
 ///
 /// Currently supports:
-/// - **HardDrive (Media type 4, subtype 1)**: Matches by partition signature and signature type
+/// - **HardDrive (Media type 4, subtype 1)**: Matches the complete partition identity
 ///
 /// Future enhancements may add support for:
 /// - FilePath-only paths (require filesystem enumeration)
@@ -592,19 +636,25 @@ pub fn expand_device_path<B: BootServices>(boot_services: &B, partial_path: &Dev
         return Ok(partial_path.into());
     }
 
-    // Parse the HardDrive node from the partial path to extract the partition signature.
-    let target_sig = partial_path.iter().find_map(|node| {
+    // Parse the complete HardDrive identity from the partial path.
+    let target_identity = partial_path.iter().find_map(|node| {
         let hd = HardDrive::try_from_node(&node)?;
-        Some((hd.partition_signature.to_vec(), hd.signature_type))
+        Some((
+            hd.partition_number,
+            hd.partition_format,
+            hd.signature_type,
+            hd.partition_signature.to_vec(),
+        ))
     });
 
-    let (target_sig, target_sig_type) = match target_sig {
-        Some(s) => s,
-        None => {
-            log::error!("expand_device_path: no HardDrive node found in partial path");
-            return Err(EfiError::InvalidParameter);
-        }
-    };
+    let (target_partition_number, target_partition_format, target_signature_type, target_signature) =
+        match target_identity {
+            Some(s) => s,
+            None => {
+                log::error!("expand_device_path: no HardDrive node found in partial path");
+                return Err(EfiError::InvalidParameter);
+            }
+        };
 
     // Collect remaining nodes after the HardDrive node in the partial path.
     // Typically this is the FilePath node (e.g., \EFI\Boot\BOOTX64.efi).
@@ -623,6 +673,7 @@ pub fn expand_device_path<B: BootServices>(boot_services: &B, partial_path: &Dev
             })
             .collect()
     };
+    let remaining_path = DevicePathBuf::from_device_path_node_iter(remaining_nodes.into_iter());
 
     // Enumerate all handles with DevicePath protocol
     let handles = boot_services
@@ -631,7 +682,10 @@ pub fn expand_device_path<B: BootServices>(boot_services: &B, partial_path: &Dev
         ))
         .map_err(EfiError::from)?;
 
-    // Search for a handle whose device path contains a matching HardDrive node
+    // Search for exactly one handle whose device path contains a matching
+    // HardDrive node. Duplicate identities are rejected instead of selecting
+    // whichever handle firmware happened to enumerate first.
+    let mut matched_path: Option<DevicePathBuf> = None;
     for &handle in handles.iter() {
         // SAFETY: handle is valid from locate_handle_buffer, requesting device path protocol.
         let dp_ptr = match unsafe { boot_services.handle_protocol::<efi::protocols::device_path::Protocol>(handle) } {
@@ -656,7 +710,10 @@ pub fn expand_device_path<B: BootServices>(boot_services: &B, partial_path: &Dev
                 break;
             }
             let is_match = HardDrive::try_from_node(&node).is_some_and(|hd| {
-                hd.partition_signature == target_sig.as_slice() && hd.signature_type == target_sig_type
+                hd.partition_number == target_partition_number
+                    && hd.partition_format == target_partition_format
+                    && hd.signature_type == target_signature_type
+                    && hd.partition_signature == target_signature.as_slice()
             });
             prefix_nodes.push(node);
             if is_match {
@@ -667,14 +724,18 @@ pub fn expand_device_path<B: BootServices>(boot_services: &B, partial_path: &Dev
 
         if found {
             let mut result = DevicePathBuf::from_device_path_node_iter(prefix_nodes.into_iter());
-            let remaining_dp = DevicePathBuf::from_device_path_node_iter(remaining_nodes.into_iter());
-            result.append_device_path(&remaining_dp);
-            return Ok(result);
+            result.append_device_path(&remaining_path);
+            if matched_path.replace(result).is_some() {
+                log::error!("expand_device_path: ambiguous partition identity matched multiple handles");
+                return Err(EfiError::SecurityViolation);
+            }
         }
     }
 
-    log::error!("expand_device_path: no matching partition found in device topology");
-    Err(EfiError::NotFound)
+    matched_path.ok_or_else(|| {
+        log::error!("expand_device_path: no matching partition found in device topology");
+        EfiError::NotFound
+    })
 }
 
 const LOAD_OPTION_ACTIVE: u32 = 0x00000001;
@@ -852,26 +913,66 @@ const FALLBACK_OS_LOADER_PATHS: [&str; 2] = ["\\EFI\\Microsoft\\Boot\\bootmgfw.e
 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
 compile_error!("unsupported target architecture: no default OS loader path defined");
 
-/// Synthesize boot options from connected filesystem volumes.
+/// Read the current Secure Boot state.
 ///
-/// For each handle publishing SimpleFileSystem, builds device paths that
+/// Invalid or missing `SecureBoot`/`SetupMode` variables are rejected rather
+/// than treated as a permissive state.
+pub fn secure_boot_state<R: RuntimeServices>(runtime_services: &R) -> Result<SecureBootState> {
+    fn read_state_variable<R: RuntimeServices>(runtime_services: &R, name: &str) -> Result<u8> {
+        let name: Vec<u16> = alloc::format!("{name}\0").encode_utf16().collect();
+        let (value, _): (Vec<u8>, u32) = runtime_services.get_variable(&name, &EFI_GLOBAL_VARIABLE, None)?;
+        match value.as_slice() {
+            [state @ 0..=1] => Ok(*state),
+            _ => Err(EfiError::SecurityViolation),
+        }
+    }
+
+    let secure_boot = read_state_variable(runtime_services, "SecureBoot")?;
+    let setup_mode = read_state_variable(runtime_services, "SetupMode")?;
+
+    match (secure_boot, setup_mode) {
+        (1, 0) => Ok(SecureBootState::Enabled),
+        (0, 0) => Ok(SecureBootState::Disabled),
+        (0, 1) => Ok(SecureBootState::SetupMode),
+        _ => Err(EfiError::SecurityViolation),
+    }
+}
+
+/// Synthesize policy-approved boot options from connected filesystem volumes.
+///
+/// For each policy-approved handle publishing SimpleFileSystem, builds device paths that
 /// append each entry of `FALLBACK_OS_LOADER_PATHS` to the volume's device
 /// path, ordered so every volume is tried for the first loader path before
 /// any volume is tried for the second. Existence is not probed here — a
 /// candidate whose file is absent fails the subsequent `load_image` and the
 /// caller moves on to the next.
 ///
-/// This is the fallback for a device whose `BootOrder`/`Boot####` variables
+/// This is an explicit fallback for a device whose `BootOrder`/`Boot####` variables
 /// are missing or empty (e.g. after a full flash cleared NVRAM), where
 /// [`discover_boot_options`] returns `NotFound`. Provisioned `Boot####`
 /// entries always take priority; callers should only reach for this after
 /// variable-based discovery yields nothing bootable.
 ///
-/// Returns the error from SimpleFileSystem handle enumeration; how to react
-/// (log, retry, fall through) is the caller's policy decision.
-pub fn fallback_boot_options<B: BootServices>(boot_services: &B) -> Result<Vec<DevicePathBuf>> {
+/// The default [`BootSourcePolicy`] permits no sources. The policy must approve
+/// each internal volume or explicitly enable removable media, and must opt in
+/// separately to fallback with Secure Boot disabled or in setup mode.
+pub fn fallback_boot_options<B: BootServices, R: RuntimeServices>(
+    boot_services: &B,
+    runtime_services: &R,
+    policy: &BootSourcePolicy,
+) -> Result<Vec<DevicePathBuf>> {
     use patina::device_path::node_defs::FilePath;
     use r_efi::protocols::simple_file_system;
+
+    if !policy.has_sources() {
+        return Err(EfiError::NotFound);
+    }
+
+    let security_state = secure_boot_state(runtime_services)?;
+    if !policy.allows_security_state(security_state) {
+        log::error!("fallback_boot_options: fallback denied in {security_state:?}");
+        return Err(EfiError::SecurityViolation);
+    }
 
     let handles =
         boot_services.locate_handle_buffer(HandleSearchType::ByProtocol(&simple_file_system::PROTOCOL_GUID))?;
@@ -883,9 +984,15 @@ pub fn fallback_boot_options<B: BootServices>(boot_services: &B) -> Result<Vec<D
             let dp_ptr = unsafe { boot_services.handle_protocol::<device_path::Protocol>(handle) }.ok()?;
             // SAFETY: The device path pointer comes from a valid protocol interface.
             let volume_path = unsafe { DevicePath::try_from_ptr(dp_ptr as *const _ as *const u8) }.ok()?;
-            Some(DevicePathBuf::from(volume_path))
+            policy
+                .allows_device(volume_path)
+                .then(|| DevicePathBuf::from(volume_path))
         })
         .collect();
+
+    if volumes.is_empty() {
+        return Err(EfiError::NotFound);
+    }
 
     let mut options: Vec<DevicePathBuf> = Vec::with_capacity(volumes.len() * FALLBACK_OS_LOADER_PATHS.len());
     for loader in FALLBACK_OS_LOADER_PATHS {
@@ -908,6 +1015,7 @@ mod tests {
     use alloc::boxed::Box;
 
     use super::*;
+    use core::cell::Cell;
     use core::sync::atomic::{AtomicUsize, Ordering};
     use patina::{
         boot_services::{MockBootServices, boxed::BootServicesBox},
@@ -1027,6 +1135,53 @@ mod tests {
 
         let result = signal_bds_phase_entry(&mock);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_enter_locked_boot_runs_ready_to_lock_after_end_of_dxe() {
+        let mut mock = MockBootServices::new();
+        mock.expect_create_event_ex_unchecked::<()>()
+            .returning(|_, _, _, _, _| Ok(core::ptr::null_mut()));
+        mock.expect_signal_event().returning(|_| Ok(()));
+        mock.expect_close_event().returning(|_| Ok(()));
+
+        let ready_to_lock_called = Cell::new(false);
+        let result = enter_locked_boot_with(&mock, |_| {
+            ready_to_lock_called.set(true);
+            Ok(())
+        });
+
+        assert!(result.is_ok());
+        assert!(ready_to_lock_called.get());
+    }
+
+    #[test]
+    fn test_enter_locked_boot_skips_ready_to_lock_when_end_of_dxe_fails() {
+        let mut mock = MockBootServices::new();
+        mock.expect_create_event_ex_unchecked::<()>()
+            .returning(|_, _, _, _, _| Err(efi::Status::OUT_OF_RESOURCES));
+
+        let ready_to_lock_called = Cell::new(false);
+        let result = enter_locked_boot_with(&mock, |_| {
+            ready_to_lock_called.set(true);
+            Ok(())
+        });
+
+        assert!(result.is_err());
+        assert!(!ready_to_lock_called.get());
+    }
+
+    #[test]
+    fn test_enter_locked_boot_propagates_ready_to_lock_failure() {
+        let mut mock = MockBootServices::new();
+        mock.expect_create_event_ex_unchecked::<()>()
+            .returning(|_, _, _, _, _| Ok(core::ptr::null_mut()));
+        mock.expect_signal_event().returning(|_| Ok(()));
+        mock.expect_close_event().returning(|_| Ok(()));
+
+        let result = enter_locked_boot_with(&mock, |_| Err(EfiError::SecurityViolation));
+
+        assert!(matches!(result, Err(EfiError::SecurityViolation)));
     }
 
     #[test]
@@ -1167,6 +1322,10 @@ mod tests {
 
     /// Helper to build a full device path starting with ACPI root.
     fn build_full_path_with_hd(guid: [u8; 16]) -> DevicePathBuf {
+        build_full_path_with_hd_partition(guid, 1)
+    }
+
+    fn build_full_path_with_hd_partition(guid: [u8; 16], partition_number: u32) -> DevicePathBuf {
         let mut path = DevicePathBuf::from_device_path_node_iter([Acpi::new_pci_root(0)].into_iter());
         let pci_path = DevicePathBuf::from_device_path_node_iter(
             [Pci {
@@ -1176,8 +1335,9 @@ mod tests {
             .into_iter(),
         );
         path.append_device_path(&pci_path);
-        let hd_path =
-            DevicePathBuf::from_device_path_node_iter([HardDrive::new_gpt(1, 2048, 1000000, guid)].into_iter());
+        let hd_path = DevicePathBuf::from_device_path_node_iter(
+            [HardDrive::new_gpt(partition_number, 2048, 1000000, guid)].into_iter(),
+        );
         path.append_device_path(&hd_path);
         path
     }
@@ -1605,6 +1765,60 @@ mod tests {
     }
 
     #[test]
+    fn test_expand_partial_path_matches_partition_number() {
+        let guid = [0xAA; 16];
+        let partial = build_partial_hd_path(guid);
+        let full = build_full_path_with_hd_partition(guid, 2);
+        let full_addr = full.as_ref() as *const DevicePath as *const u8 as usize;
+        let box_mock = leaked_boot_services_for_box();
+
+        let mut mock = MockBootServices::new();
+        mock.expect_locate_handle_buffer()
+            .returning(move |_| Ok(mock_handle_buffer(&[1], box_mock)));
+        // SAFETY: Test code returns a pointer to `full`, which remains alive
+        // until after the mocked protocol call completes.
+        unsafe {
+            mock.expect_handle_protocol::<efi::protocols::device_path::Protocol>()
+                .returning(move |_| {
+                    Ok((full_addr as *mut efi::protocols::device_path::Protocol)
+                        .as_mut()
+                        .unwrap())
+                });
+        }
+
+        assert!(matches!(expand_device_path(&mock, &partial), Err(EfiError::NotFound)));
+    }
+
+    #[test]
+    fn test_expand_partial_path_rejects_duplicate_partition_identity() {
+        let guid = [0xAA; 16];
+        let partial = build_partial_hd_path(guid);
+        let full_a = build_full_path_with_hd(guid);
+        let full_b = build_full_path_with_hd(guid);
+        let full_a_addr = full_a.as_ref() as *const DevicePath as *const u8 as usize;
+        let full_b_addr = full_b.as_ref() as *const DevicePath as *const u8 as usize;
+        let box_mock = leaked_boot_services_for_box();
+
+        let mut mock = MockBootServices::new();
+        mock.expect_locate_handle_buffer()
+            .returning(move |_| Ok(mock_handle_buffer(&[1, 2], box_mock)));
+        // SAFETY: Test code returns pointers to `full_a` and `full_b`, both of
+        // which remain alive until after the mocked protocol calls complete.
+        unsafe {
+            mock.expect_handle_protocol::<efi::protocols::device_path::Protocol>()
+                .returning(move |handle| {
+                    let addr = if handle as usize == 1 { full_a_addr } else { full_b_addr };
+                    Ok((addr as *mut efi::protocols::device_path::Protocol).as_mut().unwrap())
+                });
+        }
+
+        assert!(matches!(
+            expand_device_path(&mock, &partial),
+            Err(EfiError::SecurityViolation)
+        ));
+    }
+
+    #[test]
     /// Verify that expansion truncates the handle's device path at the matched node,
     /// discarding any trailing nodes. This prevents duplication when a handle's path
     /// extends past the node we match on (e.g., filesystem handles that include
@@ -1951,13 +2165,65 @@ mod tests {
         assert_eq!(result.unwrap().devices().count(), 1);
     }
 
+    fn secure_boot_runtime(secure_boot: u8, setup_mode: u8) -> patina::runtime_services::MockRuntimeServices {
+        use patina::runtime_services::MockRuntimeServices;
+
+        let mut runtime_mock = MockRuntimeServices::new();
+        runtime_mock
+            .expect_get_variable::<Vec<u8>>()
+            .returning(move |name, _, _| {
+                let value = if name.get(2) == Some(&('c' as u16)) {
+                    secure_boot
+                } else {
+                    setup_mode
+                };
+                Ok((alloc::vec![value], 0))
+            });
+        runtime_mock
+    }
+
+    #[test]
+    fn test_secure_boot_state_classifies_firmware_modes() {
+        assert_eq!(
+            secure_boot_state(&secure_boot_runtime(1, 0)).unwrap(),
+            SecureBootState::Enabled
+        );
+        assert_eq!(
+            secure_boot_state(&secure_boot_runtime(0, 0)).unwrap(),
+            SecureBootState::Disabled
+        );
+        assert_eq!(
+            secure_boot_state(&secure_boot_runtime(0, 1)).unwrap(),
+            SecureBootState::SetupMode
+        );
+    }
+
+    #[test]
+    fn test_secure_boot_state_rejects_invalid_combination() {
+        assert!(matches!(
+            secure_boot_state(&secure_boot_runtime(1, 1)),
+            Err(EfiError::SecurityViolation)
+        ));
+    }
+
+    #[test]
+    fn test_fallback_boot_options_default_policy_denies_enumeration() {
+        let boot_mock = MockBootServices::new();
+        let runtime_mock = patina::runtime_services::MockRuntimeServices::new();
+
+        let result = fallback_boot_options(&boot_mock, &runtime_mock, &BootSourcePolicy::new());
+        assert!(matches!(result, Err(EfiError::NotFound)));
+    }
+
     #[test]
     fn test_fallback_boot_options_no_filesystem_handles() {
         let mut mock = MockBootServices::new();
         mock.expect_locate_handle_buffer()
             .returning(|_| Err(efi::Status::NOT_FOUND));
+        let runtime_mock = secure_boot_runtime(1, 0);
+        let policy = BootSourcePolicy::new().with_approved_internal_device(create_test_device_path());
 
-        let result = fallback_boot_options(&mock);
+        let result = fallback_boot_options(&mock, &runtime_mock, &policy);
         assert!(result.is_err());
     }
 
@@ -1965,11 +2231,18 @@ mod tests {
     fn test_fallback_boot_options_orders_loaders_across_volumes() {
         use patina::device_path::node_defs::FilePath;
 
-        let dp1 = DevicePathBuf::from_device_path_node_iter([Acpi::new_pci_root(0)].into_iter());
-        let dp2 = DevicePathBuf::from_device_path_node_iter([Acpi::new_pci_root(1)].into_iter());
+        let dp1 = build_full_path_with_hd([0x11; 16]);
+        let mut dp2 = DevicePathBuf::from_device_path_node_iter([Acpi::new_pci_root(1)].into_iter());
+        let partition =
+            DevicePathBuf::from_device_path_node_iter([HardDrive::new_gpt(1, 2048, 1_000_000, [0x22; 16])].into_iter());
+        dp2.append_device_path(&partition);
         let dp1_addr = dp1.as_ref() as *const DevicePath as *const u8 as usize;
         let dp2_addr = dp2.as_ref() as *const DevicePath as *const u8 as usize;
         let box_mock = leaked_boot_services_for_box();
+        let runtime_mock = secure_boot_runtime(1, 0);
+        let policy = BootSourcePolicy::new()
+            .with_approved_internal_device(dp1.clone())
+            .with_approved_internal_device(dp2.clone());
 
         let mut mock = MockBootServices::new();
         mock.expect_locate_handle_buffer()
@@ -1984,7 +2257,7 @@ mod tests {
                 });
         }
 
-        let options = fallback_boot_options(&mock).unwrap();
+        let options = fallback_boot_options(&mock, &runtime_mock, &policy).unwrap();
 
         // Two volumes x two loader paths, every volume tried for the first
         // loader before any volume is tried for the second.
@@ -2003,5 +2276,16 @@ mod tests {
         for (built, expected) in options.iter().zip(expected.iter()) {
             assert_eq!(built.as_ref().as_bytes(), expected.as_ref().as_bytes());
         }
+    }
+
+    #[test]
+    fn test_fallback_boot_options_denies_disabled_secure_boot_without_opt_in() {
+        let dp = DevicePathBuf::from_device_path_node_iter([Acpi::new_pci_root(0)].into_iter());
+        let runtime_mock = secure_boot_runtime(0, 0);
+        let boot_mock = MockBootServices::new();
+        let policy = BootSourcePolicy::new().with_approved_internal_device(dp);
+
+        let result = fallback_boot_options(&boot_mock, &runtime_mock, &policy);
+        assert!(matches!(result, Err(EfiError::SecurityViolation)));
     }
 }
