@@ -6,23 +6,23 @@
 //! 1. Signal the `gMsStartOfBds` event group
 //! 2. Dispatch DXE drivers so their driver bindings are installed; the device
 //!    tree is not connected up front
-//! 3. Optional capsule-queue processing via [`crate::capsule::process`], before
+//! 3. Optional capsule-queue processing via `crate::capsule::process`, before
 //!    EndOfDxe while the flash is still writable; signals the capsule processor
 //!    (a no-op unless a capsule is queued on a flash-update boot) and draws the
 //!    progress-bar logo only on a flash-update boot
-//! 4. Signal `EndOfDxe` (security lockdown)
+//! 4. Signal `EndOfDxe` and install `DxeSmmReadyToLock`; abort boot if either fails
 //! 5. Probe the hotkey provider. On a recovery chord, connect the full device
 //!    tree and consoles, then dispatch the configured SRE app path or fall back
-//!    to [`bp_recovery::run_sre_flow`] (NVMe LID read → RAM disk → chainload);
+//!    to `bp_recovery::run_sre_flow` (NVMe LID read → RAM disk → chainload);
 //!    on a frontpage chord, try USB via live `SimpleFileSystem` enumeration,
 //!    then a configured frontpage app
 //! 6. Normal boot: connect the device tree except USB host controllers (storage,
 //!    partitions, filesystems and graphics bind, so short-form `Boot####` paths
 //!    resolve; USB port enumeration — not on the boot path — is skipped), then
 //!    boot each `Boot####` entry, and the constructor `main_os_path`, in order
-//! 7. Safety net: if nothing booted, connect the full tree (including USB) and
-//!    retry, so a normal boot never fails for lack of enumeration
-//! 8. Return `EfiError::NotFound` if every boot attempt has been exhausted
+//! 7. Safety net: if nothing booted, connect the full tree and retry, then
+//!    consider only filesystem sources authorized by [`BootSourcePolicy`]
+//! 8. Return `EfiError::NotFound` if every authorized boot attempt is exhausted
 //!
 //! Optional platform hooks, all default-off and builder-enabled: MU
 //! capsule-queue processing before EndOfDxe
@@ -45,7 +45,7 @@ use patina::{
     error::EfiError,
     runtime_services::StandardRuntimeServices,
 };
-use patina_boot::{BootOrchestrator, helpers};
+use patina_boot::{BootOrchestrator, BootSourcePolicy, helpers};
 use r_efi::efi;
 
 use crate::{bp_recovery, events::signal_event_group};
@@ -200,7 +200,7 @@ static DFCI_START_OF_BDS_NOTIFY_GUID: efi::Guid = efi::Guid::from_fields(
 ///
 /// Normal boot path plus hotkey dispatch when paths are configured via the
 /// `with_*_path` builder methods, with optional builder-enabled hooks:
-/// WIM RAM-disk recovery via [`bp_recovery::run_sre_flow`]
+/// WIM RAM-disk recovery via `bp_recovery::run_sre_flow`
 /// ([`Self::with_bp_sre_fallback`]), MU capsule-queue processing
 /// ([`Self::with_capsule_processing`]), and a DFCI start-of-BDS signal
 /// ([`Self::with_dfci_bds_signal`]).
@@ -218,7 +218,7 @@ pub struct SreBootManager {
     frontpage_app_path: Option<DevicePathBuf>,
     /// When `true`, `execute()` checks BP1 for a committed SRE WIM and
     /// (a) skips USB `Boot####` entries while one is present, and
-    /// (b) dispatches [`bp_recovery::run_sre_flow`] as the final fallback
+    /// (b) dispatches `bp_recovery::run_sre_flow` as the final fallback
     ///     before returning [`EfiError::NotFound`].
     /// Default `false`. Platforms opt in via [`Self::with_bp_sre_fallback`].
     bp_sre_fallback: bool,
@@ -227,7 +227,7 @@ pub struct SreBootManager {
     /// DFCI/SEMM mailbox processing runs at BDS entry. Default `false`; platforms
     /// that ship the DFCI/SEMM stack opt in via [`Self::with_dfci_bds_signal`].
     dfci_bds_signal: bool,
-    /// When `true`, `execute()` invokes [`crate::capsule::process`] after
+    /// When `true`, `execute()` invokes `crate::capsule::process` after
     /// connecting controllers (so FMP protocols are present) and before
     /// EndOfDxe/flash lockdown. That hook signals
     /// `gMuReadyToProcessCapsulesNotifyGuid` on every call (a no-op with an empty
@@ -238,6 +238,9 @@ pub struct SreBootManager {
     /// uncleared and the platform loops. Default `false`. Platforms with the MU
     /// capsule queue opt in via [`Self::with_capsule_processing`].
     capsule_processing: bool,
+    /// Explicit policy for filesystem fallback after `Boot####` and the
+    /// configured main OS path are exhausted. The default denies fallback.
+    boot_source_policy: BootSourcePolicy,
 }
 
 impl SreBootManager {
@@ -250,6 +253,7 @@ impl SreBootManager {
             bp_sre_fallback: false,
             dfci_bds_signal: false,
             capsule_processing: false,
+            boot_source_policy: BootSourcePolicy::new(),
         }
     }
 
@@ -282,10 +286,10 @@ impl SreBootManager {
     ///
     /// - If BP1 contains a valid wrapped SRE payload (FAT signature `0x55AA`), USB `Boot####` entries are
     ///   skipped (they typically point at the SRE flashing tool whose
-    ///   [`bp_recovery::DEFAULT_BOOT_FILE_PATH`] would re-run and re-flash the same payload,
+    ///   `bp_recovery::DEFAULT_BOOT_FILE_PATH` would re-run and re-flash the same payload,
     ///   creating a reflash loop on Windows-less devices).
     /// - After all non-USB `Boot####` and `main_os_path` fall through
-    ///   without booting, [`bp_recovery::run_sre_flow`] is dispatched
+    ///   without booting, `bp_recovery::run_sre_flow` is dispatched
     ///   instead of returning `NotFound`, so the system boots into the
     ///   already-committed SRE WIM rather than failing.
     /// - If BP1 has no WIM (fresh device, never flashed), the fallback
@@ -307,7 +311,7 @@ impl SreBootManager {
     }
 
     /// Opt into MU capsule-queue processing during [`Self::execute`]. Invokes
-    /// [`crate::capsule::process`] after connecting controllers and before
+    /// `crate::capsule::process` after connecting controllers and before
     /// EndOfDxe; that hook signals `gMuReadyToProcessCapsulesNotifyGuid` on every
     /// call (handing off to `SecuredCoreCapsuleProcessorDxe`, which self-gates:
     /// a no-op with an empty queue, a drain + cold-reset on a flash-update boot)
@@ -316,6 +320,15 @@ impl SreBootManager {
     /// the flash-update boot mode is cleared. Default off.
     pub fn with_capsule_processing(mut self) -> Self {
         self.capsule_processing = true;
+        self
+    }
+
+    /// Configure filesystem fallback sources and allowed Secure Boot states.
+    ///
+    /// Without this call, exhaustion of `Boot####` and `main_os_path` does not
+    /// enumerate arbitrary filesystem volumes.
+    pub fn with_boot_source_policy(mut self, policy: BootSourcePolicy) -> Self {
+        self.boot_source_policy = policy;
         self
     }
 }
@@ -361,7 +374,7 @@ fn device_path_has_usb_node(dp: &patina::device_path::paths::DevicePath) -> bool
 /// `PartitionDxe` and `FatDxe` cooperate to install SFS specifically on
 /// the partition hosting a recognizable volume; (2) `LoadImage` on a
 /// path terminating in an SFS handle auto-resolves the arch default
-/// bootloader ([`bp_recovery::DEFAULT_BOOT_FILE_PATH`]). Picking a
+/// bootloader (`bp_recovery::DEFAULT_BOOT_FILE_PATH`). Picking a
 /// whole-device `BlockIo` handle instead gives a path that terminates at
 /// the USB messaging node, and `LoadImage` returns `NotFound` because
 /// there's no filesystem at that level.
@@ -535,12 +548,12 @@ impl BootOrchestrator for SreBootManager {
             crate::capsule::process(boot_services);
         }
 
-        // Signal EndOfDxe (flash lockdown) after capsule processing so the
-        // capsule path stays flash-writable. signal_bds_phase_entry signals
-        // gEfiEndOfDxeEventGroupGuid.
-        if let Err(e) = helpers::signal_bds_phase_entry(boot_services) {
-            log::error!("signal_bds_phase_entry failed: {:?}", e);
-        }
+        // Complete the security transition after capsule processing so the
+        // capsule path stays flash-writable. No image-dispatch capability is
+        // produced unless both EndOfDxe and ReadyToLock succeed.
+        let locked_boot = helpers::enter_locked_boot(boot_services).inspect_err(|e| {
+            log::error!("boot security transition failed: {:?}", e);
+        })?;
 
         // Signal the DFCI start-of-BDS event so the MU SettingsManager DXE
         // driver publishes gDfciSettingAccessProtocolGuid. Signalling here
@@ -595,7 +608,7 @@ impl BootOrchestrator for SreBootManager {
                     if let Err(e) = helpers::signal_ready_to_boot(boot_services) {
                         log::error!("signal_ready_to_boot (SRE dispatch) failed: {:?}", e);
                     }
-                    match helpers::boot_from_device_path(boot_services, image_handle, path) {
+                    match locked_boot.boot_from_device_path(image_handle, path) {
                         Ok(()) => log::warn!("SRE app returned control; falling through to Boot####"),
                         Err(e) => log::error!("SRE app boot_from_device_path failed: {:?}", e),
                     }
@@ -605,7 +618,7 @@ impl BootOrchestrator for SreBootManager {
                     if let Err(e) = helpers::signal_ready_to_boot(boot_services) {
                         log::error!("signal_ready_to_boot (bp_recovery) failed: {:?}", e);
                     }
-                    match bp_recovery::run_sre_flow(boot_services, image_handle) {
+                    match bp_recovery::run_sre_flow(&locked_boot, image_handle) {
                         Ok(()) => {
                             log::warn!("bp_recovery::run_sre_flow returned control; falling through to normal boot")
                         }
@@ -625,7 +638,7 @@ impl BootOrchestrator for SreBootManager {
                     if let Err(e) = helpers::signal_ready_to_boot(boot_services) {
                         log::error!("signal_ready_to_boot (USB dispatch) failed: {:?}", e);
                     }
-                    match helpers::boot_from_device_path(boot_services, image_handle, &usb_path) {
+                    match locked_boot.boot_from_device_path(image_handle, &usb_path) {
                         Ok(()) => log::warn!("USB boot returned control; falling through to Boot####"),
                         Err(e) => log::error!("USB boot_from_device_path failed: {:?}", e),
                     }
@@ -637,7 +650,7 @@ impl BootOrchestrator for SreBootManager {
                     if let Err(e) = helpers::signal_ready_to_boot(boot_services) {
                         log::error!("signal_ready_to_boot (fallback dispatch) failed: {:?}", e);
                     }
-                    match helpers::boot_from_device_path(boot_services, image_handle, path) {
+                    match locked_boot.boot_from_device_path(image_handle, path) {
                         Ok(()) => log::warn!("fallback app returned control; falling through to Boot####"),
                         Err(e) => log::error!("fallback boot_from_device_path failed: {:?}", e),
                     }
@@ -688,7 +701,7 @@ impl BootOrchestrator for SreBootManager {
                         if let Err(e) = helpers::signal_ready_to_boot(boot_services) {
                             log::error!("signal_ready_to_boot failed: {:?}", e);
                         }
-                        match helpers::boot_from_device_path(boot_services, image_handle, device_path) {
+                        match locked_boot.boot_from_device_path(image_handle, device_path) {
                             Ok(()) => {
                                 log::warn!("Boot option returned control (path={:?}), trying next...", device_path)
                             }
@@ -703,7 +716,7 @@ impl BootOrchestrator for SreBootManager {
                 if let Err(e) = helpers::signal_ready_to_boot(boot_services) {
                     log::error!("signal_ready_to_boot failed: {:?}", e);
                 }
-                match helpers::boot_from_device_path(boot_services, image_handle, &self.main_os_path) {
+                match locked_boot.boot_from_device_path(image_handle, &self.main_os_path) {
                     Ok(()) => log::warn!("Main OS fallback returned control (path={:?})", self.main_os_path),
                     Err(e) => log::warn!("Main OS fallback failed (path={:?}): {:?}", self.main_os_path, e),
                 }
@@ -713,7 +726,7 @@ impl BootOrchestrator for SreBootManager {
                 // flash) and the configured main OS path did not boot.
                 // Enumerate filesystem volumes and try the standard OS loader
                 // locations so the device still reaches the OS.
-                match helpers::fallback_boot_options(boot_services) {
+                match helpers::fallback_boot_options(boot_services, runtime_services, &self.boot_source_policy) {
                     Ok(candidates) => {
                         for device_path in candidates {
                             if bp_has_sre && device_path_has_usb_node(&device_path) {
@@ -723,7 +736,7 @@ impl BootOrchestrator for SreBootManager {
                                 );
                                 continue;
                             }
-                            match helpers::boot_from_device_path(boot_services, image_handle, &device_path) {
+                            match locked_boot.boot_from_device_path(image_handle, &device_path) {
                                 Ok(()) => log::warn!(
                                     "Fallback option returned control (path={:?}), trying next...",
                                     device_path
@@ -745,7 +758,7 @@ impl BootOrchestrator for SreBootManager {
         // hard errors after this point reach the final `NotFound`.
         if bp_has_sre {
             log::info!("Normal boot exhausted; dispatching SRE from BP1");
-            match bp_recovery::run_sre_flow(boot_services, image_handle) {
+            match bp_recovery::run_sre_flow(&locked_boot, image_handle) {
                 Ok(()) => log::warn!("bp_recovery::run_sre_flow returned control; nothing left to try"),
                 Err(e) => log::error!("bp_recovery::run_sre_flow failed: {:?}", e),
             }

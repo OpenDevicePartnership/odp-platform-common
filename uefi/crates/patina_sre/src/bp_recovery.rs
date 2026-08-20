@@ -23,12 +23,18 @@ use core::{ffi::c_void, ptr};
 
 use patina::{
     boot_services::BootServices,
-    device_path::parse_node::Header as DevicePathNodeHdr,
+    device_path::{
+        parse_node::Header as DevicePathNodeHdr,
+        paths::{DevicePath, DevicePathBuf},
+    },
     error::EfiError,
 };
 use patina_boot::helpers;
 use r_efi::{efi, protocols::device_path};
-use scroll::{Endian, ctx::{TryFromCtx, TryIntoCtx}};
+use scroll::{
+    Endian,
+    ctx::{TryFromCtx, TryIntoCtx},
+};
 
 /// Target boot partition for the SRE WIM payload.
 const TARGET_BPID: u8 = 1;
@@ -538,7 +544,11 @@ fn register_ram_disk<B: BootServices>(boot_services: &B, dram: &[u8]) -> Result<
         // Roll back the BlockIo install so no half-registered handle remains.
         // SAFETY: block_io was installed on `handle` with `state_ptr` above.
         let rollback = unsafe {
-            boot_services.uninstall_protocol_interface_unchecked(handle, &block_io::PROTOCOL_GUID, state_ptr as *mut c_void)
+            boot_services.uninstall_protocol_interface_unchecked(
+                handle,
+                &block_io::PROTOCOL_GUID,
+                state_ptr as *mut c_void,
+            )
         };
         if rollback.is_ok() {
             // SAFETY: no protocol references the state after the uninstall.
@@ -565,7 +575,11 @@ fn register_ram_disk<B: BootServices>(boot_services: &B, dram: &[u8]) -> Result<
         );
     }
 
-    Ok(RamDiskInstall { handle, device_path: dp_ptr as *const c_void, state: state_ptr })
+    Ok(RamDiskInstall {
+        handle,
+        device_path: dp_ptr as *const c_void,
+        state: state_ptr,
+    })
 }
 
 /// Compute length of a device path in bytes (walks until END_ENTIRE).
@@ -597,8 +611,7 @@ pub(crate) unsafe fn device_path_size(dp: *const u8) -> usize {
         if length < NODE_HDR_BYTES {
             return 0;
         }
-        let is_end_entire =
-            hdr.r#type == device_path::TYPE_END && hdr.sub_type == device_path::End::SUBTYPE_ENTIRE;
+        let is_end_entire = hdr.r#type == device_path::TYPE_END && hdr.sub_type == device_path::End::SUBTYPE_ENTIRE;
         if is_end_entire && length != NODE_HDR_BYTES {
             return 0;
         }
@@ -627,11 +640,7 @@ pub(crate) fn build_file_path_node(path: &str) -> Vec<u8> {
     let node_len = NODE_HDR_BYTES + path_bytes;
 
     // END_ENTIRE: length=4.
-    let end_hdr = DevicePathNodeHdr::new(
-        device_path::TYPE_END,
-        device_path::End::SUBTYPE_ENTIRE,
-        NODE_HDR_BYTES,
-    );
+    let end_hdr = DevicePathNodeHdr::new(device_path::TYPE_END, device_path::End::SUBTYPE_ENTIRE, NODE_HDR_BYTES);
 
     // The node length field is 16-bit; a path long enough to overflow it
     // would produce a header that misdescribes the appended bytes. Fail
@@ -643,11 +652,7 @@ pub(crate) fn build_file_path_node(path: &str) -> Vec<u8> {
     }
 
     // MEDIA_FILEPATH_DP node.
-    let file_hdr = DevicePathNodeHdr::new(
-        device_path::TYPE_MEDIA,
-        device_path::Media::SUBTYPE_FILE_PATH,
-        node_len,
-    );
+    let file_hdr = DevicePathNodeHdr::new(device_path::TYPE_MEDIA, device_path::Media::SUBTYPE_FILE_PATH, node_len);
 
     let mut out = Vec::with_capacity(node_len + NODE_HDR_BYTES);
     out.extend_from_slice(&encode_node_header(file_hdr));
@@ -670,12 +675,14 @@ fn encode_node_header(header: DevicePathNodeHdr) -> [u8; NODE_HDR_BYTES] {
 /// Find the FAT SimpleFileSystem handle rooted at `parent_dp`, then chainload
 /// `\EFI\Boot\bootx64.efi` from it via `helpers::boot_from_device_path`.
 fn chainload_from_ramdisk<B: BootServices>(
-    boot_services: &B,
+    locked_boot: &helpers::LockedBoot<'_, B>,
     image_handle: efi::Handle,
     parent_dp: *const c_void,
 ) -> Result<(), EfiError> {
     use patina::boot_services::protocol_handler::HandleSearchType;
     use r_efi::protocols::simple_file_system;
+
+    let boot_services = locked_boot.boot_services();
 
     // Connect the RAM disk handle so PartitionDxe + FAT bind.
     let mut remaining_dp = parent_dp as *mut efi::protocols::device_path::Protocol;
@@ -747,20 +754,13 @@ fn chainload_from_ramdisk<B: BootServices>(
     full_path.extend_from_slice(sfs_payload);
     full_path.extend_from_slice(&file_node);
 
-    let device_path_ptr = full_path.as_ptr() as *mut efi::protocols::device_path::Protocol;
-    let device_path_opt = core::ptr::NonNull::new(device_path_ptr);
-    let new_image = boot_services
-        .load_image(true, image_handle, device_path_opt, None)
-        .map_err(|status| {
-            log::error!("LoadImage({}): {:?}", DEFAULT_BOOT_FILE_PATH, status);
-            EfiError::from(status)
-        })?;
+    // SAFETY: full_path is assembled from a validated device path prefix and
+    // a well-formed FilePath + EndEntire suffix.
+    let device_path = unsafe { DevicePath::try_from_ptr(full_path.as_ptr()) }
+        .map(DevicePathBuf::from)
+        .map_err(|_| EfiError::InvalidParameter)?;
 
-    log::info!("LoadImage OK; StartImage...");
-    boot_services.start_image(new_image).map_err(|(status, _exit_data)| {
-        log::error!("StartImage: {:?}", status);
-        EfiError::from(status)
-    })
+    locked_boot.boot_from_device_path(image_handle, &device_path)
 }
 
 /// Run the SRE recovery flow end-to-end on Vol-Up hotkey:
@@ -774,7 +774,11 @@ fn chainload_from_ramdisk<B: BootServices>(
 ///
 /// BP write protection (lock/unlock) is owned by the FMP capsule flow;
 /// SRE boot is read-only against BPWPS.
-pub fn run_sre_flow<B: BootServices>(boot_services: &B, image_handle: efi::Handle) -> Result<(), EfiError> {
+pub fn run_sre_flow<B: BootServices>(
+    locked_boot: &helpers::LockedBoot<'_, B>,
+    image_handle: efi::Handle,
+) -> Result<(), EfiError> {
+    let boot_services = locked_boot.boot_services();
     helpers::connect_all(boot_services).ok();
 
     // SAFETY: dereferencing the returned interface only via raw pointer calls below.
@@ -809,7 +813,7 @@ pub fn run_sre_flow<B: BootServices>(boot_services: &B, image_handle: efi::Handl
 
     let install = register_ram_disk(boot_services, &buf)?;
 
-    let result = chainload_from_ramdisk(boot_services, image_handle, install.device_path);
+    let result = chainload_from_ramdisk(locked_boot, image_handle, install.device_path);
 
     // Control only reaches here if the load failed or the chainloaded image
     // exited; a successful boot calls ExitBootServices and never returns.
