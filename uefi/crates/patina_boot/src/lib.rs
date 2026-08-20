@@ -33,6 +33,7 @@
 pub mod boot_dispatcher;
 pub mod boot_mode;
 pub mod boot_orchestrator;
+pub mod boot_source_policy;
 pub mod config;
 pub mod connect_controller;
 pub mod helpers;
@@ -42,6 +43,7 @@ pub mod strategies;
 
 pub use boot_dispatcher::BootDispatcher;
 pub use boot_orchestrator::BootOrchestrator;
+pub use boot_source_policy::{BootSourcePolicy, SecureBootState};
 pub use connect_controller::ConnectController;
 pub use orchestrators::SimpleBootManager;
 pub use strategies::ConnectAllStrategy;
