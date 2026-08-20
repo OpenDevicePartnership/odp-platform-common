@@ -1,4 +1,5 @@
 use battery_service_interface::{BixFixedStrings, BstReturn};
+use ec_test_lib::ucsi::{UcsiCapability, UcsiConnectorCapability, UcsiConnectorStatus, UcsiVersion};
 use time_alarm_service_interface::{
     AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
 };
@@ -173,4 +174,21 @@ pub struct RtcState {
     pub timestamp: Fetched<AcpiTimestamp>,
     /// `[0]` = AC Power timer, `[1]` = DC Power timer.
     pub timers: [TimerData; 2],
+}
+
+// ── UCSI (USB-C) ──────────────────────────────────────────────────────────────
+
+/// The single connector queried by the host UCSI slice.
+pub const UCSI_CONNECTOR: u8 = 1;
+
+/// Live UCSI state for the USB-C tab and dashboard card.
+///
+/// Written exclusively by [`crate::updater::UcsiUpdater`]; read by the UCSI UI
+/// module for rendering.
+#[derive(Default)]
+pub struct UcsiState {
+    pub version: Fetched<UcsiVersion>,
+    pub capability: Fetched<UcsiCapability>,
+    pub connector_capability: Fetched<UcsiConnectorCapability>,
+    pub connector_status: Fetched<UcsiConnectorStatus>,
 }

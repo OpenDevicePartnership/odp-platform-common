@@ -27,6 +27,10 @@ battery-service-relay = { git = "https://github.com/OpenDevicePartnership/embedd
 thermal-service-relay = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "main" }
 embedded-services = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "main" }
 mctp-rs = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "main", features = ["serial"] }
+embedded-usb-pd = { git = "https://github.com/OpenDevicePartnership/embedded-usb-pd", rev = "bc8c582395ee4861be95110d4097a0b39de01717", default-features = false, features = [
+    "ucsi-v1_2",
+] }
+bincode = { version = "2.0.1", default-features = false }
 embedded-mcu-hal = "0.3.0"
 clap = { version = "4.6.0", features = ["derive"] }
 
