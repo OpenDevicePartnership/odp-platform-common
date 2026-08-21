@@ -21,7 +21,7 @@ use patina::{
     boot_services::{BootServices, StandardBootServices, protocol_handler::HandleSearchType},
     device_path::paths::DevicePathBuf,
     error::EfiError,
-    runtime_services::StandardRuntimeServices,
+    runtime_services::{RuntimeServices, StandardRuntimeServices},
 };
 use r_efi::efi;
 
@@ -76,13 +76,13 @@ fn total_handle_count<B: BootServices>(boot_services: &B) -> patina::error::Resu
 /// ## Boot Flow
 ///
 /// 1. Interleave controller connection with DXE driver dispatch for device enumeration
-/// 2. Signal EndOfDxe (security lockdown)
+/// 2. Signal EndOfDxe and install DxeSmmReadyToLock
 /// 3. Discover console devices
 /// 4. Detect hotkey (if configured); select alternate devices if pressed
 /// 5. Signal ReadyToBoot
 /// 6. Iterate boot devices, attempt `LoadImage()`/`StartImage()` for each
 /// 7. Call failure handler if all options exhausted
-pub struct SimpleBootManager<C: ConnectController = ConnectAllStrategy> {
+pub struct SimpleBootManager<C = ConnectAllStrategy> {
     config: BootConfig,
     connect_strategy: C,
 }
@@ -144,7 +144,7 @@ impl<C: ConnectController> SimpleBootManager<C> {
 
 // Expose config for test assertions
 #[cfg(test)]
-impl<C: ConnectController> SimpleBootManager<C> {
+impl<C> SimpleBootManager<C> {
     pub(crate) fn config(&self) -> &BootConfig {
         &self.config
     }
@@ -159,15 +159,40 @@ impl<C: ConnectController> BootOrchestrator for SimpleBootManager<C> {
         dxe_dispatch: &dyn DxeDispatch,
         image_handle: efi::Handle,
     ) -> Result<!, EfiError> {
+        self.execute_with(
+            boot_services,
+            runtime_services,
+            dxe_dispatch,
+            image_handle,
+            helpers::enter_locked_boot,
+        )
+    }
+}
+
+impl<C> SimpleBootManager<C> {
+    fn execute_with<B, R, F>(
+        &self,
+        boot_services: &B,
+        runtime_services: &R,
+        dxe_dispatch: &dyn DxeDispatch,
+        image_handle: efi::Handle,
+        enter_locked_boot: F,
+    ) -> Result<!, EfiError>
+    where
+        B: BootServices,
+        R: RuntimeServices,
+        C: ConnectController<B>,
+        F: for<'a> FnOnce(&'a B) -> Result<helpers::LockedBoot<'a, B>, EfiError>,
+    {
         if let Err(e) =
             interleave_connect_and_dispatch(|bs| self.connect_strategy.connect(bs), boot_services, dxe_dispatch)
         {
             log::error!("interleave_connect_and_dispatch failed: {:?}", e);
         }
 
-        if let Err(e) = helpers::signal_bds_phase_entry(boot_services) {
-            log::error!("signal_bds_phase_entry failed: {:?}", e);
-        }
+        let locked_boot = enter_locked_boot(boot_services).inspect_err(|e| {
+            log::error!("boot security transition failed: {:?}", e);
+        })?;
 
         if let Err(e) = helpers::discover_console_devices(boot_services, runtime_services) {
             log::error!("discover_console_devices failed: {:?}", e);
@@ -194,7 +219,7 @@ impl<C: ConnectController> BootOrchestrator for SimpleBootManager<C> {
                 log::error!("signal_ready_to_boot failed: {:?}", e);
             }
 
-            match helpers::boot_from_device_path(boot_services, image_handle, device_path) {
+            match locked_boot.boot_from_device_path(image_handle, device_path) {
                 Ok(()) => {
                     // Boot image returned control (e.g., EFI application exited).
                     // Continue to try next boot option.
@@ -222,6 +247,7 @@ mod tests {
     use patina::{
         boot_services::{MockBootServices, boxed::BootServicesBox},
         device_path::{node_defs::EndEntire, paths::DevicePathBuf},
+        runtime_services::MockRuntimeServices,
     };
 
     fn test_device_path() -> DevicePathBuf {
@@ -346,6 +372,35 @@ mod tests {
 
         let result = interleave_connect_and_dispatch(|_bs: &MockBootServices| Ok(()), &boot_mock, &dxe_mock);
         assert!(result.is_ok());
+    }
+
+    fn assert_transition_failure_prevents_image_load(error: EfiError) {
+        let mut boot_mock = MockBootServices::new();
+        expect_handle_count_sequence(&mut boot_mock, &[1, 1]);
+        boot_mock.expect_load_image().times(0);
+
+        let runtime_mock = MockRuntimeServices::new();
+        let dxe_mock = MockDxeDispatcher::new(&[Ok(false)]);
+        let manager = SimpleBootManager {
+            config: BootConfig::new(test_device_path()),
+            connect_strategy: |_bs: &MockBootServices| Ok(()),
+        };
+
+        let result = manager.execute_with(&boot_mock, &runtime_mock, &dxe_mock, core::ptr::null_mut(), |_| {
+            Err(error)
+        });
+
+        assert!(matches!(result, Err(actual) if actual == error));
+    }
+
+    #[test]
+    fn test_simple_boot_manager_does_not_load_image_after_end_of_dxe_failure() {
+        assert_transition_failure_prevents_image_load(EfiError::OutOfResources);
+    }
+
+    #[test]
+    fn test_simple_boot_manager_does_not_load_image_after_ready_to_lock_failure() {
+        assert_transition_failure_prevents_image_load(EfiError::SecurityViolation);
     }
 
     // Tests for ConnectController and with_connect_strategy

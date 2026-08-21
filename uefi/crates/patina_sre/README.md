@@ -9,7 +9,7 @@ ship a System Recovery Environment alongside the main OS. The flow:
 2. Extra `connect_all` pass before EndOfDxe so platforms whose driver-binding
    runs only in the open window get a chance to bind (e.g. `PartitionDxe`
    creating GPT child handles)
-3. Signal `EndOfDxe` (security lockdown)
+3. Signal `EndOfDxe`, install `DxeSmmReadyToLock`, and abort boot if either fails
 4. Signal start-of-BDS event groups
 5. Discover console devices
 6. Probe the hotkey provider; on a recovery chord, dispatch the configured
@@ -23,6 +23,8 @@ ship a System Recovery Environment alongside the main OS. The flow:
    and try each in order
 9. Fall back to the constructor-provided `main_os_path` if discovery yields
    nothing (or fails)
+10. If explicitly configured, enumerate policy-approved filesystem fallback
+    sources
 
 Opt-in builders add work at BDS entry: `with_capsule_processing` signals the
 platform capsule processor before EndOfDxe (drawing the boot logo first so
@@ -36,13 +38,21 @@ across transports (NVMe today, UFS next).
 ## Use
 
 ```rust,ignore
-use patina_boot::BootDispatcher;
+use patina_boot::{BootDispatcher, BootSourcePolicy};
 use patina_sre::SreBootManager;
 
 add.component(BootDispatcher::new(
-    SreBootManager::new(main_os_path),
+    SreBootManager::new(main_os_path).with_boot_source_policy(
+        BootSourcePolicy::new()
+            .with_approved_internal_device(recovery_volume_path),
+    ),
 ));
 ```
+
+Without `with_boot_source_policy`, filesystem fallback is disabled. Approved
+internal volumes are usable while Secure Boot is enabled. OEMs must opt in
+separately to removable media, disabled Secure Boot, or SetupMode through the
+corresponding `BootSourcePolicy` builders.
 
 ## License
 
