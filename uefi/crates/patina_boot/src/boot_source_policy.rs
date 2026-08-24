@@ -68,7 +68,11 @@ impl BootSourcePolicy {
     }
 
     pub(crate) fn has_sources(&self) -> bool {
-        self.allow_removable_media || !self.approved_internal_devices.is_empty()
+        self.allow_removable_media
+            || self
+                .approved_internal_devices
+                .iter()
+                .any(|approved| hard_drive_nodes(approved.as_ref()).next().is_some())
     }
 
     pub(crate) fn allows_security_state(&self, state: SecureBootState) -> bool {
@@ -85,13 +89,22 @@ impl BootSourcePolicy {
         }
 
         self.approved_internal_devices.iter().any(|approved| {
-            approved
-                .as_ref()
-                .iter()
-                .any(|node| HardDrive::try_from_node(&node).is_some())
-                && device_path_has_prefix(candidate, approved.as_ref())
+            hard_drive_nodes(approved.as_ref()).any(|approved_hd| {
+                hard_drive_nodes(candidate).any(|candidate_hd| hard_drive_identity_matches(&approved_hd, &candidate_hd))
+            })
         })
     }
+}
+
+fn hard_drive_nodes(device_path: &DevicePath) -> impl Iterator<Item = HardDrive> {
+    device_path.iter().filter_map(|node| HardDrive::try_from_node(&node))
+}
+
+fn hard_drive_identity_matches(left: &HardDrive, right: &HardDrive) -> bool {
+    left.partition_number == right.partition_number
+        && left.partition_format == right.partition_format
+        && left.signature_type == right.signature_type
+        && left.partition_signature == right.partition_signature
 }
 
 fn is_usb_device_path(device_path: &DevicePath) -> bool {
@@ -104,26 +117,6 @@ fn is_usb_device_path(device_path: &DevicePath) -> bool {
                     || value == MessagingSubType::UsbWwid as u8
             )
     })
-}
-
-fn device_path_has_prefix(candidate: &DevicePath, approved: &DevicePath) -> bool {
-    let approved_bytes = without_end_entire(approved.as_bytes());
-    !approved_bytes.is_empty() && candidate.as_bytes().starts_with(approved_bytes)
-}
-
-fn without_end_entire(bytes: &[u8]) -> &[u8] {
-    const END_ENTIRE_SIZE: usize = 4;
-    const END_TYPE: u8 = 0x7f;
-    const END_SUBTYPE_ENTIRE: u8 = 0xff;
-
-    if bytes.len() >= END_ENTIRE_SIZE
-        && bytes[bytes.len() - END_ENTIRE_SIZE] == END_TYPE
-        && bytes[bytes.len() - END_ENTIRE_SIZE + 1] == END_SUBTYPE_ENTIRE
-    {
-        &bytes[..bytes.len() - END_ENTIRE_SIZE]
-    } else {
-        bytes
-    }
 }
 
 #[cfg(test)]
@@ -142,6 +135,12 @@ mod tests {
         path
     }
 
+    fn short_form_internal_path(root: u32) -> DevicePathBuf {
+        DevicePathBuf::from_device_path_node_iter(
+            [HardDrive::new_gpt(1, 2048, 1_000_000, [root as u8; 16])].into_iter(),
+        )
+    }
+
     fn usb_path() -> DevicePathBuf {
         let bytes = [0x03, 0x05, 0x06, 0x00, 0x00, 0x00, 0x7f, 0xff, 0x04, 0x00];
         // SAFETY: `bytes` contains a valid USB node followed by EndEntire.
@@ -157,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn approved_internal_prefix_matches_only_that_device() {
+    fn approved_internal_identity_matches_only_that_partition() {
         let approved = internal_path(0);
         let policy = BootSourcePolicy::new().with_approved_internal_device(approved.clone());
 
@@ -166,11 +165,22 @@ mod tests {
     }
 
     #[test]
+    fn short_form_internal_approval_matches_full_device_path() {
+        let approved = short_form_internal_path(0);
+        let candidate = internal_path(0);
+        let policy = BootSourcePolicy::new().with_approved_internal_device(approved);
+
+        assert!(policy.has_sources());
+        assert!(policy.allows_device(candidate.as_ref()));
+    }
+
+    #[test]
     fn broad_controller_prefix_is_not_an_approved_volume() {
         let controller = DevicePathBuf::from_device_path_node_iter([Acpi::new_pci_root(0)].into_iter());
         let candidate = internal_path(0);
         let policy = BootSourcePolicy::new().with_approved_internal_device(controller);
 
+        assert!(!policy.has_sources());
         assert!(!policy.allows_device(candidate.as_ref()));
     }
 
