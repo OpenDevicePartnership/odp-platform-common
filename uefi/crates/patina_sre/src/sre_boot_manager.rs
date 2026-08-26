@@ -3,7 +3,8 @@
 //! [`SreBootManager`] implements [`patina_boot::BootOrchestrator`] for platforms
 //! shipping a System Recovery Environment alongside the main OS. The flow:
 //!
-//! 1. Signal the `gMsStartOfBds` event group
+//! 1. Signal the `gMsStartOfBds` event group and, when enabled, the
+//!    `gDfciStartOfBds` event group
 //! 2. Dispatch DXE drivers so their driver bindings are installed; the device
 //!    tree is not connected up front
 //! 3. Optional capsule-queue processing via `crate::capsule::process`, before
@@ -182,11 +183,10 @@ static MS_START_OF_BDS_NOTIFY_GUID: efi::Guid = efi::Guid::from_fields(
     &[0x1f, 0x3f, 0x1a, 0x48, 0xa2, 0x4d],
 );
 
-/// `gDfciStartOfBdsNotifyGuid` from `DfciPkg.dec`. Signaled by `execute()`
-/// after the MU start-of-BDS event so the MU `SettingsManagerDxe`
-/// publishes `gDfciSettingAccessProtocolGuid`. Safe to signal under
-/// Patina because the upstream `DfciManager` is dispatch-order resilient
-/// (ProtocolNotify-based + ProcessMailBoxes NULL guards).
+/// `gDfciStartOfBdsNotifyGuid` from `DfciPkg.dec`. Signaled immediately after
+/// the MU start-of-BDS event and before EndOfDxe so `SettingsManagerDxe`
+/// publishes `gDfciSettingAccessProtocolGuid` while the platform is still in
+/// its pre-lock phase.
 static DFCI_START_OF_BDS_NOTIFY_GUID: efi::Guid = efi::Guid::from_fields(
     0xc9341466,
     0x1a6c,
@@ -195,6 +195,29 @@ static DFCI_START_OF_BDS_NOTIFY_GUID: efi::Guid = efi::Guid::from_fields(
     0xc2,
     &[0x78, 0x12, 0xb0, 0x29, 0x9c, 0x45],
 );
+
+fn run_pre_lock_phase<B, W, L, T>(
+    boot_services: &B,
+    signal_dfci_start: bool,
+    pre_lock_work: W,
+    enter_locked_boot: L,
+) -> T
+where
+    B: BootServices,
+    W: FnOnce(),
+    L: FnOnce() -> T,
+{
+    if let Err(e) = signal_event_group(boot_services, &MS_START_OF_BDS_NOTIFY_GUID) {
+        log::error!("signal gMsStartOfBdsNotifyGuid failed: {:?}", e);
+    }
+
+    if signal_dfci_start && let Err(e) = signal_event_group(boot_services, &DFCI_START_OF_BDS_NOTIFY_GUID) {
+        log::error!("signal gDfciStartOfBdsNotifyGuid failed: {:?}", e);
+    }
+
+    pre_lock_work();
+    enter_locked_boot()
+}
 
 /// SRE boot manager implementing [`BootOrchestrator`].
 ///
@@ -507,66 +530,56 @@ impl BootOrchestrator for SreBootManager {
         dxe_dispatch: &dyn DxeDispatch,
         image_handle: efi::Handle,
     ) -> Result<!, EfiError> {
-        // Signal gMsStartOfBds before dispatch and before EndOfDxe.
-        if let Err(e) = signal_event_group(boot_services, &MS_START_OF_BDS_NOTIFY_GUID) {
-            log::error!("signal gMsStartOfBdsNotifyGuid failed: {:?}", e);
-        }
-
-        // Dispatch DXE drivers so their driver bindings are installed.
-        loop {
-            match dxe_dispatch.dispatch() {
-                Ok(true) => continue,
-                Ok(false) => break,
-                Err(e) => {
-                    log::error!("DXE dispatch failed: {:?}", e);
-                    break;
+        let locked_boot = run_pre_lock_phase(
+            boot_services,
+            self.dfci_bds_signal,
+            || {
+                // Dispatch DXE drivers so their driver bindings are installed.
+                loop {
+                    match dxe_dispatch.dispatch() {
+                        Ok(true) => continue,
+                        Ok(false) => break,
+                        Err(e) => {
+                            log::error!("DXE dispatch failed: {:?}", e);
+                            break;
+                        }
+                    }
                 }
-            }
-        }
 
-        // Connect the device tree except USB host controllers (storage,
-        // partitions, filesystems and graphics bind — so short-form Boot####
-        // paths resolve, and the firmware-management protocols and GOP are
-        // present — while USB port enumeration, not on the boot path, is
-        // skipped). Done here so it happens in the pre-EndOfDxe open window and
-        // the capsule block below has its FMP and a drawable console without a
-        // separate connect. A full connect_all second pass in the boot loop
-        // guarantees boot if this leaves the boot device unreachable.
-        if let Err(e) = helpers::connect_all_skip_usb(boot_services) {
-            log::error!("connect_all_skip_usb failed: {:?}", e);
-        }
+                // Connect the device tree except USB host controllers (storage,
+                // partitions, filesystems and graphics bind — so short-form Boot####
+                // paths resolve, and the firmware-management protocols and GOP are
+                // present — while USB port enumeration, not on the boot path, is
+                // skipped). Done here so it happens in the pre-EndOfDxe open window and
+                // the capsule block below has its FMP and a drawable console without a
+                // separate connect. A full connect_all second pass in the boot loop
+                // guarantees boot if this leaves the boot device unreachable.
+                if let Err(e) = helpers::connect_all_skip_usb(boot_services) {
+                    log::error!("connect_all_skip_usb failed: {:?}", e);
+                }
 
-        // Drive capsule-queue processing before EndOfDxe, while the flash is
-        // still writable. crate::capsule::process signals the capsule processor
-        // unconditionally (a no-op with an empty queue or a normal boot; a drain
-        // + cold-reset on a flash-update boot, so it may not return) and draws
-        // the progress-bar logo only on a flash-update boot. Its firmware-
-        // management protocols are already present (installed at DXE dispatch,
-        // device FMPs bound by the connect above), so no extra device-tree
-        // connect is needed.
-        if self.capsule_processing {
-            crate::capsule::process(boot_services);
-        }
-
-        // Complete the security transition after capsule processing so the
-        // capsule path stays flash-writable. No image-dispatch capability is
-        // produced unless both EndOfDxe and ReadyToLock succeed.
-        let locked_boot = helpers::enter_locked_boot(boot_services).inspect_err(|e| {
-            log::error!("boot security transition failed: {:?}", e);
-        })?;
-
-        // Signal the DFCI start-of-BDS event so the MU SettingsManager DXE
-        // driver publishes gDfciSettingAccessProtocolGuid. Signalling here
-        // rather than during EndOfDxe keeps the resulting SettingAccess-install
-        // notify dispatch in a clean stack frame: SemmManager's
-        // SettingAccessCallback closes its own event from inside the callback,
-        // which would corrupt the EDK2 DxeCore notify iterator if fired while
-        // EndOfDxe were still iterating. Gated behind with_dfci_bds_signal().
-        if self.dfci_bds_signal
-            && let Err(e) = signal_event_group(boot_services, &DFCI_START_OF_BDS_NOTIFY_GUID)
-        {
-            log::error!("signal gDfciStartOfBdsNotifyGuid failed: {:?}", e);
-        }
+                // Drive capsule-queue processing before EndOfDxe, while the flash is
+                // still writable. crate::capsule::process signals the capsule processor
+                // unconditionally (a no-op with an empty queue or a normal boot; a drain
+                // + cold-reset on a flash-update boot, so it may not return) and draws
+                // the progress-bar logo only on a flash-update boot. Its firmware-
+                // management protocols are already present (installed at DXE dispatch,
+                // device FMPs bound by the connect above), so no extra device-tree
+                // connect is needed.
+                if self.capsule_processing {
+                    crate::capsule::process(boot_services);
+                }
+            },
+            || {
+                // Complete the security transition after capsule processing so
+                // the capsule path stays flash-writable. No image-dispatch
+                // capability is produced unless both EndOfDxe and ReadyToLock
+                // succeed.
+                helpers::enter_locked_boot(boot_services).inspect_err(|e| {
+                    log::error!("boot security transition failed: {:?}", e);
+                })
+            },
+        )?;
 
         // Unified SRE hotkey dispatch. probe_sre_hotkey reads the latched
         // Vol-Up/Vol-Down + Power state via MS_BUTTON_SERVICES_PROTOCOL
@@ -774,8 +787,12 @@ mod tests {
     extern crate alloc;
 
     use super::*;
-    use alloc::{sync::Arc, vec::Vec};
-    use patina::device_path::{node_defs::EndEntire, paths::DevicePathBuf};
+    use alloc::{sync::Arc, vec, vec::Vec};
+    use patina::{
+        boot_services::MockBootServices,
+        device_path::{node_defs::EndEntire, paths::DevicePathBuf},
+    };
+    use std::sync::Mutex;
 
     fn test_device_path() -> DevicePathBuf {
         DevicePathBuf::from_device_path_node_iter(core::iter::once(EndEntire))
@@ -799,6 +816,48 @@ mod tests {
     #[test]
     fn test_arc_dyn_construction() {
         let _: Arc<dyn BootOrchestrator> = Arc::new(SreBootManager::new(test_device_path()));
+    }
+
+    #[test]
+    fn test_dfci_start_of_bds_precedes_work_and_security_transition() {
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let event_trace = Arc::clone(&trace);
+        let work_trace = Arc::clone(&trace);
+        let lock_trace = Arc::clone(&trace);
+        let mut mock = MockBootServices::new();
+
+        mock.expect_create_event_ex_unchecked::<()>()
+            .times(2)
+            .returning(move |_, _, _, _, group| {
+                let phase = if group == &MS_START_OF_BDS_NOTIFY_GUID {
+                    "ms-start-of-bds"
+                } else if group == &DFCI_START_OF_BDS_NOTIFY_GUID {
+                    "dfci-start-of-bds"
+                } else {
+                    panic!("unexpected event group: {group:?}");
+                };
+                event_trace.lock().unwrap().push(phase);
+                Ok(core::ptr::null_mut())
+            });
+        mock.expect_signal_event().times(2).returning(|_| Ok(()));
+        mock.expect_close_event().times(2).returning(|_| Ok(()));
+
+        run_pre_lock_phase(
+            &mock,
+            true,
+            || work_trace.lock().unwrap().push("pre-lock-work"),
+            || lock_trace.lock().unwrap().push("security-transition"),
+        );
+
+        assert_eq!(
+            *trace.lock().unwrap(),
+            vec![
+                "ms-start-of-bds",
+                "dfci-start-of-bds",
+                "pre-lock-work",
+                "security-transition",
+            ]
+        );
     }
 
     // === Device-path classification helper tests ===
