@@ -1,4 +1,11 @@
 //! Explicit policy for boot sources discovered outside provisioned `Boot####` entries.
+//!
+//! ## License
+//!
+//! Copyright (c) Microsoft Corporation.
+//!
+//! SPDX-License-Identifier: MIT
+//!
 
 extern crate alloc;
 

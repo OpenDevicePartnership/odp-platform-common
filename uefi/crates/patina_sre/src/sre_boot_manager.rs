@@ -20,7 +20,8 @@
 //! 6. Normal boot: connect the device tree except USB host controllers (storage,
 //!    partitions, filesystems and graphics bind, so short-form `Boot####` paths
 //!    resolve; USB port enumeration — not on the boot path — is skipped), then
-//!    boot each `Boot####` entry, and the constructor `main_os_path`, in order
+//!    boot each `Boot####` entry in order; if no `Boot####` entry was attempted,
+//!    fall back to the constructor `main_os_path`
 //! 7. Safety net: if nothing booted, connect the full tree and retry, then
 //!    consider only filesystem sources authorized by [`BootSourcePolicy`]
 //! 8. Return `EfiError::NotFound` if every authorized boot attempt is exhausted
