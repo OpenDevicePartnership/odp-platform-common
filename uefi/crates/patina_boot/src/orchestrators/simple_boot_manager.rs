@@ -82,7 +82,7 @@ fn total_handle_count<B: BootServices>(boot_services: &B) -> patina::error::Resu
 /// 5. Signal ReadyToBoot
 /// 6. Iterate boot devices, attempt `LoadImage()`/`StartImage()` for each
 /// 7. Call failure handler if all options exhausted
-pub struct SimpleBootManager<C = ConnectAllStrategy> {
+pub struct SimpleBootManager<C: ConnectController = ConnectAllStrategy> {
     config: BootConfig,
     connect_strategy: C,
 }
@@ -144,7 +144,7 @@ impl<C: ConnectController> SimpleBootManager<C> {
 
 // Expose config for test assertions
 #[cfg(test)]
-impl<C> SimpleBootManager<C> {
+impl<C: ConnectController> SimpleBootManager<C> {
     pub(crate) fn config(&self) -> &BootConfig {
         &self.config
     }
@@ -169,7 +169,7 @@ impl<C: ConnectController> BootOrchestrator for SimpleBootManager<C> {
     }
 }
 
-impl<C> SimpleBootManager<C> {
+impl<C: ConnectController> SimpleBootManager<C> {
     fn execute_with<B, R, F>(
         &self,
         boot_services: &B,
@@ -375,16 +375,20 @@ mod tests {
     }
 
     fn assert_transition_failure_prevents_image_load(error: EfiError) {
+        struct OkConnect;
+        impl<B: BootServices> ConnectController<B> for OkConnect {
+            fn connect(&self, _boot_services: &B) -> patina::error::Result<()> {
+                Ok(())
+            }
+        }
+
         let mut boot_mock = MockBootServices::new();
         expect_handle_count_sequence(&mut boot_mock, &[1, 1]);
         boot_mock.expect_load_image().times(0);
 
         let runtime_mock = MockRuntimeServices::new();
         let dxe_mock = MockDxeDispatcher::new(&[Ok(false)]);
-        let manager = SimpleBootManager {
-            config: BootConfig::new(test_device_path()),
-            connect_strategy: |_bs: &MockBootServices| Ok(()),
-        };
+        let manager = SimpleBootManager::with_connect_strategy(BootConfig::new(test_device_path()), OkConnect);
 
         let result = manager.execute_with(&boot_mock, &runtime_mock, &dxe_mock, core::ptr::null_mut(), |_| {
             Err(error)
