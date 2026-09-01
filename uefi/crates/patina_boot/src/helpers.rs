@@ -2278,9 +2278,21 @@ mod tests {
         }
     }
 
+    /// Device path for an internal, GPT-signed volume.
+    ///
+    /// Used as the approved device in policy tests whose outcome depends on
+    /// the secure boot state rather than on device identity. A GPT partition
+    /// signature is a unique partition GUID and so is arbitrary by
+    /// construction; it is fixed once here rather than repeated as a literal
+    /// at call sites. The path only needs a HardDrive node the policy accepts.
+    fn approved_internal_volume() -> DevicePathBuf {
+        const PARTITION_SIGNATURE: [u8; 16] = [0x33; 16];
+        build_full_path_with_hd(PARTITION_SIGNATURE)
+    }
+
     #[test]
     fn test_fallback_boot_options_denies_disabled_secure_boot_without_opt_in() {
-        let dp = DevicePathBuf::from_device_path_node_iter([Acpi::new_pci_root(0)].into_iter());
+        let dp = approved_internal_volume();
         let runtime_mock = secure_boot_runtime(0, 0);
         let boot_mock = MockBootServices::new();
         let policy = BootSourcePolicy::new().with_approved_internal_device(dp);
