@@ -18,15 +18,15 @@ readme = "README.md"
 
 [dependencies]
 log = { version = "0.4", default-features = false }
-patina = { version = "22", features = ["unstable-device-path"] }
-patina_macro = { version = "22" }
+patina = { version = "23", features = ["unstable-device-path"] }
+patina_macro = { version = "23" }
 r-efi = { version = "7", default-features = false }
 spin = { version = "0.9", default-features = false, features = ["spin_mutex", "once"] }
 zerocopy = { version = "0.8", default-features = false }
 zerocopy-derive = { version = "0.8" }
 
 [dev-dependencies]
-patina = { version = "22", features = ["mockall", "unstable-device-path"] }
+patina = { version = "23", features = ["mockall", "unstable-device-path"] }
 mockall = { version = "0.14" }
 criterion = "0.5"
 

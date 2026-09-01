@@ -11,8 +11,8 @@
 //!
 
 use patina::{
-    boot_services::{BootServices, StandardBootServices},
     error::Result,
+    uefi::boot_services::{BootServices, StandardBootServices},
 };
 
 /// Pluggable controller connection strategy for device enumeration.

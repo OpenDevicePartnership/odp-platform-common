@@ -41,11 +41,11 @@
 extern crate alloc;
 
 use patina::{
-    boot_services::{BootServices, StandardBootServices},
     component::service::dxe_dispatch::DxeDispatch,
-    device_path::paths::DevicePathBuf,
     error::EfiError,
-    runtime_services::StandardRuntimeServices,
+    uefi::boot_services::{BootServices, StandardBootServices},
+    uefi::device_path::paths::DevicePathBuf,
+    uefi::runtime_services::StandardRuntimeServices,
 };
 use patina_boot::{BootOrchestrator, BootSourcePolicy, helpers};
 use r_efi::efi;
@@ -364,8 +364,8 @@ impl SreBootManager {
 /// is the desired recovery path — those dispatchers can crash under
 /// alternate BDS implementations (Patina) and would prevent the fallback
 /// from running.
-fn device_path_has_fw_file_node(dp: &patina::device_path::paths::DevicePath) -> bool {
-    use patina::device_path::node_defs::{DevicePathType, MediaSubType};
+fn device_path_has_fw_file_node(dp: &patina::uefi::device_path::paths::DevicePath) -> bool {
+    use patina::uefi::device_path::node_defs::{DevicePathType, MediaSubType};
     dp.iter().any(|node| {
         let t = node.header.r#type;
         let s = node.header.sub_type;
@@ -377,8 +377,8 @@ fn device_path_has_fw_file_node(dp: &patina::device_path::paths::DevicePath) -> 
 /// True if any node in `dp` is a USB messaging node (Usb, UsbClass, or
 /// UsbWwid sub-types). Used by [`find_first_usb_sfs_device_path`] to
 /// filter enumerated `SimpleFileSystem` handles.
-fn device_path_has_usb_node(dp: &patina::device_path::paths::DevicePath) -> bool {
-    use patina::device_path::node_defs::{DevicePathType, MessagingSubType};
+fn device_path_has_usb_node(dp: &patina::uefi::device_path::paths::DevicePath) -> bool {
+    use patina::uefi::device_path::node_defs::{DevicePathType, MessagingSubType};
     dp.iter().any(|node| {
         let t = node.header.r#type;
         let s = node.header.sub_type;
@@ -403,8 +403,8 @@ fn device_path_has_usb_node(dp: &patina::device_path::paths::DevicePath) -> bool
 /// the USB messaging node, and `LoadImage` returns `NotFound` because
 /// there's no filesystem at that level.
 fn find_first_usb_sfs_device_path<B: BootServices>(boot_services: &B) -> Option<DevicePathBuf> {
-    use patina::boot_services::protocol_handler::HandleSearchType;
-    use patina::device_path::paths::DevicePath;
+    use patina::uefi::boot_services::protocol_handler::HandleSearchType;
+    use patina::uefi::device_path::paths::DevicePath;
     use r_efi::protocols::{device_path, simple_file_system};
 
     let handles = boot_services
@@ -468,8 +468,8 @@ fn find_first_usb_sfs_device_path<B: BootServices>(boot_services: &B) -> Option<
 /// `patina_dxe_core` requires the full FV+File form instead — for that, use
 /// [`fv_volume_file_device_path`].
 pub fn fv_file_device_path(file_guid: efi::Guid) -> DevicePathBuf {
-    use patina::device_path::fv_types::FvPiWgDevicePath;
-    use patina::device_path::paths::DevicePath;
+    use patina::uefi::device_path::fv_types::FvPiWgDevicePath;
+    use patina::uefi::device_path::paths::DevicePath;
 
     let fv_dp = FvPiWgDevicePath::new_file(file_guid);
     // SAFETY: `FvPiWgDevicePath` is `#[repr(C)]` containing a 20-byte FwFile
@@ -490,8 +490,8 @@ pub fn fv_file_device_path(file_guid: efi::Guid) -> DevicePathBuf {
 /// GUID as a parameter; callers typically pin a platform-specific DXE FV
 /// GUID. Dynamic resolution is a follow-up.
 pub fn fv_volume_file_device_path(fv_guid: efi::Guid, file_guid: efi::Guid) -> DevicePathBuf {
-    use patina::device_path::fv_types::{MediaFwDevicePathSubtype, MediaFwVolDevicePath};
-    use patina::device_path::paths::DevicePath;
+    use patina::uefi::device_path::fv_types::{MediaFwDevicePathSubtype, MediaFwVolDevicePath};
+    use patina::uefi::device_path::paths::DevicePath;
 
     /// On-wire layout: 20-byte FwVol node | 20-byte FwFile node | 4-byte End.
     #[repr(C)]
@@ -790,8 +790,8 @@ mod tests {
     use super::*;
     use alloc::{sync::Arc, vec, vec::Vec};
     use patina::{
-        boot_services::MockBootServices,
-        device_path::{node_defs::EndEntire, paths::DevicePathBuf},
+        uefi::boot_services::MockBootServices,
+        uefi::device_path::{node_defs::EndEntire, paths::DevicePathBuf},
     };
     use std::sync::Mutex;
 
@@ -899,10 +899,10 @@ mod tests {
         bytes
     }
 
-    fn classify<F: Fn(&patina::device_path::paths::DevicePath) -> bool>(bytes: &[u8], f: F) -> bool {
+    fn classify<F: Fn(&patina::uefi::device_path::paths::DevicePath) -> bool>(bytes: &[u8], f: F) -> bool {
         // SAFETY: synth_path produces well-formed, EndEntire-terminated node
         // streams; the reference does not outlive `bytes`.
-        f(unsafe { patina::device_path::paths::DevicePath::try_from_ptr(bytes.as_ptr()) }.unwrap())
+        f(unsafe { patina::uefi::device_path::paths::DevicePath::try_from_ptr(bytes.as_ptr()) }.unwrap())
     }
 
     #[test]

@@ -22,12 +22,12 @@ use alloc::vec::Vec;
 use core::{ffi::c_void, ptr};
 
 use patina::{
-    boot_services::BootServices,
-    device_path::{
+    error::EfiError,
+    uefi::boot_services::BootServices,
+    uefi::device_path::{
         parse_node::Header as DevicePathNodeHdr,
         paths::{DevicePath, DevicePathBuf},
     },
-    error::EfiError,
 };
 use patina_boot::helpers;
 use r_efi::{efi, protocols::device_path};
@@ -679,7 +679,7 @@ fn chainload_from_ramdisk<B: BootServices>(
     image_handle: efi::Handle,
     parent_dp: *const c_void,
 ) -> Result<(), EfiError> {
-    use patina::boot_services::protocol_handler::HandleSearchType;
+    use patina::uefi::boot_services::protocol_handler::HandleSearchType;
     use r_efi::protocols::simple_file_system;
 
     let boot_services = locked_boot.boot_services();

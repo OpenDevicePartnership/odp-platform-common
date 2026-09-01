@@ -26,5 +26,5 @@ pub use sre_boot_manager::{SreBootManager, SreHotkey, fv_file_device_path, fv_vo
 // platform binaries don't need to depend on the same patina source patina_sre
 // uses. Constructing DevicePathBuf via these re-exports
 // guarantees type identity with SreBootManager's constructor signature.
-pub use patina::device_path::node_defs::EndEntire;
-pub use patina::device_path::paths::DevicePathBuf;
+pub use patina::uefi::device_path::node_defs::EndEntire;
+pub use patina::uefi::device_path::paths::DevicePathBuf;

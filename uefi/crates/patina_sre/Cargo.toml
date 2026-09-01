@@ -35,10 +35,10 @@ patina_boot = { path = "../patina_boot" }
 
 # Must match the patina that patina_boot itself uses, or trait/type identity
 # breaks (two distinct `patina::DevicePathBuf` types, mismatched impls).
-patina = { version = "22", features = ["unstable-device-path"] }
+patina = { version = "23", features = ["unstable-device-path"] }
 
 [dev-dependencies]
-patina = { version = "22", features = ["mockall", "unstable-device-path"] }
+patina = { version = "23", features = ["mockall", "unstable-device-path"] }
 mockall = { version = "0.13" }
 
 [lints.clippy]

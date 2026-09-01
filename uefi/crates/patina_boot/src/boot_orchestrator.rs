@@ -12,8 +12,8 @@
 //! SPDX-License-Identifier: MIT
 //!
 use patina::{
-    boot_services::StandardBootServices, component::service::dxe_dispatch::DxeDispatch, error::EfiError,
-    runtime_services::StandardRuntimeServices,
+    component::service::dxe_dispatch::DxeDispatch, error::EfiError, uefi::boot_services::StandardBootServices,
+    uefi::runtime_services::StandardRuntimeServices,
 };
 use r_efi::efi;
 

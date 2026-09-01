@@ -7,7 +7,7 @@
 //! SPDX-License-Identifier: MIT
 //!
 
-use patina::{boot_services::BootServices, error::Result};
+use patina::{error::Result, uefi::boot_services::BootServices};
 
 use crate::{connect_controller::ConnectController, helpers};
 

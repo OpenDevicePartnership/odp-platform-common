@@ -16,15 +16,15 @@ use alloc::boxed::Box;
 use core::ffi::c_void;
 
 use patina::{
-    boot_services::{BootServices, StandardBootServices},
     component::{
         component,
         params::Handle,
         service::{Service, dxe_dispatch::DxeDispatch},
     },
     error::{EfiError, Result},
-    pi::protocols::bds,
-    runtime_services::StandardRuntimeServices,
+    pi::protocol::bds,
+    uefi::boot_services::{BootServices, StandardBootServices},
+    uefi::runtime_services::StandardRuntimeServices,
 };
 use spin::Once;
 
@@ -118,10 +118,10 @@ impl BootDispatcher {
         });
 
         // Install the BDS architectural protocol
-        let protocol = Box::leak(Box::new(bds::Protocol { entry: bds_entry_point }));
+        let protocol = Box::leak(Box::new(bds::BdsProtocol { entry: bds_entry_point }));
 
         // SAFETY: protocol is a valid, leaked BDS protocol struct with a valid entry function pointer.
-        // Using unchecked variant because bds::Protocol does not implement ProtocolInterface.
+        // Using unchecked variant because bds::BdsProtocol does not implement ProtocolInterface.
         unsafe {
             boot_services.as_ref().install_protocol_interface_unchecked(
                 None,
@@ -141,7 +141,7 @@ impl BootDispatcher {
 /// all DXE drivers have been dispatched. Retrieves the stored context and
 /// delegates to the orchestrator.
 #[coverage(off)] // Extern "efiapi" callback — tested via integration tests
-extern "efiapi" fn bds_entry_point(_this: *mut bds::Protocol) {
+extern "efiapi" fn bds_entry_point(_this: *mut bds::BdsProtocol) {
     let Some(context) = BDS_CONTEXT.get() else {
         bds_fatal(format_args!(
             "BDS context not initialized — BootDispatcher entry_point was not called"
@@ -178,8 +178,8 @@ fn bds_fatal(args: core::fmt::Arguments) -> ! {
 mod tests {
     use super::*;
     use patina::{
-        boot_services::StandardBootServices, component::service::dxe_dispatch::DxeDispatch,
-        runtime_services::StandardRuntimeServices,
+        component::service::dxe_dispatch::DxeDispatch, uefi::boot_services::StandardBootServices,
+        uefi::runtime_services::StandardRuntimeServices,
     };
     use r_efi::efi;
 

@@ -17,14 +17,16 @@ use alloc::vec::Vec;
 use core::ptr;
 
 use patina::{
-    boot_services::{BootServices, event::EventType, protocol_handler::HandleSearchType, tpl::Tpl},
-    device_path::{
+    Char16Str, Char16String, char16,
+    error::{EfiError, Result},
+    pi::event::END_OF_DXE_EVENT_GROUP_GUID,
+    uefi::boot_services::{BootServices, protocol_handler::HandleSearchType, tpl::Tpl},
+    uefi::device_path::{
         node_defs::{DevicePathType, HardDrive, MediaSubType},
         paths::{DevicePath, DevicePathBuf},
     },
-    error::{EfiError, Result},
-    guids::EVENT_GROUP_END_OF_DXE,
-    runtime_services::RuntimeServices,
+    uefi::event::EventType,
+    uefi::runtime_services::RuntimeServices,
 };
 use r_efi::{
     efi,
@@ -378,7 +380,7 @@ pub fn signal_bds_phase_entry<B: BootServices>(boot_services: &B) -> Result<()> 
             Tpl::CALLBACK,
             Some(signal_event_noop),
             ptr::null_mut(),
-            &EVENT_GROUP_END_OF_DXE,
+            &END_OF_DXE_EVENT_GROUP_GUID,
         )
     }
     .map_err(EfiError::from)?;
@@ -446,27 +448,11 @@ pub fn discover_console_devices<B: BootServices, R: RuntimeServices>(
     let attrs = VARIABLE_NON_VOLATILE | VARIABLE_BOOTSERVICE_ACCESS | VARIABLE_RUNTIME_ACCESS;
 
     // UTF-16 null-terminated variable names
-    let con_in_name: &[u16] = &[b'C' as u16, b'o' as u16, b'n' as u16, b'I' as u16, b'n' as u16, 0];
-    let con_out_name: &[u16] = &[
-        b'C' as u16,
-        b'o' as u16,
-        b'n' as u16,
-        b'O' as u16,
-        b'u' as u16,
-        b't' as u16,
-        0,
-    ];
-    let err_out_name: &[u16] = &[
-        b'E' as u16,
-        b'r' as u16,
-        b'r' as u16,
-        b'O' as u16,
-        b'u' as u16,
-        b't' as u16,
-        0,
-    ];
+    let con_in_name = char16!("ConIn");
+    let con_out_name = char16!("ConOut");
+    let err_out_name = char16!("ErrOut");
 
-    let console_vars: &[(&str, &[u16], &[&'static efi::Guid])] = &[
+    let console_vars: &[(&str, &Char16Str, &[&'static efi::Guid])] = &[
         ("ConIn", con_in_name, &[&simple_text_input::PROTOCOL_GUID]),
         (
             "ConOut",
@@ -761,8 +747,7 @@ struct LoadOptionHeader {
 pub fn discover_boot_options<R: RuntimeServices>(runtime_services: &R) -> Result<super::config::BootConfig> {
     let namespace = EFI_GLOBAL_VARIABLE;
 
-    let boot_order_name: Vec<u16> = "BootOrder\0".encode_utf16().collect();
-    let boot_order_name = boot_order_name.as_slice();
+    let boot_order_name = char16!("BootOrder");
 
     let (boot_order_bytes, _attributes): (Vec<u8>, u32) =
         runtime_services.get_variable(boot_order_name, &namespace, None)?;
@@ -782,17 +767,18 @@ pub fn discover_boot_options<R: RuntimeServices>(runtime_services: &R) -> Result
     for option_number in &boot_order {
         let var_name = boot_option_variable_name(*option_number);
 
-        let load_option_bytes = match runtime_services.get_variable::<Vec<u8>>(&var_name, &namespace, None) {
-            Ok((bytes, _)) => bytes,
-            Err(e) => {
-                log::warn!(
-                    "discover_boot_options: failed to read Boot{:04X}: {:?}",
-                    option_number,
-                    e
-                );
-                continue;
-            }
-        };
+        let load_option_bytes =
+            match runtime_services.get_variable::<Vec<u8>>(var_name.as_char16_str(), &namespace, None) {
+                Ok((bytes, _)) => bytes,
+                Err(e) => {
+                    log::warn!(
+                        "discover_boot_options: failed to read Boot{:04X}: {:?}",
+                        option_number,
+                        e
+                    );
+                    continue;
+                }
+            };
 
         if let Some(device_path_buf) = parse_load_option(&load_option_bytes) {
             device_paths.push(device_path_buf);
@@ -809,12 +795,9 @@ pub fn discover_boot_options<R: RuntimeServices>(runtime_services: &R) -> Result
 }
 
 /// Build a null-terminated UTF-16 variable name for `Boot####`.
-fn boot_option_variable_name(option_number: u16) -> Vec<u16> {
-    let mut name = alloc::format!("Boot{:04X}", option_number)
-        .encode_utf16()
-        .collect::<Vec<u16>>();
-    name.push(0);
-    name
+fn boot_option_variable_name(option_number: u16) -> Char16String {
+    Char16String::try_from_str(&alloc::format!("Boot{:04X}", option_number))
+        .expect("Boot#### names are ASCII and contain no interior NUL")
 }
 
 /// Validate that all device path node lengths stay within the buffer.
@@ -919,8 +902,9 @@ compile_error!("unsupported target architecture: no default OS loader path defin
 /// than treated as a permissive state.
 pub fn secure_boot_state<R: RuntimeServices>(runtime_services: &R) -> Result<SecureBootState> {
     fn read_state_variable<R: RuntimeServices>(runtime_services: &R, name: &str) -> Result<u8> {
-        let name: Vec<u16> = alloc::format!("{name}\0").encode_utf16().collect();
-        let (value, _): (Vec<u8>, u32) = runtime_services.get_variable(&name, &EFI_GLOBAL_VARIABLE, None)?;
+        let name = Char16String::try_from_str(name).map_err(|_| EfiError::InvalidParameter)?;
+        let (value, _): (Vec<u8>, u32) =
+            runtime_services.get_variable(name.as_char16_str(), &EFI_GLOBAL_VARIABLE, None)?;
         match value.as_slice() {
             [state @ 0..=1] => Ok(*state),
             _ => Err(EfiError::SecurityViolation),
@@ -961,7 +945,7 @@ pub fn fallback_boot_options<B: BootServices, R: RuntimeServices>(
     runtime_services: &R,
     policy: &BootSourcePolicy,
 ) -> Result<Vec<DevicePathBuf>> {
-    use patina::device_path::node_defs::FilePath;
+    use patina::uefi::device_path::node_defs::FilePath;
     use r_efi::protocols::simple_file_system;
 
     if !policy.has_sources() {
@@ -1018,8 +1002,8 @@ mod tests {
     use core::cell::Cell;
     use core::sync::atomic::{AtomicUsize, Ordering};
     use patina::{
-        boot_services::{MockBootServices, boxed::BootServicesBox},
-        device_path::node_defs::{Acpi, EndEntire, HardDrive},
+        uefi::boot_services::{MockBootServices, boxed::BootServicesBox},
+        uefi::device_path::node_defs::{Acpi, EndEntire, HardDrive},
     };
 
     fn create_test_device_path() -> DevicePathBuf {
@@ -1211,7 +1195,7 @@ mod tests {
 
     #[test]
     fn test_discover_console_devices_handles_missing_protocols() {
-        use patina::runtime_services::MockRuntimeServices;
+        use patina::uefi::runtime_services::MockRuntimeServices;
 
         let mut boot_mock = MockBootServices::new();
         let runtime_mock = MockRuntimeServices::new();
@@ -1313,7 +1297,7 @@ mod tests {
 
     // Tests for partial device path expansion
 
-    use patina::device_path::node_defs::Pci;
+    use patina::uefi::device_path::node_defs::Pci;
 
     /// Helper to build a partial device path starting with HD node.
     fn build_partial_hd_path(guid: [u8; 16]) -> DevicePathBuf {
@@ -1506,7 +1490,7 @@ mod tests {
 
     #[test]
     fn test_discover_console_devices_sets_variables() {
-        use patina::runtime_services::MockRuntimeServices;
+        use patina::uefi::runtime_services::MockRuntimeServices;
 
         let dp = DevicePathBuf::from_device_path_node_iter([Acpi::new_pci_root(0)].into_iter());
         let dp_addr = dp.as_ref() as *const DevicePath as *const u8 as usize;
@@ -1542,7 +1526,7 @@ mod tests {
 
     #[test]
     fn test_discover_console_devices_set_variable_failure_is_non_fatal() {
-        use patina::runtime_services::MockRuntimeServices;
+        use patina::uefi::runtime_services::MockRuntimeServices;
 
         let dp = DevicePathBuf::from_device_path_node_iter([Acpi::new_pci_root(0)].into_iter());
         let dp_addr = dp.as_ref() as *const DevicePath as *const u8 as usize;
@@ -1825,7 +1809,7 @@ mod tests {
     /// FilePath nodes after HD). The same principle applies to any future partial
     /// path types — we must only use the prefix up to the matched node.
     fn test_expand_partial_path_truncates_at_matched_node() {
-        use patina::device_path::node_defs::FilePath;
+        use patina::uefi::device_path::node_defs::FilePath;
 
         let guid = [0xAA; 16];
         // Partial path: HD()/FilePath(\EFI\Boot\BOOTX64.efi)
@@ -1913,15 +1897,13 @@ mod tests {
     #[test]
     fn test_boot_option_variable_name() {
         let name = boot_option_variable_name(0x0001);
-        let expected: Vec<u16> = "Boot0001\0".encode_utf16().collect();
-        assert_eq!(name, expected);
+        assert!(name.as_char16_str() == "Boot0001");
     }
 
     #[test]
     fn test_boot_option_variable_name_hex() {
         let name = boot_option_variable_name(0x00AB);
-        let expected: Vec<u16> = "Boot00AB\0".encode_utf16().collect();
-        assert_eq!(name, expected);
+        assert!(name.as_char16_str() == "Boot00AB");
     }
 
     #[test]
@@ -2012,7 +1994,7 @@ mod tests {
 
     #[test]
     fn test_discover_boot_options_single_option() {
-        use patina::runtime_services::MockRuntimeServices;
+        use patina::uefi::runtime_services::MockRuntimeServices;
 
         let dp = create_test_device_path();
         let load_option = build_load_option(LOAD_OPTION_ACTIVE, "Windows", &dp);
@@ -2023,7 +2005,7 @@ mod tests {
         runtime_mock
             .expect_get_variable::<Vec<u8>>()
             .returning(move |name, _, _| {
-                if name[0] == 'B' as u16 && name[4] == 'O' as u16 {
+                if name == "BootOrder" {
                     Ok((boot_order.clone(), 0))
                 } else {
                     Ok((load_option.clone(), 0))
@@ -2037,7 +2019,7 @@ mod tests {
 
     #[test]
     fn test_discover_boot_options_multiple_options() {
-        use patina::runtime_services::MockRuntimeServices;
+        use patina::uefi::runtime_services::MockRuntimeServices;
 
         let dp = create_test_device_path();
         let load_option = build_load_option(LOAD_OPTION_ACTIVE, "Option", &dp);
@@ -2048,7 +2030,7 @@ mod tests {
         runtime_mock
             .expect_get_variable::<Vec<u8>>()
             .returning(move |name, _, _| {
-                if name[0] == 'B' as u16 && name[4] == 'O' as u16 {
+                if name == "BootOrder" {
                     Ok((boot_order.clone(), 0))
                 } else {
                     Ok((load_option.clone(), 0))
@@ -2062,7 +2044,7 @@ mod tests {
 
     #[test]
     fn test_discover_boot_options_skips_inactive() {
-        use patina::runtime_services::MockRuntimeServices;
+        use patina::uefi::runtime_services::MockRuntimeServices;
 
         let dp = create_test_device_path();
         let active = build_load_option(LOAD_OPTION_ACTIVE, "Active", &dp);
@@ -2077,7 +2059,7 @@ mod tests {
         runtime_mock
             .expect_get_variable::<Vec<u8>>()
             .returning(move |name, _, _| {
-                if name[0] == 'B' as u16 && name[4] == 'O' as u16 {
+                if name == "BootOrder" {
                     Ok((boot_order.clone(), 0))
                 } else {
                     let n = call_count_clone.fetch_add(1, Ordering::SeqCst);
@@ -2096,7 +2078,7 @@ mod tests {
 
     #[test]
     fn test_discover_boot_options_boot_order_not_found() {
-        use patina::runtime_services::MockRuntimeServices;
+        use patina::uefi::runtime_services::MockRuntimeServices;
 
         let mut runtime_mock = MockRuntimeServices::new();
 
@@ -2110,7 +2092,7 @@ mod tests {
 
     #[test]
     fn test_discover_boot_options_all_inactive() {
-        use patina::runtime_services::MockRuntimeServices;
+        use patina::uefi::runtime_services::MockRuntimeServices;
 
         let dp = create_test_device_path();
         let inactive = build_load_option(0, "Inactive", &dp);
@@ -2121,7 +2103,7 @@ mod tests {
         runtime_mock
             .expect_get_variable::<Vec<u8>>()
             .returning(move |name, _, _| {
-                if name[0] == 'B' as u16 && name[4] == 'O' as u16 {
+                if name == "BootOrder" {
                     Ok((boot_order.clone(), 0))
                 } else {
                     Ok((inactive.clone(), 0))
@@ -2134,7 +2116,7 @@ mod tests {
 
     #[test]
     fn test_discover_boot_options_skips_unreadable_option() {
-        use patina::runtime_services::MockRuntimeServices;
+        use patina::uefi::runtime_services::MockRuntimeServices;
 
         let dp = create_test_device_path();
         let active = build_load_option(LOAD_OPTION_ACTIVE, "Good", &dp);
@@ -2148,7 +2130,7 @@ mod tests {
         runtime_mock
             .expect_get_variable::<Vec<u8>>()
             .returning(move |name, _, _| {
-                if name[0] == 'B' as u16 && name[4] == 'O' as u16 {
+                if name == "BootOrder" {
                     Ok((boot_order.clone(), 0))
                 } else {
                     let n = call_count_clone.fetch_add(1, Ordering::SeqCst);
@@ -2165,18 +2147,14 @@ mod tests {
         assert_eq!(result.unwrap().devices().count(), 1);
     }
 
-    fn secure_boot_runtime(secure_boot: u8, setup_mode: u8) -> patina::runtime_services::MockRuntimeServices {
-        use patina::runtime_services::MockRuntimeServices;
+    fn secure_boot_runtime(secure_boot: u8, setup_mode: u8) -> patina::uefi::runtime_services::MockRuntimeServices {
+        use patina::uefi::runtime_services::MockRuntimeServices;
 
         let mut runtime_mock = MockRuntimeServices::new();
         runtime_mock
             .expect_get_variable::<Vec<u8>>()
             .returning(move |name, _, _| {
-                let value = if name.get(2) == Some(&('c' as u16)) {
-                    secure_boot
-                } else {
-                    setup_mode
-                };
+                let value = if name == "SecureBoot" { secure_boot } else { setup_mode };
                 Ok((alloc::vec![value], 0))
             });
         runtime_mock
@@ -2209,7 +2187,7 @@ mod tests {
     #[test]
     fn test_fallback_boot_options_default_policy_denies_enumeration() {
         let boot_mock = MockBootServices::new();
-        let runtime_mock = patina::runtime_services::MockRuntimeServices::new();
+        let runtime_mock = patina::uefi::runtime_services::MockRuntimeServices::new();
 
         let result = fallback_boot_options(&boot_mock, &runtime_mock, &BootSourcePolicy::new());
         assert!(matches!(result, Err(EfiError::NotFound)));
@@ -2229,7 +2207,7 @@ mod tests {
 
     #[test]
     fn test_fallback_boot_options_orders_loaders_across_volumes() {
-        use patina::device_path::node_defs::FilePath;
+        use patina::uefi::device_path::node_defs::FilePath;
 
         let dp1 = build_full_path_with_hd([0x11; 16]);
         let mut dp2 = DevicePathBuf::from_device_path_node_iter([Acpi::new_pci_root(1)].into_iter());

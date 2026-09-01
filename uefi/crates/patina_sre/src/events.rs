@@ -6,7 +6,7 @@
 //!
 //! SPDX-License-Identifier: MIT
 //!
-use patina::{boot_services::BootServices, error::EfiError};
+use patina::{error::EfiError, uefi::boot_services::BootServices};
 use r_efi::efi;
 
 /// Create a one-shot NOTIFY_SIGNAL event tied to `group_guid`, fire it, then
@@ -16,7 +16,7 @@ pub(crate) fn signal_event_group<B: BootServices>(
     boot_services: &B,
     group_guid: &'static efi::Guid,
 ) -> patina::error::Result<()> {
-    use patina::boot_services::{event::EventType, tpl::Tpl};
+    use patina::uefi::{boot_services::tpl::Tpl, event::EventType};
 
     extern "efiapi" fn noop(_event: *mut core::ffi::c_void, _context: *mut ()) {}
 

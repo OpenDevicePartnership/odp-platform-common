@@ -11,7 +11,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-use patina::device_path::{
+use patina::uefi::device_path::{
     node_defs::{DevicePathType, HardDrive, MessagingSubType},
     paths::{DevicePath, DevicePathBuf},
 };
@@ -129,7 +129,7 @@ fn is_usb_device_path(device_path: &DevicePath) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patina::device_path::node_defs::{Acpi, Pci};
+    use patina::uefi::device_path::node_defs::{Acpi, Pci};
 
     fn internal_path(root: u32) -> DevicePathBuf {
         let mut path = DevicePathBuf::from_device_path_node_iter([Acpi::new_pci_root(root)].into_iter());

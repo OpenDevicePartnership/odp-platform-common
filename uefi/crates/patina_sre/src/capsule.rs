@@ -21,7 +21,7 @@
 //!
 //! SPDX-License-Identifier: MIT
 //!
-use patina::boot_services::BootServices;
+use patina::uefi::boot_services::BootServices;
 use patina_boot::{boot_mode, proxy};
 use r_efi::efi;
 

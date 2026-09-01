@@ -12,7 +12,7 @@
 extern crate alloc;
 
 use alloc::{boxed::Box, vec::Vec};
-use patina::device_path::paths::DevicePathBuf;
+use patina::uefi::device_path::paths::DevicePathBuf;
 
 /// Boot options provided by the platform.
 ///
@@ -128,7 +128,7 @@ mod tests {
     use super::*;
     use alloc::sync::Arc;
     use core::sync::atomic::{AtomicBool, Ordering};
-    use patina::device_path::node_defs::EndEntire;
+    use patina::uefi::device_path::node_defs::EndEntire;
 
     fn create_test_device_path() -> DevicePathBuf {
         DevicePathBuf::from_device_path_node_iter(core::iter::once(EndEntire))

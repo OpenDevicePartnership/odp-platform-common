@@ -26,7 +26,7 @@ use alloc::{boxed::Box, vec::Vec};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use patina::boot_services::{MockBootServices, boxed::BootServicesBox};
+use patina::uefi::boot_services::{MockBootServices, boxed::BootServicesBox};
 use patina_boot::helpers;
 use r_efi::efi;
 

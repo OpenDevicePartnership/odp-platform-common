@@ -27,8 +27,8 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use patina::{
-    boot_services::{MockBootServices, boxed::BootServicesBox},
-    device_path::{
+    uefi::boot_services::{MockBootServices, boxed::BootServicesBox},
+    uefi::device_path::{
         node_defs::{FilePath, HardDrive},
         paths::{DevicePath, DevicePathBuf},
     },
@@ -52,7 +52,7 @@ const HANDLE_BASE: usize = 0x1000;
 /// Build a full-form handle device path `PciRoot/HardDrive(guid)`, matching
 /// the shape `expand_device_path` walks looking for a HardDrive node.
 fn build_handle_path(guid: [u8; 16]) -> DevicePathBuf {
-    use patina::device_path::node_defs::{Acpi, Pci};
+    use patina::uefi::device_path::node_defs::{Acpi, Pci};
     let mut path = DevicePathBuf::from_device_path_node_iter([Acpi::new_pci_root(0)].into_iter());
     let pci = DevicePathBuf::from_device_path_node_iter(
         [Pci {

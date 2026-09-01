@@ -20,7 +20,7 @@ extern crate alloc;
 
 use core::ffi::c_void;
 
-use patina::{boot_services::BootServices, error::EfiError};
+use patina::{error::EfiError, uefi::boot_services::BootServices};
 use r_efi::efi;
 
 /// `gPatinaBootMgrLibProxyProtocolGuid` — matches the C header.

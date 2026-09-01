@@ -18,10 +18,10 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use patina::{
-    boot_services::{BootServices, StandardBootServices, protocol_handler::HandleSearchType},
-    device_path::paths::DevicePathBuf,
     error::EfiError,
-    runtime_services::{RuntimeServices, StandardRuntimeServices},
+    uefi::boot_services::{BootServices, StandardBootServices, protocol_handler::HandleSearchType},
+    uefi::device_path::paths::DevicePathBuf,
+    uefi::runtime_services::{RuntimeServices, StandardRuntimeServices},
 };
 use r_efi::efi;
 
@@ -122,7 +122,7 @@ impl<C: ConnectController> SimpleBootManager<C> {
     ///
     /// ```rust,ignore
     /// use patina_boot::{ConnectController, SimpleBootManager, config::BootConfig};
-    /// use patina::{boot_services::BootServices, error::Result};
+    /// use patina::{uefi::boot_services::BootServices, error::Result};
     ///
     /// struct MyPlatformConnect;
     /// impl<B: BootServices> ConnectController<B> for MyPlatformConnect {
@@ -245,9 +245,9 @@ mod tests {
     use alloc::{boxed::Box, sync::Arc};
     use core::sync::atomic::{AtomicBool, Ordering};
     use patina::{
-        boot_services::{MockBootServices, boxed::BootServicesBox},
-        device_path::{node_defs::EndEntire, paths::DevicePathBuf},
-        runtime_services::MockRuntimeServices,
+        uefi::boot_services::{MockBootServices, boxed::BootServicesBox},
+        uefi::device_path::{node_defs::EndEntire, paths::DevicePathBuf},
+        uefi::runtime_services::MockRuntimeServices,
     };
 
     fn test_device_path() -> DevicePathBuf {
