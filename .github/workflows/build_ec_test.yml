@@ -1,10 +1,12 @@
 # Builds the EC test applications (ec-test-cli, ec-test-tui) for Windows on ARM
 # (ARM64).
 #
-# On pushes to main (and manual dispatch), the build is zipped and published as
-# an asset on the rolling "latest" prerelease GitHub Release (created once, by
-# hand). Downstream users always have one current source of apps to run. Pull
-# requests build only, to validate the change without touching the release.
+# On pushes to the upstream main branch (and upstream manual dispatch), the
+# build is zipped and published as an asset on the rolling "latest" prerelease
+# GitHub Release (created once, by hand). Downstream users always have one
+# current source of apps to run. Pull requests build only, to validate the
+# change without touching the release. Fork pushes are skipped because syncing
+# a stale fork can span EC changes and forks do not own the upstream release.
 #
 # SPDX-License-Identifier: MIT
 #
@@ -32,6 +34,7 @@ concurrency:
 
 jobs:
   build-apps:
+    if: github.event_name != 'push' || github.event.repository.fork == false
     name: Build Apps (ARM64)
     runs-on: windows-2022
     permissions:
@@ -60,7 +63,10 @@ jobs:
       # (e.g. C:\ectest\). --clobber replaces the asset from a prior run without
       # disturbing the release metadata or other jobs' assets.
       - name: Package and upload apps
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+        if: |
+          github.event.repository.fork == false &&
+          ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          github.event_name == 'workflow_dispatch')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
