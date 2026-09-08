@@ -1,0 +1,37 @@
+# Cargo configuration for patina_boot.
+#
+# The Patina SDK gates some of its API on unstable rustc features (notably
+# `allocator_api`, which `patina` enables whenever `alloc` or `test` is active).
+# Patina builds those on a pinned *stable* channel by setting RUSTC_BOOTSTRAP and
+# then restricting the unlocked set to the features Patina has accepted through
+# its unstable feature process. This mirrors the configuration shipped by the
+# Patina DevOps repo so patina_boot builds the same way as every other crate in
+# the ecosystem, including the DXE cores that consume it.
+#
+# `coverage_attribute` is deliberately absent: coverage runs add it via the
+# RUSTFLAGS environment variable, and the crate's `#[coverage(off)]` annotations
+# are gated behind `cfg(coverage)` so they disappear on ordinary builds.
+#
+# SPDX-License-Identifier: MIT
+#
+
+[env]
+RUSTC_BOOTSTRAP = "1"
+
+# Cargo does not merge rustflags across sources, so the allowlist has to be
+# repeated for every target that needs it. `[build]` covers host builds (unit
+# tests, benches, proc-macros); the UEFI targets are the firmware builds.
+[build]
+rustflags = [
+    "-Z", "allow-features=c_variadic,allocator_api",
+]
+
+[target.x86_64-unknown-uefi]
+rustflags = [
+    "-Z", "allow-features=c_variadic,allocator_api",
+]
+
+[target.aarch64-unknown-uefi]
+rustflags = [
+    "-Z", "allow-features=c_variadic,allocator_api",
+]

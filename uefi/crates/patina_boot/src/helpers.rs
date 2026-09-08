@@ -532,7 +532,7 @@ fn build_multi_instance_device_path<B: BootServices>(
 }
 
 /// No-op event callback for signal-only events.
-#[coverage(off)] // Extern callback - tested via integration tests
+#[cfg_attr(coverage, coverage(off))] // Extern callback - tested via integration tests
 extern "efiapi" fn signal_event_noop(_event: *mut core::ffi::c_void, _context: *mut ()) {}
 
 /// Returns true if the device path is a partial (short-form) device path.

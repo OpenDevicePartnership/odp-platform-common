@@ -27,8 +27,7 @@
 //! SPDX-License-Identifier: MIT
 //!
 #![cfg_attr(not(feature = "std"), no_std)]
-#![feature(coverage_attribute)]
-#![feature(never_type)]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 pub mod boot_dispatcher;
 pub mod boot_mode;

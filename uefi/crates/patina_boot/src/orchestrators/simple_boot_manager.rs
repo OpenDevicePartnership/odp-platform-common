@@ -16,7 +16,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-
+use core::convert::Infallible;
 use patina::{
     error::EfiError,
     uefi::boot_services::{BootServices, StandardBootServices, protocol_handler::HandleSearchType},
@@ -151,14 +151,14 @@ impl<C: ConnectController> SimpleBootManager<C> {
 }
 
 impl<C: ConnectController> BootOrchestrator for SimpleBootManager<C> {
-    #[coverage(off)] // Integration point — delegates to helper functions which are individually tested
+    #[cfg_attr(coverage, coverage(off))] // Integration point — delegates to helper functions which are individually tested
     fn execute(
         &self,
         boot_services: &StandardBootServices,
         runtime_services: &StandardRuntimeServices,
         dxe_dispatch: &dyn DxeDispatch,
         image_handle: efi::Handle,
-    ) -> Result<!, EfiError> {
+    ) -> Result<Infallible, EfiError> {
         self.execute_with(
             boot_services,
             runtime_services,
@@ -177,7 +177,7 @@ impl<C: ConnectController> SimpleBootManager<C> {
         dxe_dispatch: &dyn DxeDispatch,
         image_handle: efi::Handle,
         enter_locked_boot: F,
-    ) -> Result<!, EfiError>
+    ) -> Result<Infallible, EfiError>
     where
         B: BootServices,
         R: RuntimeServices,

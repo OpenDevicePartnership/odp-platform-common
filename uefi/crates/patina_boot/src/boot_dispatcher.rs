@@ -95,7 +95,7 @@ impl BootDispatcher {
     /// The actual boot flow does not execute here. It executes later when the
     /// DXE core calls `bds_entry_point` after all architectural protocols are
     /// satisfied and all DXE drivers have been dispatched.
-    #[coverage(off)] // Component integration — tested via integration tests
+    #[cfg_attr(coverage, coverage(off))] // Component integration — tested via integration tests
     fn entry_point(
         self,
         boot_services: StandardBootServices,
@@ -140,7 +140,7 @@ impl BootDispatcher {
 /// Called by the DXE core after all architectural protocols are installed and
 /// all DXE drivers have been dispatched. Retrieves the stored context and
 /// delegates to the orchestrator.
-#[coverage(off)] // Extern "efiapi" callback — tested via integration tests
+#[cfg_attr(coverage, coverage(off))] // Extern "efiapi" callback — tested via integration tests
 extern "efiapi" fn bds_entry_point(_this: *mut bds::BdsProtocol) {
     let Some(context) = BDS_CONTEXT.get() else {
         bds_fatal(format_args!(
@@ -164,7 +164,7 @@ extern "efiapi" fn bds_entry_point(_this: *mut bds::BdsProtocol) {
 /// never return to the DXE core, and parking keeps the failure deterministic
 /// rather than depending on a platform panic handler that may halt silently
 /// without emitting anything.
-#[coverage(off)]
+#[cfg_attr(coverage, coverage(off))]
 #[allow(clippy::assertions_on_constants)] // debug_assert!(false) is an intentional debug-only trap.
 fn bds_fatal(args: core::fmt::Arguments) -> ! {
     log::error!("{args}");
@@ -192,7 +192,7 @@ mod tests {
             _runtime_services: &StandardRuntimeServices,
             _dxe_dispatch: &dyn DxeDispatch,
             _image_handle: efi::Handle,
-        ) -> core::result::Result<!, patina::error::EfiError> {
+        ) -> core::result::Result<core::convert::Infallible, patina::error::EfiError> {
             Err(patina::error::EfiError::NotFound)
         }
     }

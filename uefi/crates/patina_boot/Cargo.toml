@@ -33,6 +33,11 @@ criterion = "0.5"
 [lints.clippy]
 undocumented_unsafe_blocks = "warn"
 
+# Set by cargo-llvm-cov during coverage runs. Declared here so gating
+# `coverage_attribute` behind it does not trigger unexpected_cfgs warnings.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
+
 [features]
 default = []
 doc = []

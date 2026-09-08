@@ -11,6 +11,7 @@
 //!
 //! SPDX-License-Identifier: MIT
 //!
+use core::convert::Infallible;
 use patina::{
     component::service::dxe_dispatch::DxeDispatch, error::EfiError, uefi::boot_services::StandardBootServices,
     uefi::runtime_services::StandardRuntimeServices,
@@ -43,7 +44,7 @@ use r_efi::efi;
 ///         runtime_services: &StandardRuntimeServices,
 ///         dxe_services: &dyn DxeDispatch,
 ///         image_handle: efi::Handle,
-///     ) -> Result<!, EfiError> {
+///     ) -> Result<Infallible, EfiError> {
 ///         // Custom boot flow...
 ///         // Return Err if all boot options are exhausted
 ///         Err(EfiError::NotFound)
@@ -64,13 +65,14 @@ pub trait BootOrchestrator: Send + Sync + 'static {
     ///
     /// A successful boot transfers control to the boot image and never returns.
     /// If all boot options are exhausted, the implementation returns
-    /// `Err(EfiError)`. The `Ok` variant is uninhabitable (`!`), enforcing at
-    /// the type level that this method can only "succeed" by not returning.
+    /// `Err(EfiError)`. The `Ok` variant is [`Infallible`], a type that has no
+    /// values, enforcing at the type level that this method can only "succeed"
+    /// by not returning.
     fn execute(
         &self,
         boot_services: &StandardBootServices,
         runtime_services: &StandardRuntimeServices,
         dxe_services: &dyn DxeDispatch,
         image_handle: efi::Handle,
-    ) -> Result<!, EfiError>;
+    ) -> Result<Infallible, EfiError>;
 }

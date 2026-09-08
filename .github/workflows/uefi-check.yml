@@ -1,8 +1,10 @@
 # CI checks for Rust crates under uefi/crates/.
 #
-# These crates require a pinned nightly toolchain (the patina SDK uses
-# unstable features like `coverage_attribute` and `allocator_api`), so we
-# can't share the stable-toolchain `check.yml` workflow that targets `ec/`.
+# The patina SDK gates parts of its API on unstable rustc features such as
+# `allocator_api`. Crates that unlock those on a pinned stable channel (via the
+# RUSTC_BOOTSTRAP/allow-features settings in their .cargo/config.toml, matching
+# upstream Patina) build on stable here. Crates that still require a genuine
+# nightly compiler pin one below.
 
 permissions:
   contents: read
@@ -98,7 +100,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2026-02-27
+          toolchain: 1.95.0
           components: rust-src,clippy,rustfmt
           targets: x86_64-unknown-uefi,aarch64-unknown-uefi
 
