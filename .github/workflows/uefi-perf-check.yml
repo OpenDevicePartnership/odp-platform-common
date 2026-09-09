@@ -2,7 +2,8 @@
 #
 # Running these scripts for real needs QEMU and a firmware build, which is more
 # than a hosted runner should take on. This checks what can be checked without
-# booting anything: shellcheck over every script under uefi/perf.
+# booting anything: shellcheck over the shell scripts, and that the Python
+# helpers compile.
 #
 # SPDX-License-Identifier: MIT
 #
@@ -61,3 +62,14 @@ jobs:
           fi
           printf 'checking %s\n' "${scripts[@]}"
           shellcheck -S style "${scripts[@]}"
+
+      - name: Compile Python helpers
+        run: |
+          set -euo pipefail
+          mapfile -t helpers < <(find uefi/perf -name '*.py' -print | sort)
+          if [ "${#helpers[@]}" -eq 0 ]; then
+            echo "no Python helpers found under uefi/perf" >&2
+            exit 1
+          fi
+          printf 'compiling %s\n' "${helpers[@]}"
+          python3 -m py_compile "${helpers[@]}"
