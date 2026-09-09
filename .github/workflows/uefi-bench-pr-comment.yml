@@ -1,0 +1,219 @@
+# GitHub Actions: posts patina_boot benchmark results back to the originating
+# pull request.
+#
+# SPDX-License-Identifier: MIT
+#
+
+# uefi-bench runs in the pull request context, which is read-only for forks,
+# so it uploads its results as an artifact instead of commenting. This
+# workflow runs in the base repository context, where it has
+# pull-requests: write, and renders that artifact into a single comment that
+# is updated in place.
+
+name: uefi-bench PR comment
+
+on:
+  workflow_run:
+    workflows: [uefi-bench]
+    types:
+      - completed
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  # A workflow_run payload carries no pull request number for pull requests
+  # from forks, so this cannot key on the number the way uefi-bench does. Head
+  # repository and branch together identify the same pull request; branch alone
+  # would not, because every fork has a `main`.
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  comment:
+    name: post results
+    runs-on: ubuntu-latest
+    # Only pull request runs have a comment to post to, and a failed bench run
+    # uploads no results worth rendering. uefi-bench already fails loudly in
+    # that case.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: Download results
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: bench-results
+          path: bench-results/
+          run-id: ${{ github.event.workflow_run.id }}
+
+      # A workflow_run payload carries no pull request number for pull requests
+      # from forks, so uefi-bench carries it across in the artifact. That
+      # artifact is produced by a job running in the pull request context,
+      # whose workflow file a fork can modify, so the value is untrusted: it
+      # has to be a plain number, and it has to name a pull request whose head
+      # really is the commit this run benchmarked. Without the second check a
+      # fork could point the comment at any issue in the repository and have
+      # the bot post there.
+      - name: Get PR number
+        id: get-pr-number
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          pr_number="$(tr -d '[:space:]' < ./bench-results/NR)"
+          if ! [[ "$pr_number" =~ ^[1-9][0-9]*$ ]]; then
+            echo "artifact does not carry a pull request number" >&2
+            exit 1
+          fi
+
+          claimed_head="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}" --jq .head.sha)"
+          if [ "$claimed_head" != "$RUN_HEAD_SHA" ]; then
+            echo "pull request ${pr_number} is at ${claimed_head}, not the benchmarked ${RUN_HEAD_SHA}" >&2
+            exit 1
+          fi
+
+          echo "pr_number=${pr_number}" >> "$GITHUB_OUTPUT"
+
+      - name: Render results table
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          # Bencher lines look like:
+          #   test connect_all/512 ... bench:  142019 cycles/iter (+/- 39534)
+          # Reduce both runs to name/value/unit/spread so they can be joined.
+          # Control characters are removed first because the fields are tab
+          # separated: a tab embedded in a benchmark name would otherwise shift
+          # every field after it.
+          normalize() {
+            tr -d '\000-\011\013-\037' < "$1" \
+              | sed -nE 's@^test (.+) \.\.\. bench:[[:space:]]+([0-9]+) ([^ ]+) \(\+/- ([0-9]+)\)$@\1\t\2\t\3\t\4@p'
+          }
+
+          normalize ./bench-results/results-base.txt > base.tsv
+          normalize ./bench-results/results-head.txt > head.tsv
+
+          if [ ! -s head.tsv ]; then
+            echo "No benchmark lines could be parsed from the results artifact" >&2
+            exit 1
+          fi
+
+          # A missing baseline is a case uefi-bench deliberately allows: a base
+          # commit that will not benchmark yields an empty file rather than a
+          # failed run. Say so, or every row reading "new" looks like this pull
+          # request added the whole suite.
+          baseline_note=""
+          if [ ! -s base.tsv ]; then
+            baseline_note="The base commit produced no benchmark results, so every benchmark below is reported as new and no change can be computed."
+          fi
+
+          cat <<EOF > comment.md
+          ## patina_boot benchmarks
+
+          Base commit vs. this pull request at \`${HEAD_SHA}\`, benchmarked as merged into the base.
+          ${baseline_note}
+
+          | Benchmark | Base | This PR | Change | Spread |
+          | --- | ---: | ---: | ---: | ---: |
+          EOF
+
+          # The unit travels with each value so that a benchmark quietly
+          # switching its measurement shows up instead of being compared as if
+          # the numbers were still commensurable.
+          awk -F'\t' '
+            function sanitize(text) {
+              # Benchmark names are fork-controlled. Neutralize Markdown table
+              # and code-span syntax, plus the angle brackets that would
+              # otherwise let a name inject raw HTML into the rendered comment.
+              gsub(/[|`<>\\]/, " ", text)
+              return text
+            }
+            # Selected by name rather than the usual NR == FNR: an empty base
+            # file consumes no records, which leaves NR == FNR true for the
+            # head file and silently files every head result as a baseline.
+            FILENAME == "base.tsv" {
+              if (!($1 in bval)) { border[++bcount] = $1 }
+              bval[$1] = $2; bunit[$1] = $3; bvar[$1] = $4
+              next
+            }
+            {
+              name = $1; hval = $2; hunit = $3; hvar = $4
+              seen[name] = 1
+              label = sanitize(name)
+              if (!(name in bval)) {
+                printf "| `%s` | — | %s %s | new | ± %s |\n", \
+                  label, hval, sanitize(hunit), hvar
+                next
+              }
+              if (bunit[name] != hunit) {
+                printf "| `%s` | %s %s | %s %s | unit changed | ± %s |\n", \
+                  label, bval[name], sanitize(bunit[name]), hval, sanitize(hunit), hvar
+                next
+              }
+              diff = hval - bval[name]
+              pct = bval[name] > 0 ? diff / bval[name] * 100 : 0
+              change = sprintf("%+.1f%%", pct)
+              magnitude = diff < 0 ? -diff : diff
+              # Both runs contribute noise, so the two spreads add. The same
+              # combined figure is printed, so the table shows the number the
+              # "within spread" decision was actually made against.
+              spread = bvar[name] + hvar
+              if (magnitude <= spread) {
+                change = change " (within spread)"
+              }
+              printf "| `%s` | %s %s | %s %s | %s | ± %s |\n", \
+                label, bval[name], sanitize(bunit[name]), hval, sanitize(hunit), change, spread
+            }
+            END {
+              # Measured at the base commit but absent here: removed by this
+              # pull request. Emitted in base-file order so the table stays
+              # stable from run to run.
+              for (i = 1; i <= bcount; i++) {
+                name = border[i]
+                if (name in seen) { continue }
+                printf "| `%s` | %s %s | — | removed | — |\n", \
+                  sanitize(name), bval[name], sanitize(bunit[name])
+              }
+            }
+          ' base.tsv head.tsv >> comment.md
+
+          cat <<'EOF' >> comment.md
+
+          Informational only; this does not gate the merge. Shared CI
+          runners are noisy, so treat a change marked "within spread"
+          as no signal and confirm anything surprising locally with
+          `cargo bench -p patina_boot` before acting on it.
+
+          <!--
+          This comment is auto-generated by the uefi-bench workflow.
+          Please do not edit it directly.
+
+          comment-tag: [uefi-bench]
+          -->
+          EOF
+
+      - name: Find existing comment
+        id: find-comment
+        uses: peter-evans/find-comment@v3
+        with:
+          issue-number: ${{ steps.get-pr-number.outputs.pr_number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: 'comment-tag: [uefi-bench]'
+
+      # An empty comment-id creates a new comment; a populated one replaces the
+      # previous results so the pull request keeps a single, current comment.
+      - name: Post results
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ steps.get-pr-number.outputs.pr_number }}
+          body-path: comment.md
+          edit-mode: replace
