@@ -153,10 +153,8 @@ fn invoke<S: Source>(s: &S, m: &Method, env: &Env) -> Result<Value, String> {
 // ── Value conversions for structured returns ───────────────────────────────
 
 fn bst_to_value(b: BstReturn) -> Value {
-    // `battery_state` is a custom type without a trivial numeric
-    // representation, so it's omitted; project to the u32 fields
-    // (`battery_present_voltage`, etc.) for verb checks.
     Value::Struct(vec![
+        ("battery_state".into(), Value::Num(b.battery_state.bits() as f64)),
         ("battery_present_rate".into(), Value::Num(b.battery_present_rate as f64)),
         (
             "battery_remaining_capacity".into(),
@@ -403,5 +401,34 @@ fn apply_value_verb(verb: &Verb, value: &Value, resolve: &dyn Fn(&Operand) -> Re
             }
         },
         Verb::IsOk | Verb::IsErr => unreachable!(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use battery_service_interface::BatteryState;
+
+    #[test]
+    fn bst_to_value_projects_numeric_fields() {
+        let value = bst_to_value(BstReturn {
+            battery_state: BatteryState::from_bits(0b0101).unwrap(),
+            battery_present_rate: 1000,
+            battery_remaining_capacity: 5000,
+            battery_present_voltage: 12000,
+        });
+
+        for (field, expected) in [
+            ("battery_state", 5.0),
+            ("battery_present_rate", 1000.0),
+            ("battery_remaining_capacity", 5000.0),
+            ("battery_present_voltage", 12000.0),
+        ] {
+            assert_eq!(
+                value.project(&[field.into()]).unwrap().as_num().unwrap(),
+                expected,
+                "{field}"
+            );
+        }
     }
 }

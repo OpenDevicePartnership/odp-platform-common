@@ -159,6 +159,7 @@ parse error.
 | `battery.set_btp(<n>)`| `Unit`                                    |
 
 **BST fields** (project with `.`):
+`battery_state` (numeric raw bitmask),
 `battery_present_rate`, `battery_remaining_capacity`,
 `battery_present_voltage`.
 
@@ -169,7 +170,7 @@ parse error.
 `max_averaging_interval`, `min_averaging_interval`,
 `battery_capacity_granularity_1`, `battery_capacity_granularity_2`.
 
-Enum and byte-array fields (`battery_state`, `power_unit`,
+Enum and byte-array fields (`power_unit`,
 `battery_technology`, `model_number`, `serial_number`, …) are
 intentionally not exposed — there is no useful numeric mapping for
 the verb set.
