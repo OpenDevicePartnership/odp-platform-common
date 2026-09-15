@@ -16,6 +16,12 @@ keywords = ["uefi", "edk2", "patina", "boot", "firmware"]
 categories = ["embedded", "no-std"]
 readme = "README.md"
 
+[lib]
+# Excluded from `cargo bench` so `--benches` selects only the criterion
+# targets. The lib unittest target is libtest and rejects criterion's
+# arguments.
+bench = false
+
 [dependencies]
 log = { version = "0.4", default-features = false }
 patina = { version = "23", features = ["unstable-device-path"] }

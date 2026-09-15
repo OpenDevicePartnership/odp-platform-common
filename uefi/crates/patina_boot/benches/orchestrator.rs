@@ -7,6 +7,10 @@
 //! Add `-- --output-format bencher` for libtest-style lines that
 //! standard perf-tracking tooling consumes.
 //!
+//! Reports elapsed reference cycles (`rdtsc`) per iteration via the shared
+//! [`support::Cycles`] measurement, matching the other benches in this crate
+//! so every reported number shares one unit.
+//!
 //! ## License
 //!
 //! Copyright (c) Microsoft Corporation.
@@ -23,6 +27,9 @@ use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use patina::uefi::boot_services::{MockBootServices, boxed::BootServicesBox};
 use patina_boot::helpers;
 use r_efi::efi;
+
+#[path = "support/mod.rs"]
+mod support;
 
 /// Build a `MockBootServices` whose method expectations cover the
 /// sequence `connect_all` + `signal_bds_phase_entry` +
@@ -84,7 +91,7 @@ fn build_mock() -> &'static MockBootServices {
 /// table with stub function pointers) that does not exist yet.
 /// Pending that, this composite is the closest end-to-end measurement
 /// of the BDS chain achievable against the public helper surface.
-fn bds_phase_composite(c: &mut Criterion) {
+fn bds_phase_composite(c: &mut Criterion<support::Cycles>) {
     let mock = build_mock();
     let iter_count = AtomicUsize::new(0);
 
@@ -100,5 +107,9 @@ fn bds_phase_composite(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bds_phase_composite);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().with_measurement(support::Cycles);
+    targets = bds_phase_composite
+}
 criterion_main!(benches);

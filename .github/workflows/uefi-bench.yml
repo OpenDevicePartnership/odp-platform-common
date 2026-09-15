@@ -1,0 +1,108 @@
+# GitHub Actions: runs the patina_boot microbenchmarks on the pull request and
+# on its base commit, and saves both result sets for the PR comment workflow.
+#
+# SPDX-License-Identifier: MIT
+#
+
+# Results are uploaded as an artifact rather than commented on from here: a
+# pull_request run from a fork gets a read-only token and cannot post
+# comments. The companion uefi-bench-pr-comment workflow does the writing.
+#
+# The numbers never gate the merge; the job fails only if the benches will not
+# build or produce no results.
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - 'uefi/crates/patina_boot/**'
+      - '.github/workflows/uefi-bench.yml'
+
+concurrency:
+  # Keyed on the pull request number rather than the branch: fork branch names
+  # collide constantly (every fork has a `main`), and a bare branch key would
+  # let one pull request cancel another's run.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+name: uefi-bench
+
+jobs:
+  bench:
+    name: bench / patina_boot
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: the base commit must be present locally to check out and
+      # benchmark it.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # rust-toolchain.toml pins the channel, components, and targets, and
+      # rustup applies it when cargo runs in the crate directory. This step
+      # only pre-installs the pinned channel, so keep it in step with that
+      # file.
+      #
+      # The SDK's unstable features work on this stable channel because the
+      # crate's .cargo/config.toml sets RUSTC_BOOTSTRAP in `[build]`, which
+      # covers host builds and so covers the benches.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+
+      - name: Benchmark base commit
+        shell: bash
+        working-directory: uefi/crates/patina_boot
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          # Results and raw output both live here, outside the working tree:
+          # switching commits between runs must not disturb them, and an
+          # untracked file in the crate would block the next checkout.
+          mkdir -p "$RUNNER_TEMP/bench-results"
+
+          # A failed checkout must abort. Left to continue, the step would
+          # benchmark the merge commit and upload it as the baseline, which
+          # renders as "no change" on every benchmark instead of as an error.
+          git checkout --quiet --detach "$BASE_SHA"
+
+          # The base commit may not build, or may predate a bench, and that is
+          # not this pull request's problem: report a missing baseline rather
+          # than aborting the run.
+          if cargo bench --benches -- --output-format bencher > "$RUNNER_TEMP/base-output.txt" 2>&1; then
+            grep '^test ' "$RUNNER_TEMP/base-output.txt" > "$RUNNER_TEMP/bench-results/results-base.txt" || true
+          else
+            echo "Base commit $BASE_SHA failed to benchmark; reporting no baseline." >&2
+            head -n 40 "$RUNNER_TEMP/base-output.txt" >&2
+            : > "$RUNNER_TEMP/bench-results/results-base.txt"
+          fi
+
+      - name: Benchmark pull request
+        shell: bash
+        working-directory: uefi/crates/patina_boot
+        env:
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git checkout --quiet --detach "$HEAD_SHA"
+
+          cargo bench --benches -- --output-format bencher | tee "$RUNNER_TEMP/head-output.txt"
+          if ! grep '^test ' "$RUNNER_TEMP/head-output.txt" > "$RUNNER_TEMP/bench-results/results-head.txt"; then
+            echo "No benchmark result lines found in the bench output" >&2
+            exit 1
+          fi
+
+          # A workflow_run payload carries no pull request number for pull
+          # requests from forks, so the comment workflow cannot look it up.
+          # Carry it across in the artifact.
+          echo "${{ github.event.number }}" > "$RUNNER_TEMP/bench-results/NR"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: ${{ runner.temp }}/bench-results/
+          overwrite: true
