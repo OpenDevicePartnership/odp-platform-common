@@ -17,7 +17,7 @@
 use std::fmt;
 use std::time::Duration;
 
-use time_alarm_service_interface::AcpiTimerId;
+use time_alarm_service_interface::{AcpiTimerId, AcpiTimestamp};
 
 /// Local mirror of [`ec_test_lib::Threshold`] (which is not `Clone`/`Debug`).
 #[derive(Debug, Clone, Copy)]
@@ -80,6 +80,7 @@ pub enum Method {
     // Rtc
     GetCapabilities,
     GetRealTime,
+    SetRealTime(AcpiTimestamp),
     GetWakeStatus(AcpiTimerId),
     GetExpiredTimerWakePolicy(AcpiTimerId),
     GetTimerValue(AcpiTimerId),
@@ -381,6 +382,7 @@ fn build_method(target: Target, name: &str, arg: Option<&str>) -> Result<Method,
             need_no_arg(name, arg)?;
             Ok(Method::GetRealTime)
         }
+        (Target::Rtc, "set_real_time") => Ok(Method::SetRealTime(parse_timestamp_buffer(need_arg(name, arg)?)?)),
         (Target::Rtc, "get_wake_status") => Ok(Method::GetWakeStatus(parse_timer(need_arg(name, arg)?)?)),
         (Target::Rtc, "get_expired_timer_wake_policy") => {
             Ok(Method::GetExpiredTimerWakePolicy(parse_timer(need_arg(name, arg)?)?))
@@ -406,6 +408,53 @@ fn target_name(t: Target) -> &'static str {
         Target::Battery => "battery",
         Target::Rtc => "rtc",
     }
+}
+
+fn parse_timestamp_buffer(s: &str) -> Result<AcpiTimestamp, String> {
+    let syntax = || "set_real_time requires `Buffer(16) { <16 explicit bytes> }`".to_string();
+    let (size, rest) = s
+        .strip_prefix("Buffer")
+        .and_then(|s| s.trim_start().strip_prefix('('))
+        .and_then(|s| s.split_once(')'))
+        .ok_or_else(syntax)?;
+    if parse_u8_literal(size)? != 16 {
+        return Err("RTC Buffer size must be 16".into());
+    }
+    let initializer = rest
+        .trim()
+        .strip_prefix('{')
+        .and_then(|s| s.strip_suffix('}'))
+        .ok_or_else(syntax)?
+        .trim();
+    let bytes = initializer
+        .strip_suffix(',')
+        .unwrap_or(initializer)
+        .split(',')
+        .map(parse_u8_literal)
+        .collect::<Result<Vec<_>, _>>()?;
+    let bytes: [u8; 16] = bytes
+        .try_into()
+        .map_err(|bytes: Vec<u8>| format!("RTC Buffer requires exactly 16 explicit bytes, got {}", bytes.len()))?;
+    // Bound milliseconds before the shared decoder multiplies them into u32 nanoseconds.
+    let milliseconds = u16::from_le_bytes([bytes[8], bytes[9]]);
+    if milliseconds > 999 {
+        return Err(format!(
+            "invalid RTC timestamp: milliseconds {milliseconds} out of range 0..=999"
+        ));
+    }
+    AcpiTimestamp::try_from_bytes(&bytes).map_err(|e| format!("invalid RTC timestamp: {e:?}"))
+}
+
+fn parse_u8_literal(s: &str) -> Result<u8, String> {
+    let s = s.trim();
+    let (digits, radix) = match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        Some(hex) => (hex, 16),
+        None => (s, 10),
+    };
+    if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
+        return Err(format!("expected decimal or hexadecimal byte literal, got `{s}`"));
+    }
+    u8::from_str_radix(digits, radix).map_err(|e| format!("byte literal `{s}` out of range 0..=255: {e}"))
 }
 
 fn parse_timer(s: &str) -> Result<AcpiTimerId, String> {
@@ -552,6 +601,99 @@ mod tests {
         match &stmts[0] {
             Stmt::Let { name, .. } => assert_eq!(name, "cached"),
             other => panic!("expected Let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_rtc_buffer_literal() {
+        for (size, trailing) in [("16", ""), ("0x10", ",")] {
+            let src = format!(
+                "rtc.set_real_time(Buffer ({size}) {{ # whole seconds
+                    0xEA, 0X07, 9, 17, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0{trailing}
+                }}) => is_ok;"
+            );
+            let stmts = parse(&src).unwrap();
+            let Stmt::Check {
+                call, verb: Verb::IsOk, ..
+            } = &stmts[0]
+            else {
+                panic!("expected RTC setter check");
+            };
+            let Method::SetRealTime(timestamp) = call.method else {
+                panic!("expected SetRealTime");
+            };
+            let expected =
+                AcpiTimestamp::try_from_bytes(&[234, 7, 9, 17, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
+            assert_eq!(timestamp, expected);
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_rtc_buffers() {
+        let bytes = "234, 7, 9, 17, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0";
+        for arg in [
+            String::new(),
+            "1760000000".into(),
+            "2026, 9, 17, 12, 0, 0, 0, 0, 0".into(),
+            format!("Buffer(15) {{ {bytes} }}"),
+            format!("Buffer(17) {{ {bytes} }}"),
+            format!("Buffer(16.0) {{ {bytes} }}"),
+            format!("Buffer(16 + 0) {{ {bytes} }}"),
+            "Buffer(16) {}".into(),
+            format!("Buffer(16) {{ {} }}", bytes.rsplit_once(',').unwrap().0),
+            format!("Buffer(16) {{ {bytes}, 0 }}"),
+            format!("Buffer(16) {{ {bytes},, }}"),
+            format!("Buffer(16) {{ {} }}", bytes.replacen(", 7", " 7", 1)),
+            format!("Buffer(16) {{ {bytes}"),
+            format!("Buffer(16) {bytes} }}"),
+            format!("Buffer(16 {{ {bytes} }}"),
+            format!("Buffer(16)) {{ {bytes} }}"),
+            format!("Buffer(16) {{ {bytes} }} garbage"),
+            format!("Buffer(16) {{ {bytes} }}, Buffer(16) {{ {bytes} }}"),
+        ] {
+            let error = parse(&format!("\nrtc.set_real_time({arg}) => is_ok;")).unwrap_err();
+            assert_eq!(error.line, 2, "{arg}");
+        }
+        for byte in [
+            "256",
+            "0x100",
+            "-1",
+            "+1",
+            "1.5",
+            "1e0",
+            "0xGG",
+            "year",
+            "1 + 2",
+            "Add(1, 2)",
+            "",
+        ] {
+            let arg = bytes.replacen("234", byte, 1);
+            assert!(
+                parse(&format!("rtc.set_real_time(Buffer(16) {{ {arg} }}) => is_ok;")).is_err(),
+                "{byte}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_decoded_timestamps() {
+        for (index, byte) in [(2, 13), (3, 32), (4, 24), (5, 60), (6, 60), (8, 232), (11, 6), (12, 2)] {
+            let mut bytes = [234u8, 7, 9, 17, 12, 0, 0, 0, 231, 3, 0, 0, 0, 0, 0, 0];
+            bytes[index] = byte;
+            let initializer = bytes.map(|b| b.to_string()).join(", ");
+            let error = parse(&format!("rtc.set_real_time(Buffer(16) {{ {initializer} }}) => is_err;")).unwrap_err();
+            assert!(error.message.starts_with("invalid RTC timestamp:"), "{error}");
+        }
+    }
+
+    #[test]
+    fn rejects_milliseconds_that_overflow_decoder_arithmetic() {
+        for milliseconds in [4295u16, u16::MAX] {
+            let mut bytes = [234u8, 7, 9, 17, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+            bytes[8..10].copy_from_slice(&milliseconds.to_le_bytes());
+            let initializer = bytes.map(|b| b.to_string()).join(", ");
+            let error = parse(&format!("rtc.set_real_time(Buffer(16) {{ {initializer} }}) => is_ok;")).unwrap_err();
+            assert!(error.message.contains("milliseconds"), "{milliseconds}: {error}");
         }
     }
 }
