@@ -15,6 +15,9 @@ pub mod acpi;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+#[cfg(target_os = "windows")]
+pub mod pcc;
+
 pub mod mock;
 pub mod serial;
 pub mod ucsi;

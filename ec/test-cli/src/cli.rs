@@ -88,6 +88,21 @@ pub enum Command {
     /// Evaluate a raw ACPI method (Windows `--source acpi` only).
     #[cfg(target_os = "windows")]
     Eval(EvalCommand),
+    /// Query or exercise native PCC through ectest (Windows `--source acpi` only).
+    #[cfg(target_os = "windows")]
+    #[command(subcommand)]
+    Pcc(PccCommand),
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Subcommand)]
+pub enum PccCommand {
+    Probe,
+    Ping {
+        /// Sequence to echo; generated when omitted.
+        #[arg(long)]
+        sequence: Option<u32>,
+    },
 }
 
 /// Raw ACPI method evaluation arguments.
