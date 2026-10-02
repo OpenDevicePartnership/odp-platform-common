@@ -420,9 +420,17 @@ impl From<AcpiEvalInputBufferComplexV1Ex> for Vec<u8> {
 impl TryFrom<Vec<u8>> for AcpiEvalOutputBufferV1 {
     type Error = AcpiParseError;
     fn try_from(value: Vec<u8>) -> Result<Self, AcpiParseError> {
+        if value.len() < 12 {
+            return Err(AcpiParseError::InsufficientLength);
+        }
+
         let signature = u32::from_le_bytes(value[0..4].try_into().map_err(|_| AcpiParseError::InvalidFormat)?);
         let length = u32::from_le_bytes(value[4..8].try_into().map_err(|_| AcpiParseError::InvalidFormat)?);
         let count = u32::from_le_bytes(value[8..12].try_into().map_err(|_| AcpiParseError::InvalidFormat)?);
+
+        if signature != u32::from_le_bytes(*b"AeoB") || length as usize != value.len() {
+            return Err(AcpiParseError::InvalidFormat);
+        }
 
         let mut offset = 12;
         let mut arguments = Vec::new();
@@ -458,7 +466,8 @@ impl TryFrom<Vec<u8>> for AcpiEvalOutputBufferV1 {
             }
 
             let data = value[offset..offset + data_length].to_vec();
-            offset += data_length;
+            // ACPI_METHOD_ARGUMENT reserves at least a ULONG for its data union.
+            offset += data_length.max(4);
 
             arguments.push(AcpiMethodArgumentV1 {
                 type_,
@@ -466,6 +475,10 @@ impl TryFrom<Vec<u8>> for AcpiEvalOutputBufferV1 {
                 data_32,
                 data,
             });
+        }
+
+        if offset != value.len() {
+            return Err(AcpiParseError::InvalidFormat);
         }
 
         // Now return generated content
@@ -482,6 +495,8 @@ impl TryFrom<Vec<u8>> for AcpiEvalOutputBufferV1 {
 pub struct Acpi {
     fan_instance: u8,
     device_path: String,
+    #[cfg(test)]
+    evaluation: Option<tests::Evaluation>,
 }
 
 impl Acpi {
@@ -490,6 +505,8 @@ impl Acpi {
         Self {
             fan_instance,
             device_path,
+            #[cfg(test)]
+            evaluation: None,
         }
     }
 
@@ -520,6 +537,14 @@ impl Acpi {
 
         // Input buffer
         let in_buf: Vec<u8> = input.into();
+
+        #[cfg(test)]
+        if let Some(evaluation) = &self.evaluation {
+            evaluation.requests.borrow_mut().push(in_buf);
+            return AcpiEvalOutputBufferV1::try_from(
+                evaluation.response.clone().map_err(AcpiParseError::EvaluationFailed)?,
+            );
+        }
 
         // Output buffer
         let out_buf_len = 1024;
@@ -586,7 +611,15 @@ impl Acpi {
             if arg.type_ != AcpiArgumentType::Integer as u16 {
                 Err(Error::UnexpectedArgumentType(arg.type_))
             } else {
-                Ok(arg.data_32)
+                match arg.data_length {
+                    4 => Ok(arg.data_32),
+                    // EVAL_METHOD_EX can return eight bytes even for ULONG results.
+                    8 => {
+                        let bytes = arg.data.as_slice().try_into().map_err(|_| Error::UnexpectedResponse)?;
+                        u32::try_from(u64::from_le_bytes(bytes)).map_err(|_| Error::InvalidData)
+                    }
+                    _ => Err(Error::UnexpectedResponse),
+                }
             }
         }
     }
@@ -778,18 +811,24 @@ impl RtcSource for Acpi {
 
     fn set_real_time(&self, timestamp: AcpiTimestamp) -> Result<(), Self::Error> {
         let bytes = timestamp.as_bytes();
-        let _ = self.evaluate("\\_SB.ECT0._SRT", Some(&[AcpiMethodArgument::Buffer(bytes.to_vec())]))?;
+        let status = self.evaluate_u32("\\_SB.ECT0._SRT", Some(&[AcpiMethodArgument::Buffer(bytes.to_vec())]))?;
+        if status != 0 {
+            return Err(Error::OperationFailed);
+        }
         Ok(())
     }
 
     fn set_timer_value(&self, timer_id: AcpiTimerId, value: AlarmTimerSeconds) -> Result<(), Self::Error> {
-        let _ = self.evaluate(
+        let status = self.evaluate_u32(
             "\\_SB.ECT0._STV",
             Some(&[
                 AcpiMethodArgument::Int(timer_id.into()),
                 AcpiMethodArgument::Int(value.0),
             ]),
         )?;
+        if status != 0 {
+            return Err(Error::OperationFailed);
+        }
         Ok(())
     }
 
@@ -798,18 +837,24 @@ impl RtcSource for Acpi {
         timer_id: AcpiTimerId,
         policy: AlarmExpiredWakePolicy,
     ) -> Result<(), Self::Error> {
-        let _ = self.evaluate(
+        let status = self.evaluate_u32(
             "\\_SB.ECT0._STP",
             Some(&[
                 AcpiMethodArgument::Int(timer_id.into()),
                 AcpiMethodArgument::Int(policy.0),
             ]),
         )?;
+        if status != 0 {
+            return Err(Error::OperationFailed);
+        }
         Ok(())
     }
 
     fn clear_wake_status(&self, timer_id: AcpiTimerId) -> Result<(), Self::Error> {
-        let _ = self.evaluate("\\_SB.ECT0._CWS", Some(&[AcpiMethodArgument::Int(timer_id.into())]))?;
+        let status = self.evaluate_u32("\\_SB.ECT0._CWS", Some(&[AcpiMethodArgument::Int(timer_id.into())]))?;
+        if status != 0 {
+            return Err(Error::OperationFailed);
+        }
         Ok(())
     }
 }
@@ -850,5 +895,197 @@ impl UcsiSource for Acpi {
             connector_capability,
             connector_status,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    const TIMESTAMP: [u8; 16] = [0xEA, 0x07, 9, 17, 21, 20, 34, 1, 0xDB, 0x03, 0x20, 0xFE, 0, 0, 0, 0];
+
+    #[derive(Clone)]
+    pub(super) struct Evaluation {
+        pub response: Result<Vec<u8>, i32>,
+        pub requests: RefCell<Vec<Vec<u8>>>,
+    }
+
+    fn output(arguments: &[(u16, &[u8])]) -> Vec<u8> {
+        let mut bytes = b"AeoB".to_vec();
+        bytes.extend(0u32.to_le_bytes());
+        bytes.extend((arguments.len() as u32).to_le_bytes());
+        for (type_, data) in arguments {
+            bytes.extend(type_.to_le_bytes());
+            bytes.extend((data.len() as u16).to_le_bytes());
+            bytes.extend_from_slice(data);
+            bytes.resize(bytes.len() + 4usize.saturating_sub(data.len()), 0);
+        }
+        let length = bytes.len() as u32;
+        bytes[4..8].copy_from_slice(&length.to_le_bytes());
+        bytes
+    }
+
+    fn acpi_with_response(response: Result<Vec<u8>, i32>) -> Acpi {
+        Acpi {
+            evaluation: Some(Evaluation {
+                response,
+                requests: RefCell::default(),
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn exercise_setters(response: Result<Vec<u8>, i32>) -> (Vec<Vec<u8>>, [Result<(), Error>; 4]) {
+        let acpi = acpi_with_response(response);
+        let results = [
+            acpi.set_real_time(AcpiTimestamp::try_from_bytes(&TIMESTAMP).unwrap()),
+            acpi.set_timer_value(AcpiTimerId::DcPower, AlarmTimerSeconds(0x1234_5678)),
+            acpi.set_expired_timer_wake_policy(AcpiTimerId::AcPower, AlarmExpiredWakePolicy(u32::MAX)),
+            acpi.clear_wake_status(AcpiTimerId::DcPower),
+        ];
+        (acpi.evaluation.unwrap().requests.into_inner(), results)
+    }
+
+    #[test]
+    fn rtc_setters_accept_zero_and_preserve_requests() {
+        let expected = [
+            ("\\_SB.ECT0._SRT", vec![AcpiMethodArgument::Buffer(TIMESTAMP.to_vec())]),
+            (
+                "\\_SB.ECT0._STV",
+                vec![AcpiMethodArgument::Int(1), AcpiMethodArgument::Int(0x1234_5678)],
+            ),
+            (
+                "\\_SB.ECT0._STP",
+                vec![AcpiMethodArgument::Int(0), AcpiMethodArgument::Int(u32::MAX)],
+            ),
+            ("\\_SB.ECT0._CWS", vec![AcpiMethodArgument::Int(1)]),
+        ];
+        for width in [4, 8] {
+            let (requests, results) = exercise_setters(Ok(output(&[(0, &[0; 8][..width])])));
+            for result in results {
+                result.unwrap();
+            }
+            assert_eq!(requests.len(), expected.len());
+            for (request, (name, args)) in requests.iter().zip(&expected) {
+                let input =
+                    AcpiEvalInputBufferComplexV1Ex::try_from(AcpiMethodInput { name, args: Some(args) }).unwrap();
+                assert_eq!(*request, Vec::<u8>::from(input));
+            }
+        }
+    }
+
+    #[test]
+    fn rtc_setters_reject_nonzero_status() {
+        for status in [1u32, 45, u32::MAX] {
+            for width in [4, 8] {
+                let bytes = u64::from(status).to_le_bytes();
+                for result in exercise_setters(Ok(output(&[(0, &bytes[..width])]))).1 {
+                    assert!(matches!(result, Err(Error::OperationFailed)));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rtc_getter_accepts_32_and_64_bit_integers() {
+        for value in [0u32, 45, u32::MAX] {
+            for width in [4, 8] {
+                let bytes = u64::from(value).to_le_bytes();
+                let acpi = acpi_with_response(Ok(output(&[(0, &bytes[..width])])));
+                assert_eq!(acpi.get_timer_value(AcpiTimerId::DcPower).unwrap().0, value);
+            }
+        }
+    }
+
+    #[test]
+    fn rtc_setters_and_getter_reject_u32_overflow() {
+        for value in [0x1_0000_0000u64, u64::MAX] {
+            let response = output(&[(0, &value.to_le_bytes())]);
+            for result in exercise_setters(Ok(response.clone())).1 {
+                assert!(matches!(result, Err(Error::InvalidData)));
+            }
+            let acpi = acpi_with_response(Ok(response));
+            assert!(matches!(
+                acpi.get_timer_value(AcpiTimerId::DcPower),
+                Err(Error::InvalidData)
+            ));
+        }
+    }
+
+    #[test]
+    fn rtc_setters_require_one_result() {
+        for response in [output(&[]), output(&[(0, &[0; 4]), (0, &[0; 4])])] {
+            for result in exercise_setters(Ok(response)).1 {
+                assert!(matches!(result, Err(Error::UnexpectedResponse)));
+            }
+        }
+    }
+
+    #[test]
+    fn rtc_setters_require_integer_type() {
+        for type_ in [1, 2, 3, 4, u16::MAX] {
+            for result in exercise_setters(Ok(output(&[(type_, &[0; 4])]))).1 {
+                assert!(matches!(result, Err(Error::UnexpectedArgumentType(t)) if t == type_));
+            }
+        }
+    }
+
+    #[test]
+    fn rtc_setters_reject_malformed_integer_width() {
+        for length in [0, 1, 2, 3, 5, 6, 7, 9] {
+            for result in exercise_setters(Ok(output(&[(0, &vec![0; length])]))).1 {
+                assert!(matches!(result, Err(Error::UnexpectedResponse)));
+            }
+        }
+    }
+
+    #[test]
+    fn rtc_setters_reject_short_responses() {
+        let response = output(&[(0, &[0; 4])]);
+        for length in 0..response.len() {
+            let mut short = response[..length].to_vec();
+            if length >= 8 {
+                short[4..8].copy_from_slice(&(length as u32).to_le_bytes());
+            }
+            for result in exercise_setters(Ok(short)).1 {
+                assert!(matches!(result, Err(Error::Parse(AcpiParseError::InsufficientLength))));
+            }
+        }
+    }
+
+    #[test]
+    fn rtc_setters_reject_malformed_framing() {
+        let valid = output(&[(0, &[0; 4])]);
+        let mut signature = valid.clone();
+        signature[0] = 0;
+        let mut length = valid.clone();
+        length[4] += 1;
+        let mut trailing = valid;
+        trailing.push(0);
+        trailing[4] += 1;
+        for response in [signature, length, trailing] {
+            for result in exercise_setters(Ok(response)).1 {
+                assert!(matches!(result, Err(Error::Parse(AcpiParseError::InvalidFormat))));
+            }
+        }
+    }
+
+    #[test]
+    fn rtc_setters_propagate_evaluation_failure() {
+        for result in exercise_setters(Err(-42)).1 {
+            assert!(matches!(
+                result,
+                Err(Error::Parse(AcpiParseError::EvaluationFailed(-42)))
+            ));
+        }
+    }
+
+    #[test]
+    fn output_parser_preserves_padded_buffer_arguments() {
+        let response = output(&[(2, &[42]), (0, &45u32.to_le_bytes())]);
+        let parsed = AcpiEvalOutputBufferV1::try_from(response).unwrap();
+        assert_eq!(parsed.arg(0).unwrap().data, [42]);
+        assert_eq!(parsed.arg(1).unwrap().data_32, 45);
     }
 }

@@ -27,6 +27,15 @@
 //! Bitfield accessors may optionally be written with `()` (e.g.
 //! `ac_wake_implemented()`); both forms are equivalent.
 //!
+//! `rtc.set_real_time(Buffer(16) { <bytes> })` accepts exactly 16 explicit
+//! decimal/hexadecimal bytes, with an optional trailing comma; size `0x10`
+//! is also accepted. This is a literal, not ASL evaluation or zero filling.
+//! Milliseconds are checked before decoding to prevent nanosecond overflow.
+//! Validation otherwise reuses `AcpiTimestamp::try_from_bytes`: milliseconds `0..=999`,
+//! daylight `0`/`1`/`3`, and byte 7 acceptance are existing compatibility
+//! choices, not normative ACPI guarantees. There is no normalization;
+//! the source receives the decoded timestamp. See the README for details.
+//!
 //! ## Operands
 //!
 //! Verb operands can be:

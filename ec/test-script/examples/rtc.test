@@ -1,12 +1,16 @@
 # Time-alarm / RTC service: real-hardware invariants.
 #
 # Quirks:
-# * `set_real_time` is on the trait but not in the DSL (no operand
-#   syntax for AcpiTimestamp). Drive from Rust if needed.
+# * This script sets the clock; run only on test devices.
 # * The device treats timer value 0 as "disabled" and reports it back
 #   as u32::MAX, so the 0 round-trip only checks the write succeeds.
 #
 # SPDX-License-Identifier: MIT
+
+# Whole-second compatibility: milliseconds 0, conventional Pad1 0.
+rtc.set_real_time(Buffer(16) {
+    0xEA, 0x07, 9, 17, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+}) => is_ok;
 
 # Clock ticks monotonically.
 rtc.get_real_time => is_ok;

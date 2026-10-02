@@ -129,6 +129,9 @@ fn invoke<S: Source>(s: &S, m: &Method, env: &Env) -> Result<Value, String> {
 
         Method::GetCapabilities => RtcSource::get_capabilities(s).map(caps_to_value).map_err(err),
         Method::GetRealTime => RtcSource::get_real_time(s).map(timestamp_to_value).map_err(err),
+        Method::SetRealTime(timestamp) => RtcSource::set_real_time(s, *timestamp)
+            .map(|()| Value::Unit)
+            .map_err(err),
         Method::GetWakeStatus(id) => RtcSource::get_wake_status(s, *id)
             .map(wake_status_to_value)
             .map_err(err),

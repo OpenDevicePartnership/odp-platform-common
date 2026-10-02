@@ -120,8 +120,9 @@ A call is one of:
 * **`<target>`** is `thermal`, `battery`, or `rtc`.
 * **`<method>`** is one of the methods listed below.
 * **`<arg>`** is method-specific (enum keyword, numeric literal, a
-  comma-separated pair, or an identifier previously bound by `let`).
-  Setter arguments accept any of: number, `true` / `false`, or a
+  comma-separated pair, an identifier previously bound by `let`, or
+  the RTC timestamp Buffer literal described below).
+  Scalar setter arguments accept any of: number, `true` / `false`, or a
   variable name — so you can snapshot, write, and restore:
   `let orig = thermal.get_rpm; thermal.set_rpm(orig) => is_ok;`.
   Parens are required *only* when the method takes an argument.
@@ -181,6 +182,7 @@ the verb set.
 |--------------------------------------------------------|--------------|
 | `rtc.get_capabilities`                                 | `Struct`     |
 | `rtc.get_real_time`                                    | `Struct`     |
+| `rtc.set_real_time(Buffer(16) { <bytes> })`             | `Unit`       |
 | `rtc.get_wake_status(<id>)`                            | `Struct`     |
 | `rtc.get_expired_timer_wake_policy(<id>)`              | `Struct`     |
 | `rtc.get_timer_value(<id>)`                            | `Struct`     |
@@ -190,8 +192,31 @@ the verb set.
 
 `<id>` ∈ `ac`, `dc`.
 
-`set_real_time` exists on the trait but is **not** in the DSL — its
-`AcpiTimestamp` argument has no operand syntax. Use it from Rust.
+`set_real_time` takes one ASL-like Buffer literal in the ACPI 16-byte
+timestamp layout (multibyte fields are little-endian):
+
+```text
+# Sets the test clock to 2026-09-17 12:00:00, UTC, whole seconds.
+rtc.set_real_time(Buffer(16) {
+    0xEA, 0x07, 9, 17, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+}) => is_ok;
+```
+
+The size must be `16` or its hexadecimal equivalent `0x10`. Exactly
+16 explicit decimal/hexadecimal byte literals (`0..=255`) are required;
+one trailing comma is optional. This is not an ASL evaluator: expressions,
+variables, implicit zero padding, Unix timestamps, and field-list arguments
+are not supported. Malformed literals or timestamps are parse errors.
+
+The parser checks milliseconds `0..=999` before calling the existing
+`AcpiTimestamp::try_from_bytes` decoder, avoiding overflow in its nanosecond
+conversion. This range and daylight `0`, `1`, or `3` are compatibility
+choices, not normative specification guarantees. ACPI 6.6 lists milliseconds
+as `1..=1000`; no correcting erratum has been verified. Linux uses `0` for
+whole seconds, as do these examples. No +/-1 conversion is performed.
+Byte 7 retains decoder compatibility, without enforcing zero or normalizing
+the input; examples use conventional zero. The source receives a typed
+`AcpiTimestamp`, whose existing `as_bytes` serializer may emit `1` at byte 7.
 
 **`get_capabilities` accessors** (all `Bool`):
 `ac_wake_implemented`, `dc_wake_implemented`, `realtime_implemented`,
@@ -382,8 +407,8 @@ Common runtime failure messages (one per failed row):
 
 ## Limitations
 
-* `set_real_time(<timestamp>)` is in the trait but not in the DSL —
-  no operand syntax for `AcpiTimestamp`.
+* `set_real_time` accepts only the explicit Buffer literal above, not a
+  timestamp variable or arbitrary ASL.
 * `BatterySource` has no `DeviceId` parameter, so the on-target
   "unknown battery id returns `Err`" rows have no host equivalent.
 * No `if` / loops / arithmetic — by design. Use Rust integration
