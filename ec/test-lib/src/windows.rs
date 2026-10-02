@@ -84,8 +84,8 @@ pub enum Error {
     Io(i32),
     /// The device returned a malformed or unexpected buffer.
     InvalidData,
-    /// The Windows class-driver source does not expose UCSI.
-    Unsupported,
+    /// The Windows class-driver source does not expose the specified operation.
+    Unsupported(&'static str),
 }
 
 impl std::fmt::Display for Error {
@@ -94,7 +94,7 @@ impl std::fmt::Display for Error {
             Self::DeviceNotFound => write!(f, "Device not found"),
             Self::Io(code) => write!(f, "HRESULT {code:#x}"),
             Self::InvalidData => write!(f, "Invalid data"),
-            Self::Unsupported => write!(f, "UCSI is unsupported by the Windows source"),
+            Self::Unsupported(operation) => write!(f, "{} is unsupported by the Windows source", operation),
         }
     }
 }
@@ -107,7 +107,7 @@ impl crate::Error for Error {
             Self::DeviceNotFound => crate::ErrorKind::Io,
             Self::Io(_) => crate::ErrorKind::Io,
             Self::InvalidData => crate::ErrorKind::InvalidData,
-            Self::Unsupported => crate::ErrorKind::Other,
+            Self::Unsupported(_) => crate::ErrorKind::Other,
         }
     }
 }
@@ -282,10 +282,9 @@ impl RtcSource for Windows {
         Ok(caps)
     }
 
-    // Revisit: acpitime.c exposes no IOCTL for _GWS/_CWS; so return fake data for now?
-    // The HIDTime.sys driver might need to define/expose these manually?
+    // Revisit: acpitime.c exposes no IOCTL for _GWS/_CWS - should it?
     fn get_wake_status(&self, _timer_id: AcpiTimerId) -> Result<TimerStatus, Error> {
-        Ok(TimerStatus(0))
+        Err(Error::Unsupported("GetWakeStatus"))
     }
 
     fn clear_wake_status(&self, _timer_id: AcpiTimerId) -> Result<(), Error> {
@@ -341,6 +340,6 @@ impl BatterySource for Windows {
 
 impl UcsiSource for Windows {
     fn get_snapshot(&self, _connector: u8) -> Result<UcsiSnapshot, Self::Error> {
-        Err(Error::Unsupported)
+        Err(Error::Unsupported("UCSI"))
     }
 }
