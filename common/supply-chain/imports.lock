@@ -1,6 +1,13 @@
 
 # cargo-vet imports lock
 
+[[publisher.tokio]]
+version = "1.54.1"
+when = "2026-10-21"
+user-id = 6741
+user-login = "Darksonn"
+user-name = "Alice Ryhl"
+
 [[publisher.unicode-segmentation]]
 version = "1.13.2"
 when = "2026-03-26"
