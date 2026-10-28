@@ -1,5 +1,5 @@
-# Builds the EC test applications (ec-test-cli, ec-test-tui) for Windows on ARM
-# (ARM64).
+# Builds the EC test applications (ec-test-cli, ec-test-tui) for Windows on
+# ARM64 and x86_64.
 #
 # On pushes to the upstream main branch (and upstream manual dispatch), the
 # build is zipped and published as an asset on the rolling "latest" prerelease
@@ -35,8 +35,16 @@ concurrency:
 jobs:
   build-apps:
     if: github.event_name != 'push' || github.event.repository.fork == false
-    name: Build Apps (ARM64)
+    name: Build Apps (${{ matrix.arch }})
     runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-pc-windows-msvc
+            arch: ARM64
+          - target: x86_64-pc-windows-msvc
+            arch: x86_64
     permissions:
       contents: write
     steps:
@@ -45,21 +53,21 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust (stable) with ARM64 target
+      - name: Install Rust (stable) with ${{ matrix.arch }} target
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-pc-windows-msvc
+          targets: ${{ matrix.target }}
 
-      # rustc locates the ARM64 MSVC linker/libs (installed on the runner) via
-      # the target triple, so a plain cargo build cross-compiles from the x64
-      # host. The crt-static rustflag lives in ec/.cargo/config.toml.
+      # rustc locates the target MSVC linker/libs (installed on the runner) via
+      # the target triple. ARM64 is cross-compiled from the x64 host. The
+      # crt-static rustflags live in ec/.cargo/config.toml.
       - name: Build test apps
         working-directory: ec
-        run: cargo build --release --locked --target aarch64-pc-windows-msvc -p ec-test-cli -p ec-test-tui
+        run: cargo build --release --locked --target ${{ matrix.target }} -p ec-test-cli -p ec-test-tui
 
       # Release assets are raw files (gh release upload does not zip), so bundle
-      # both executables into one zip under a fixed `ectest/` folder, so a
-      # consumer can extract it straight onto the image at a predictable path
+      # both executables into one zip per architecture under a fixed `ectest/`
+      # folder, so a consumer can extract it onto the image at a predictable path
       # (e.g. C:\ectest\). --clobber replaces the asset from a prior run without
       # disturbing the release metadata or other jobs' assets.
       - name: Package and upload apps
@@ -71,7 +79,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $outDir = 'ec/target/aarch64-pc-windows-msvc/release'
+          $outDir = 'ec/target/${{ matrix.target }}/release'
           $stageDir = Join-Path $env:RUNNER_TEMP 'ectest'
           if (Test-Path $stageDir) { Remove-Item -Path $stageDir -Recurse -Force }
           New-Item -ItemType Directory -Path $stageDir | Out-Null
@@ -82,7 +90,7 @@ jobs:
             }
             Copy-Item -LiteralPath $src -Destination $stageDir
           }
-          $zip = Join-Path $env:RUNNER_TEMP 'ec-test-apps-ARM64.zip'
+          $zip = Join-Path $env:RUNNER_TEMP 'ec-test-apps-${{ matrix.arch }}.zip'
           if (Test-Path $zip) { Remove-Item -Path $zip -Force }
           Compress-Archive -Path $stageDir -DestinationPath $zip -Force
           gh release upload latest $zip --repo $env:GITHUB_REPOSITORY --clobber
