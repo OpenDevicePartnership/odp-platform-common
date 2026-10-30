@@ -119,20 +119,20 @@ impl From<crate::mock::Error> for Error {
 }
 
 /// A resolved handle to one Windows class-driver device interface.
-struct WindowsDevice {
+pub(crate) struct WindowsDevice {
     device_path: String,
 }
 
 impl WindowsDevice {
     /// Create a device from given `interface_guid`.
-    fn new(interface_guid: &GUID) -> Result<Self, Error> {
+    pub(crate) fn new(interface_guid: &GUID) -> Result<Self, Error> {
         Ok(Self {
             device_path: get_device_path(interface_guid)?,
         })
     }
 
     /// Issue a single buffered IOCTL, requiring the driver to fill `output` completely.
-    fn ioctl(&self, code: u32, input: &[u8], output: &mut [u8]) -> Result<(), Error> {
+    pub(crate) fn ioctl(&self, code: u32, input: &[u8], output: &mut [u8]) -> Result<(), Error> {
         let wide: Vec<u16> = self.device_path.encode_utf16().chain(std::iter::once(0)).collect();
         let handle = unsafe {
             CreateFileW(

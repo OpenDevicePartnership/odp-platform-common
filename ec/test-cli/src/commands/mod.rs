@@ -6,6 +6,8 @@
 pub mod battery;
 #[cfg(target_os = "windows")]
 pub mod eval;
+#[cfg(any(test, target_os = "windows"))]
+pub mod pcc;
 pub mod rtc;
 pub mod script;
 pub mod thermal;

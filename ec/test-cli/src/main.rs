@@ -20,6 +20,8 @@ fn dispatch<S: Source>(source: S, command: Command) -> Result<(), Box<dyn std::e
         // `eval` requires the concrete ACPI source and is handled in `main`.
         #[cfg(target_os = "windows")]
         Command::Eval(_) => unreachable!("eval is dispatched before reaching a generic source"),
+        #[cfg(target_os = "windows")]
+        Command::Pcc(_) => unreachable!("pcc is dispatched before reaching a generic source"),
     }
 }
 
@@ -32,6 +34,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return match cli.source {
             SourceKind::Acpi => commands::eval::run(&ec_test_lib::acpi::Acpi::new(cli.fan_instance), cmd),
             _ => Err("`eval` is only supported with `--source acpi`".into()),
+        };
+    }
+
+    #[cfg(target_os = "windows")]
+    if let Command::Pcc(cmd) = &cli.command {
+        return match cli.source {
+            SourceKind::Acpi => commands::pcc::run(cmd),
+            _ => Err("`pcc` is only supported with `--source acpi`".into()),
         };
     }
 

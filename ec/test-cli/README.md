@@ -1,7 +1,7 @@
 # ec-test-cli
 
 ## Overview
-Command-line tool for testing EC features (thermal, battery, RTC). Each command maps directly to an EC data source trait method — it executes the request, prints the result, and exits.
+Command-line tool for testing EC features (thermal, battery, RTC) and native PCC connectivity. Commands execute the request, print the result, and exit.
 
 See [ODP Documentation](https://opendevicepartnership.github.io/documentation/guide/overview.html) for details on EC specification.
 
@@ -36,6 +36,33 @@ The following options only apply when `--source serial`:
 Use `ec-test-cli --help` and `ec-test-cli <COMMAND> --help` to see available commands and options.
 
 Setter commands print nothing on success — exit code 0 indicates success.
+
+## Native PCC (Windows ARM64)
+
+Use `--source acpi` with the native-PCC-enabled `ectest` driver and the QEMU
+platform's Type 3 subspace 0. The driver's native interface is experimental
+and currently gated to Windows ARM64 10.0.28000.2605 and the matching PCCT.
+
+```text
+ec-test-cli --source acpi pcc probe
+ec-test-cli --source acpi pcc ping --sequence 42
+```
+
+`probe` prints the native interface metadata and query status without sending
+an EC command. A successful probe does not prove that the EC can respond.
+
+`ping` requires dev-qemu's PCC responder running over the host/EC eSPI link.
+It sends command `1` with an eight-byte `PING` marker and little-endian `u32`
+sequence, then checks the returned status, `PONG` marker, and matching sequence.
+Omit `--sequence` to generate a value. Successful output includes:
+
+```text
+PCC execute: status=0x00000000
+PCC response: PONG sequence=42
+```
+
+Failed queries, executions, and malformed or mismatched replies exit nonzero.
+The `pcc` commands are Windows-only and do not use the serial or mock sources.
 
 ## Raw ACPI evaluation (Windows only)
 
