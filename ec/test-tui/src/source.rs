@@ -127,7 +127,7 @@ pub(crate) fn build(cli: &Cli) -> Result<Arc<dyn DynSource>> {
             Ok(Arc::new(source))
         }
 
-        #[cfg(target_os = "windows")]
+        #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
         SourceKind::Acpi => Ok(Arc::new(ec_test_lib::acpi::Acpi::new(cli.fan_instance))),
 
         #[cfg(target_os = "windows")]

@@ -9,7 +9,7 @@ use crate::ucsi::UcsiSnapshot;
 
 pub(crate) mod common;
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", target_arch = "aarch64"))]
 pub mod acpi;
 
 #[cfg(target_os = "windows")]

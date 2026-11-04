@@ -30,6 +30,10 @@ struct Cli {
 
     /// Serial port path (required when --source serial).
     #[arg(long, required_if_eq("source", "serial"))]
+    #[cfg_attr(
+        not(all(target_os = "windows", target_arch = "aarch64")),
+        arg(required_unless_present = "source")
+    )]
     port: Option<String>,
 
     /// Serial flow-control mode.
@@ -59,10 +63,10 @@ enum SourceKind {
     /// Deterministic in-process mock — no hardware required.
     Mock,
     /// Real hardware via serial transport.
-    #[cfg_attr(not(target_os = "windows"), default)]
+    #[cfg_attr(not(all(target_os = "windows", target_arch = "aarch64")), default)]
     Serial,
-    /// Real hardware via the local OS ACPI interface (Windows).
-    #[cfg(target_os = "windows")]
+    /// Real hardware via the local OS ACPI interface (Windows ARM64).
+    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
     #[default]
     Acpi,
     /// Real hardware via the local Windows class-driver interface.
@@ -75,7 +79,7 @@ impl std::fmt::Display for SourceKind {
         match self {
             Self::Mock => write!(f, "mock"),
             Self::Serial => write!(f, "serial"),
-            #[cfg(target_os = "windows")]
+            #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
             Self::Acpi => write!(f, "acpi"),
             #[cfg(target_os = "windows")]
             Self::Windows => write!(f, "windows"),
