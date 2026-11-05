@@ -16,7 +16,9 @@ For Windows on ARM (cross-compile):
 cargo build-win --release
 ```
 
-Note (Windows only): the `acpi` source requires the `ectest.sys` KMDF driver built/installed with the required ACPI entries/device instance present; the `windows` source requires the corresponding Windows class driver(s) (e.g. `HIDTime.sys`). These drivers live in [odp-windows-drivers](https://github.com/OpenDevicePartnership/odp-windows-drivers).
+On Windows ARM64, the `acpi` source requires the `ectest.sys` KMDF driver built/installed with the required ACPI entries/device instance present.
+On all Windows targets, the `windows` source requires the corresponding Windows class driver(s) (e.g. `HIDTime.sys`).
+These drivers live in [odp-windows-drivers](https://github.com/OpenDevicePartnership/odp-windows-drivers).
 
 ## Usage
 
@@ -24,11 +26,11 @@ Note (Windows only): the `acpi` source requires the `ectest.sys` KMDF driver bui
 ec-test-cli --source <mock|serial|acpi|windows> [OPTIONS] <COMMAND>
 ```
 
-- `--source` — The data source to use. Accepts `mock`, `serial`, or (Windows only) `acpi` and `windows`. Defaults to `serial` on Linux and `acpi` on Windows.
+- `--source` — The data source to use. Accepts `mock` and `serial` on all targets, `acpi` on Windows ARM64, and `windows` on all Windows targets. Defaults to `acpi` on Windows ARM64 and `serial` elsewhere.
 - `--sensor-instance` — Sensor instance index. Defaults to `0`.
 - `--fan-instance` — Fan instance index. Defaults to `0`.
 
-The following options only apply when `--source serial`:
+The following options apply when using the `serial` source (including when it is the default):
 - `--port` — Path to the serial port (e.g., `/dev/ttyUSB0`, `COM3`). Required.
 - `--flow-control` — `hw` or `none`. Defaults to `none`.
 - `--baud` — Baud rate. Defaults to `115200`.
@@ -37,7 +39,7 @@ Use `ec-test-cli --help` and `ec-test-cli <COMMAND> --help` to see available com
 
 Setter commands print nothing on success — exit code 0 indicates success.
 
-## Raw ACPI evaluation (Windows only)
+## Raw ACPI evaluation (Windows ARM64 only)
 
 The `eval` command evaluates an arbitrary ACPI method by name and prints its return
 value(s). It is only supported with `--source acpi` and replaces the legacy C++

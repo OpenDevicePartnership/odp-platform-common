@@ -4,7 +4,7 @@
 //!
 
 pub mod battery;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", target_arch = "aarch64"))]
 pub mod eval;
 pub mod rtc;
 pub mod script;

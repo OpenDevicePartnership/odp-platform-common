@@ -27,8 +27,8 @@ ec-test-cli --source mock script run path/to/file.test
 # Real hardware over serial.
 ec-test-cli --source serial --port COM5 script run path/to/file.test
 
-# Windows ACPI (when present).
-ec-test-cli --source local script run path/to/file.test
+# Windows ARM64 ACPI (when present).
+ec-test-cli --source acpi script run path/to/file.test
 
 # Run every `.test` file under a directory (recursive, sorted).
 ec-test-cli --source mock script run path/to/dir/

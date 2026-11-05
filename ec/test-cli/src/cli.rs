@@ -14,6 +14,10 @@ pub struct Cli {
 
     /// Serial port path (required when --source serial).
     #[arg(long, required_if_eq("source", "serial"))]
+    #[cfg_attr(
+        not(all(target_os = "windows", target_arch = "aarch64")),
+        arg(required_unless_present = "source")
+    )]
     pub port: Option<String>,
 
     /// Serial flow-control mode.
@@ -42,10 +46,10 @@ pub enum SourceKind {
     /// Deterministic in-process mock — no hardware required.
     Mock,
     /// Real hardware via serial transport.
-    #[cfg_attr(not(target_os = "windows"), default)]
+    #[cfg_attr(not(all(target_os = "windows", target_arch = "aarch64")), default)]
     Serial,
-    /// Real hardware via the local OS ACPI interface (Windows).
-    #[cfg(target_os = "windows")]
+    /// Real hardware via the local OS ACPI interface (Windows ARM64).
+    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
     #[default]
     Acpi,
     /// Real hardware via the Windows class-driver interface.
@@ -58,7 +62,7 @@ impl std::fmt::Display for SourceKind {
         match self {
             Self::Mock => write!(f, "mock"),
             Self::Serial => write!(f, "serial"),
-            #[cfg(target_os = "windows")]
+            #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
             Self::Acpi => write!(f, "acpi"),
             #[cfg(target_os = "windows")]
             Self::Windows => write!(f, "windows"),
@@ -85,13 +89,13 @@ pub enum Command {
     Rtc(RtcCommand),
     #[command(subcommand)]
     Script(ScriptCommand),
-    /// Evaluate a raw ACPI method (Windows `--source acpi` only).
-    #[cfg(target_os = "windows")]
+    /// Evaluate a raw ACPI method (Windows ARM64 `--source acpi` only).
+    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
     Eval(EvalCommand),
 }
 
 /// Raw ACPI method evaluation arguments.
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", target_arch = "aarch64"))]
 #[derive(clap::Args)]
 pub struct EvalCommand {
     /// ACPI method path, e.g. `\_SB.ECT0.TFST`.

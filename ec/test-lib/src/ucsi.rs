@@ -4,7 +4,7 @@
 //! is validated here. The command-specific response payloads are decoded with
 //! the upstream [`embedded_usb_pd`] UCSI v1.2 types, which are re-exported below
 //! so callers consume the upstream shapes directly. Decoding lives here (not in
-//! the Windows-only [`crate::acpi`] backend) so it can be unit-tested on any host.
+//! the Windows ARM64 `acpi` backend) so it can be unit-tested on any host.
 
 use std::fmt;
 
@@ -15,7 +15,7 @@ use embedded_usb_pd::ucsi::v1_2::ppm::get_capability;
 /// Power role of a connected connector.
 pub use embedded_usb_pd::PowerRole;
 /// UCSI command opcode selector (an ACPI implementation detail).
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(all(target_os = "windows", target_arch = "aarch64"), test))]
 pub(crate) use embedded_usb_pd::ucsi::v1_2::CommandType;
 
 /// PPM capabilities (GET_CAPABILITY response).
@@ -38,13 +38,13 @@ pub struct UcsiSnapshot {
 }
 
 /// Length of the UCSI CONTROL field the OS writes to issue a command.
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(all(target_os = "windows", target_arch = "aarch64"), test))]
 pub(crate) const CONTROL_LEN: usize = 8;
 
 const MAILBOX_LEN: usize = 48;
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(all(target_os = "windows", target_arch = "aarch64"), test))]
 const FFA_ENVELOPE_LEN: usize = 144;
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(all(target_os = "windows", target_arch = "aarch64"), test))]
 const FFA_PAYLOAD_OFFSET: usize = 32;
 const UCSI_VERSION_1_2: u16 = 0x0120;
 const MESSAGE_IN_OFFSET: usize = 16;
@@ -53,7 +53,7 @@ const MESSAGE_IN_OFFSET: usize = 16;
 ///
 /// Matches the UCSI command header (opcode, data-length=0) followed by the
 /// LPM connector number in the command-specific field.
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(all(target_os = "windows", target_arch = "aarch64"), test))]
 pub(crate) fn control(command: CommandType, connector: u8) -> [u8; CONTROL_LEN] {
     let mut buf = [0u8; CONTROL_LEN];
     buf[0] = command as u8;
@@ -63,7 +63,7 @@ pub(crate) fn control(command: CommandType, connector: u8) -> [u8; CONTROL_LEN] 
 
 /// Normalize either a direct mailbox or the full FF-A envelope returned by
 /// the Windows fixed-hardware operation region.
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(all(target_os = "windows", target_arch = "aarch64"), test))]
 pub(crate) fn normalize_acpi_response(bytes: &[u8]) -> Result<&[u8], MailboxError> {
     match bytes.len() {
         MAILBOX_LEN => Ok(bytes),

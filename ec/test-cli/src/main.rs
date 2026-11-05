@@ -18,7 +18,7 @@ fn dispatch<S: Source>(source: S, command: Command) -> Result<(), Box<dyn std::e
         Command::Rtc(cmd) => commands::rtc::run(source, cmd).map_err(Into::into),
         Command::Script(cmd) => commands::script::run(source, cmd),
         // `eval` requires the concrete ACPI source and is handled in `main`.
-        #[cfg(target_os = "windows")]
+        #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
         Command::Eval(_) => unreachable!("eval is dispatched before reaching a generic source"),
     }
 }
@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     // `eval` needs the concrete ACPI source, which the generic `dispatch` can't provide.
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
     if let Command::Eval(cmd) = &cli.command {
         return match cli.source {
             SourceKind::Acpi => commands::eval::run(&ec_test_lib::acpi::Acpi::new(cli.fan_instance), cmd),
@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             dispatch(source, cli.command)
         }
 
-        #[cfg(target_os = "windows")]
+        #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
         SourceKind::Acpi => dispatch(ec_test_lib::acpi::Acpi::new(cli.fan_instance), cli.command),
 
         #[cfg(target_os = "windows")]
