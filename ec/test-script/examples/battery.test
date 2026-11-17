@@ -14,6 +14,11 @@ battery.get_bst => is_ok;
 battery.get_bst.battery_present_voltage => in_range 1000..=30000;
 battery.get_bst.battery_present_rate    => le 50000;
 
+# PSR: 0 = Offline, 1 = Online. A broken PSR path can still read Offline,
+# so only the range is asserted here.
+battery.get_psr => is_ok;
+battery.get_psr.power_source => in_range 0..=1;
+
 battery.set_btp(0)     => is_ok;
 battery.set_btp(5000)  => is_ok;
 battery.set_btp(15000) => is_ok;

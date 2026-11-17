@@ -3,11 +3,11 @@ use crate::source::DynSource;
 use crate::state::{BatteryCommand, BatteryState};
 use crate::widgets::battery;
 use battery_service_interface::{
-    BatteryState as BatteryStateFlag, BatterySwapCapability, BatteryTechnology, PowerUnit,
+    BatteryState as BatteryStateFlag, BatterySwapCapability, BatteryTechnology, PowerSource, PowerUnit, PsrReturn,
 };
 use core::ffi::CStr;
 use std::sync::mpsc;
-use tracing::{debug, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 
 use ratatui::style::Modifier;
 use ratatui::text::Text;
@@ -108,6 +108,58 @@ pub(crate) fn poll_bix(state: &mut BatteryState, source: &dyn DynSource) {
             warn!(error = %e, "BIX read failed");
             state.bix_success = false;
         }
+    }
+}
+
+/// Fetch the current power source (PSR) into `state`.
+///
+/// Runs every tick, so only the transitions into and out of failure are
+/// logged above debug level.
+#[instrument(skip_all)]
+pub(crate) fn poll_psr(state: &mut BatteryState, source: &dyn DynSource) {
+    let was_failing = matches!(state.psr, Some(Err(_)));
+    match source.get_psr() {
+        Ok(psr) => {
+            if was_failing {
+                info!("PSR read recovered");
+            }
+            debug!(online = matches!(psr.power_source, PowerSource::Online), "PSR read OK");
+            state.psr = Some(Ok(psr));
+        }
+        Err(e) => {
+            if was_failing {
+                debug!(error = %e, "PSR read still failing");
+            } else {
+                warn!(error = %e, "PSR read failed");
+            }
+            state.psr = Some(Err(e));
+        }
+    }
+}
+
+/// A battery can't charge without external power, so a PSR of Offline while
+/// BST reports charging suggests the PSR path is falling back to Offline.
+pub(crate) fn psr_contradicts_bst(state: &BatteryState) -> bool {
+    state.bst_success
+        && state.bst.battery_state.contains(BatteryStateFlag::CHARGING)
+        && matches!(
+            state.psr,
+            Some(Ok(PsrReturn {
+                power_source: PowerSource::Offline
+            }))
+        )
+}
+
+/// Text and color for the AC adapter indicator.
+fn ac_indicator(state: &BatteryState) -> (&'static str, Color) {
+    match &state.psr {
+        None => ("AC: ...", common::palette::LABEL),
+        Some(Err(_)) => ("AC: ?", common::palette::FAILURE),
+        Some(Ok(PsrReturn {
+            power_source: PowerSource::Online,
+        })) => ("AC: Online", common::palette::SUCCESS),
+        Some(Ok(_)) if psr_contradicts_bst(state) => ("AC: Offline?", tailwind::AMBER.c400),
+        Some(Ok(_)) => ("AC: Offline", common::palette::LABEL),
     }
 }
 
@@ -213,12 +265,25 @@ impl Battery {
         let [state_area, gauge_area, details_area] =
             Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(0)]).areas(inner);
 
-        Line::from(vec![
+        let (ac_str, ac_color) = ac_indicator(bat);
+        let ac_span = Span::styled(ac_str, Style::default().fg(ac_color).bold());
+        let mut state_line = Line::from(vec![
             Span::styled(state_str, Style::default().fg(state_color).bold()),
             Span::raw("  "),
             Span::styled(format!("{bat_pct}%"), Style::default().fg(Color::White).bold()),
-        ])
-        .render(state_area, buf);
+        ]);
+        let gauge_area = if state_line.width() + 2 + ac_span.width() > usize::from(state_area.width) {
+            let [gauge_area, ac_area] =
+                Layout::horizontal([Constraint::Min(0), Constraint::Length(ac_span.width() as u16)])
+                    .spacing(1)
+                    .areas(gauge_area);
+            Line::from(ac_span).render(ac_area, buf);
+            gauge_area
+        } else {
+            state_line.spans.extend([Span::raw("  "), ac_span]);
+            gauge_area
+        };
+        state_line.render(state_area, buf);
 
         let gauge_color = bat_gauge_color(
             bat.bst.battery_remaining_capacity,
@@ -352,11 +417,13 @@ impl Battery {
         let pct = bat_percent(bat.bst.battery_remaining_capacity, bat.bix.design_capacity);
         let cap_str = power_unit_as_capacity_str(bat.bix.power_unit);
         let rate_str = power_unit_as_rate_str(bat.bix.power_unit);
+        let (ac_str, ac_color) = ac_indicator(bat);
 
         let block = Block::bordered()
             .title(Line::from(vec![
                 Span::styled(state_str, Style::default().fg(state_color).bold()),
                 Span::styled(format!("  {pct}%"), Style::default().fg(Color::White).bold()),
+                Span::styled(format!("  {ac_str}"), Style::default().fg(ac_color).bold()),
             ]))
             .border_style(tailwind::SKY.c600);
         let inner = block.inner(area);
@@ -581,6 +648,11 @@ mod tests {
                 ..Default::default()
             })
         }
+        fn get_psr(&self) -> color_eyre::Result<PsrReturn> {
+            Ok(PsrReturn {
+                power_source: PowerSource::Online,
+            })
+        }
         fn set_btp(&self, _: u32) -> color_eyre::Result<()> {
             Ok(())
         }
@@ -634,6 +706,9 @@ mod tests {
             Err(eyre!("test error"))
         }
         fn get_bix(&self) -> color_eyre::Result<BixFixedStrings> {
+            Err(eyre!("test error"))
+        }
+        fn get_psr(&self) -> color_eyre::Result<PsrReturn> {
             Err(eyre!("test error"))
         }
         fn set_btp(&self, _: u32) -> color_eyre::Result<()> {
@@ -720,6 +795,55 @@ mod tests {
         poll_bix(&mut state, &ErrSource);
         assert!(!state.bix_success);
         assert_eq!(state.bix.design_capacity, 9999);
+    }
+
+    // ── poll_psr ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn poll_psr_stores_value_on_ok() {
+        let mut state = BatteryState::default();
+        poll_psr(&mut state, &OkSource);
+        assert!(matches!(
+            state.psr,
+            Some(Ok(PsrReturn {
+                power_source: PowerSource::Online
+            }))
+        ));
+    }
+
+    /// Unlike BST, a failed PSR read replaces the previous value so a stale
+    /// Online/Offline is never shown.
+    #[test]
+    fn poll_psr_replaces_value_on_err() {
+        let mut state = BatteryState::default();
+        poll_psr(&mut state, &OkSource);
+        poll_psr(&mut state, &ErrSource);
+        assert!(matches!(state.psr, Some(Err(_))));
+    }
+
+    // ── ac_indicator ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn ac_indicator_states() {
+        let mut state = BatteryState::default();
+        assert_eq!(ac_indicator(&state).0, "AC: ...");
+
+        state.psr = Some(Err(eyre!("test error")));
+        assert_eq!(ac_indicator(&state).0, "AC: ?");
+
+        state.psr = Some(Ok(PsrReturn {
+            power_source: PowerSource::Online,
+        }));
+        assert_eq!(ac_indicator(&state).0, "AC: Online");
+
+        state.psr = Some(Ok(PsrReturn {
+            power_source: PowerSource::Offline,
+        }));
+        assert_eq!(ac_indicator(&state).0, "AC: Offline");
+
+        state.bst_success = true;
+        state.bst.battery_state = BatteryStateFlag::CHARGING;
+        assert_eq!(ac_indicator(&state).0, "AC: Offline?");
     }
 
     // ── format helpers ───────────────────────────────────────────────────────

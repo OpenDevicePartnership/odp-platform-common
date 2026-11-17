@@ -2,7 +2,7 @@
 
 use std::cell::Cell;
 
-use battery_service_interface::{BixFixedStrings, BstReturn};
+use battery_service_interface::{BixFixedStrings, BstReturn, PsrReturn};
 use ec_test_lib::{BatterySource, ErrorKind, ErrorType, RtcSource, ThermalSource, Threshold, mock::Mock};
 use ec_test_script::run_script;
 use time_alarm_service_interface::{
@@ -117,6 +117,9 @@ impl BatterySource for SetRealTimeFailure {
         unreachable!()
     }
     fn get_bix(&self) -> Result<BixFixedStrings, Self::Error> {
+        unreachable!()
+    }
+    fn get_psr(&self) -> Result<PsrReturn, Self::Error> {
         unreachable!()
     }
     fn set_btp(&self, _: u32) -> Result<(), Self::Error> {

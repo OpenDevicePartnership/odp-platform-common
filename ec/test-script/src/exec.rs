@@ -1,7 +1,7 @@
 //! Statement executor: dispatch a parsed [`Stmt`] against a [`Source`].
 //!
 //! Method returns are converted to [`Value`]s (numbers, bools, structs)
-//! so the same dotted-path syntax can reach individual battery/BIX
+//! so the same dotted-path syntax can reach individual battery/BIX/PSR
 //! fields, bitfield accessors on `TimeAlarmDeviceCapabilities` /
 //! `TimerStatus`, and the timestamp wrapped inside `AcpiTimestamp`.
 //!
@@ -13,7 +13,7 @@ use crate::parser::{Call, Method, Operand, Stmt, Threshold, Verb};
 use crate::runner::{Outcome, Runner};
 use crate::value::Value;
 use crate::verbs;
-use battery_service_interface::{BixFixedStrings, BstReturn};
+use battery_service_interface::{BixFixedStrings, BstReturn, PsrReturn};
 use ec_test_lib::{BatterySource, RtcSource, Source, ThermalSource};
 use time_alarm_service_interface::{
     AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
@@ -123,6 +123,7 @@ fn invoke<S: Source>(s: &S, m: &Method, env: &Env) -> Result<Value, String> {
 
         Method::GetBst => BatterySource::get_bst(s).map(bst_to_value).map_err(err),
         Method::GetBix => BatterySource::get_bix(s).map(bix_to_value).map_err(err),
+        Method::GetPsr => BatterySource::get_psr(s).map(psr_to_value).map_err(err),
         Method::SetBtp(v) => BatterySource::set_btp(s, u32_arg(v, env)?)
             .map(|()| Value::Unit)
             .map_err(err),
@@ -208,6 +209,10 @@ fn bix_to_value(b: BixFixedStrings) -> Value {
             Value::Num(b.battery_capacity_granularity_2 as f64),
         ),
     ])
+}
+
+fn psr_to_value(p: PsrReturn) -> Value {
+    Value::Struct(vec![("power_source".into(), Value::Num(p.power_source as u32 as f64))])
 }
 
 fn caps_to_value(c: TimeAlarmDeviceCapabilities) -> Value {
@@ -410,7 +415,7 @@ fn apply_value_verb(verb: &Verb, value: &Value, resolve: &dyn Fn(&Operand) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use battery_service_interface::BatteryState;
+    use battery_service_interface::{BatteryState, PowerSource};
 
     #[test]
     fn bst_to_value_projects_numeric_fields() {
@@ -431,6 +436,17 @@ mod tests {
                 value.project(&[field.into()]).unwrap().as_num().unwrap(),
                 expected,
                 "{field}"
+            );
+        }
+    }
+
+    #[test]
+    fn psr_to_value_projects_power_source() {
+        for (power_source, expected) in [(PowerSource::Offline, 0.0), (PowerSource::Online, 1.0)] {
+            let value = psr_to_value(PsrReturn { power_source });
+            assert_eq!(
+                value.project(&["power_source".into()]).unwrap().as_num().unwrap(),
+                expected
             );
         }
     }

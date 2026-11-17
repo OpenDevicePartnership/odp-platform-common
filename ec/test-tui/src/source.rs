@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use battery_service_interface::{BixFixedStrings, BstReturn};
+use battery_service_interface::{BixFixedStrings, BstReturn, PsrReturn};
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
 use ec_test_lib::Threshold;
@@ -29,6 +29,7 @@ pub(crate) trait DynSource: Send + Sync {
     // Battery
     fn get_bst(&self) -> Result<BstReturn>;
     fn get_bix(&self) -> Result<BixFixedStrings>;
+    fn get_psr(&self) -> Result<PsrReturn>;
     fn set_btp(&self, trippoint: u32) -> Result<()>;
 
     // Thermal
@@ -65,6 +66,9 @@ where
     }
     fn get_bix(&self) -> Result<BixFixedStrings> {
         ec_test_lib::BatterySource::get_bix(self).map_err(Into::into)
+    }
+    fn get_psr(&self) -> Result<PsrReturn> {
+        ec_test_lib::BatterySource::get_psr(self).map_err(Into::into)
     }
     fn set_btp(&self, trippoint: u32) -> Result<()> {
         ec_test_lib::BatterySource::set_btp(self, trippoint).map_err(Into::into)

@@ -1,5 +1,5 @@
 use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, UcsiSource, common};
-use battery_service_interface::{BixFixedStrings, BstReturn, Btp};
+use battery_service_interface::{BixFixedStrings, BstReturn, Btp, PsrReturn};
 use battery_service_relay::{AcpiBatteryRequest, AcpiBatteryResponse};
 use embedded_services::relay::SerializableMessage;
 use mctp_rs::{
@@ -429,6 +429,19 @@ impl BatterySource for Serial {
 
         if let AcpiBatteryResponse::GetBix { bix } = response {
             Ok(bix)
+        } else {
+            Err(Error::UnexpectedResponse)
+        }
+    }
+
+    fn get_psr(&self) -> Result<PsrReturn, Self::Error> {
+        let request = AcpiBatteryRequest::GetPsr {
+            battery_id: BATTERY_INSTANCE,
+        };
+        let response = self.send(Destination::Battery, request)?;
+
+        if let AcpiBatteryResponse::GetPsr { psr } = response {
+            Ok(psr)
         } else {
             Err(Error::UnexpectedResponse)
         }

@@ -1,4 +1,4 @@
-use battery_service_interface::{BixFixedStrings, BstReturn};
+use battery_service_interface::{BixFixedStrings, BstReturn, PsrReturn};
 use ec_test_lib::ucsi::UcsiSnapshot;
 use time_alarm_service_interface::{
     AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
@@ -15,7 +15,7 @@ pub type Fetched<T> = Option<color_eyre::Result<T>>;
 
 // ── Battery ──────────────────────────────────────────────────────────────────
 
-/// Live battery state (BST + BIX + graph samples).
+/// Live battery state (BST + BIX + PSR + graph samples).
 ///
 /// Written exclusively by the background [`crate::updater::Updater`];
 /// read by the battery UI module for rendering.
@@ -24,6 +24,7 @@ pub struct BatteryState {
     pub bst_success: bool,
     pub bix: BixFixedStrings,
     pub bix_success: bool,
+    pub psr: Fetched<PsrReturn>,
     pub samples: SampleBuf<u32, BATTERY_MAX_SAMPLES>,
     pub t_min: usize,
     /// Last trip-point value set by the user via the BTP input box.
@@ -39,6 +40,7 @@ impl Default for BatteryState {
             bst_success: false,
             bix: Default::default(),
             bix_success: false,
+            psr: None,
             samples: Default::default(),
             t_min: 0,
             btp: 0,

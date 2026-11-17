@@ -29,6 +29,8 @@ battery.get_bix                         => is_ok;
 battery.get_bix.design_voltage          => in_range 1000..=30000;
 battery.get_bst                         => is_ok;
 battery.get_bst.battery_present_voltage => in_range 1000..=30000;
+battery.get_psr                         => is_ok;
+battery.get_psr.power_source            => in_range 0..=1;
 battery.set_btp(15000)                  => is_ok;
 
 # --- rtc ---

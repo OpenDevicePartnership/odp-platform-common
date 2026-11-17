@@ -1,6 +1,6 @@
 // Multiple source features may be enabled simultaneously; the binary selects one at runtime.
 
-use battery_service_interface::{BixFixedStrings, BstReturn};
+use battery_service_interface::{BixFixedStrings, BstReturn, PsrReturn};
 use time_alarm_service_interface::{
     AcpiTimerId, AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
 };
@@ -113,13 +113,20 @@ pub trait ThermalSource: ErrorType {
     fn set_rpm(&self, rpm: f64) -> Result<(), Self::Error>;
 }
 
-/// Trait for battery data sources (BST, BIX, BTP).
+/// Trait for battery data sources (BST, BIX, PSR, BTP).
 pub trait BatterySource: ErrorType {
     /// Get battery BST data
     fn get_bst(&self) -> Result<BstReturn, Self::Error>;
 
     /// Get battery BIX data
     fn get_bix(&self) -> Result<BixFixedStrings, Self::Error>;
+
+    /// Get the power source state - see _PSR
+    ///
+    /// Offline is also what some firmware paths report when the request
+    /// fails (e.g. the ACPI `_PSR` method), so a lone Offline reading does
+    /// not prove the PSR path works end to end.
+    fn get_psr(&self) -> Result<PsrReturn, Self::Error>;
 
     /// Set battery trippoint
     fn set_btp(&self, trippoint: u32) -> Result<(), Self::Error>;
@@ -207,6 +214,9 @@ impl<T: BatterySource> BatterySource for Arc<T> {
     }
     fn get_bix(&self) -> Result<BixFixedStrings, Self::Error> {
         self.as_ref().get_bix()
+    }
+    fn get_psr(&self) -> Result<PsrReturn, Self::Error> {
+        self.as_ref().get_psr()
     }
     fn set_btp(&self, trippoint: u32) -> Result<(), Self::Error> {
         self.as_ref().set_btp(trippoint)
