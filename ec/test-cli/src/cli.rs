@@ -136,6 +136,7 @@ pub enum ThermalCommand {
 pub enum BatteryCommand {
     GetBst,
     GetBix,
+    GetPsr,
     SetBtp { trippoint: u32 },
 }
 

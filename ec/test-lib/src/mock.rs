@@ -1,7 +1,8 @@
 use crate::ucsi::{PowerRole, UcsiCapability, UcsiConnectorCapability, UcsiConnectorStatus, UcsiSnapshot};
 use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, UcsiSource};
 use battery_service_interface::{
-    BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit,
+    BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerSource, PowerUnit,
+    PsrReturn,
 };
 use embedded_mcu_hal::time::{Datetime, DatetimeFields, Month};
 use embedded_usb_pd::ucsi::v1_2::lpm::get_connector_capability::OperationModeFlags;
@@ -158,7 +159,6 @@ type FanState = Ramp;
 
 /// Battery charge/discharge simulation state.
 struct BstState {
-    /// 2 = charging, 1 = discharging
     state: u32,
     capacity: u32,
 }
@@ -204,7 +204,10 @@ impl Mock {
             current_temp_c: Mutex::new(IDLE_TEMP),
             temp_state: Mutex::new(TempState::new()),
             fan_state: Mutex::new(Ramp::new(0.0)),
-            bst_state: Mutex::new(BstState { state: 2, capacity: 0 }),
+            bst_state: Mutex::new(BstState {
+                state: BatteryState::CHARGING.bits(),
+                capacity: 0,
+            }),
             thresholds: Mutex::new(MockThresholds::default()),
         }
     }
@@ -296,16 +299,16 @@ impl BatterySource for Mock {
         let mut guard = self.bst_state.lock().unwrap();
         let BstState { state, capacity } = &mut *guard;
 
-        if *state == 2 {
+        if *state == BatteryState::CHARGING.bits() {
             *capacity += RATE;
             if *capacity > MAX_CAPACITY {
                 *capacity = MAX_CAPACITY;
-                *state = 1;
+                *state = BatteryState::DISCHARGING.bits();
             }
         } else {
             *capacity = capacity.saturating_sub(RATE);
             if *capacity < RATE {
-                *state = 2;
+                *state = BatteryState::CHARGING.bits();
             }
         }
 
@@ -340,6 +343,19 @@ impl BatterySource for Mock {
             battery_type: [b'L', b'i', b'-', b'o', b'n', 0, 0, 0],
             oem_info: [b'B', b'a', b't', b'B', b'r', b'o', b's', 0],
             battery_swapping_capability: BatterySwapCapability::ColdSwappable,
+        })
+    }
+
+    fn get_psr(&self) -> Result<PsrReturn, Self::Error> {
+        // The simulated adapter is plugged in exactly while the battery charges.
+        // Reads the state `get_bst` left behind without advancing the simulation.
+        let charging = self.bst_state.lock().unwrap().state == BatteryState::CHARGING.bits();
+        Ok(PsrReturn {
+            power_source: if charging {
+                PowerSource::Online
+            } else {
+                PowerSource::Offline
+            },
         })
     }
 
@@ -513,5 +529,16 @@ mod tests {
     fn get_snapshot_accepts_connector_one() {
         let snapshot = Mock::new().get_snapshot(1).expect("connector 1 snapshot");
         assert_eq!(snapshot.version, 0x0120);
+    }
+
+    /// The simulated adapter is online while charging and offline while discharging.
+    #[test]
+    fn get_psr_follows_charge_state() {
+        let mock = Mock::new();
+        assert!(matches!(mock.get_psr().unwrap().power_source, PowerSource::Online));
+
+        let discharging = (0..100).any(|_| !mock.get_bst().unwrap().battery_state.contains(BatteryState::CHARGING));
+        assert!(discharging, "mock never left the charging phase");
+        assert!(matches!(mock.get_psr().unwrap().power_source, PowerSource::Offline));
     }
 }

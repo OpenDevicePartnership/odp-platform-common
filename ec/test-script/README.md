@@ -157,12 +157,15 @@ parse error.
 |-----------------------|-------------------------------------------|
 | `battery.get_bst`     | `Struct` (BST fields, see below)          |
 | `battery.get_bix`     | `Struct` (BIX fields, see below)          |
+| `battery.get_psr`     | `Struct` (PSR fields, see below)          |
 | `battery.set_btp(<n>)`| `Unit`                                    |
 
 **BST fields** (project with `.`):
 `battery_state` (numeric raw bitmask),
 `battery_present_rate`, `battery_remaining_capacity`,
 `battery_present_voltage`.
+
+**PSR fields:** `power_source` (`0` = Offline, `1` = Online).
 
 **BIX fields:** `revision`, `design_capacity`,
 `last_full_charge_capacity`, `design_voltage`,
@@ -438,6 +441,10 @@ for when adapting them:
   `design_capacity`, `last_full_charge_capacity`, `design_cap_of_warning`,
   and `design_cap_of_low` return `0` or `0xDEADBEEF`. The bundled
   `battery.test` skips these.
+* **A broken PSR path can still read Offline.** ACPI `_PSR` returns `0` when
+  its FF-A request fails, and an EC that isn't wired to a power policy always
+  reports Offline. The bundled scripts only assert `in_range 0..=1`; assert
+  `eq 1` in a script that runs with the adapter plugged in.
 
 ## See also
 

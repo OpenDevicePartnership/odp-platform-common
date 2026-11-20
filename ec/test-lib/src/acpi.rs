@@ -1,7 +1,8 @@
 use crate::ucsi::{self, UcsiSnapshot};
 use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, UcsiSource, common};
 use battery_service_interface::{
-    BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit,
+    BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerSource, PowerUnit,
+    PsrReturn,
 };
 use scopeguard::defer;
 use time_alarm_service_interface::{
@@ -760,6 +761,13 @@ impl BatterySource for Acpi {
                     .map_err(|_| Error::InvalidData)?,
             })
         }
+    }
+
+    fn get_psr(&self) -> Result<PsrReturn, Self::Error> {
+        let power_source = self.evaluate_u32("\\_SB.ECT0.TPSR", None)?;
+        Ok(PsrReturn {
+            power_source: PowerSource::try_from(power_source).map_err(|_| Error::InvalidData)?,
+        })
     }
 
     fn set_btp(&self, trippoint: u32) -> Result<(), Self::Error> {

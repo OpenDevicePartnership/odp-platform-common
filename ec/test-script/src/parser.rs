@@ -76,6 +76,7 @@ pub enum Method {
     // Battery
     GetBst,
     GetBix,
+    GetPsr,
     SetBtp(Operand),
     // Rtc
     GetCapabilities,
@@ -368,6 +369,10 @@ fn build_method(target: Target, name: &str, arg: Option<&str>) -> Result<Method,
         (Target::Battery, "get_bix") => {
             need_no_arg(name, arg)?;
             Ok(Method::GetBix)
+        }
+        (Target::Battery, "get_psr") => {
+            need_no_arg(name, arg)?;
+            Ok(Method::GetPsr)
         }
         (Target::Battery, "set_btp") => {
             let a = need_arg(name, arg)?;

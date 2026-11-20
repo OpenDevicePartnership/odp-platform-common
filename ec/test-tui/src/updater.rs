@@ -5,7 +5,7 @@ use ec_test_lib::Threshold;
 use time_alarm_service_interface::AcpiTimerId;
 use tracing::{debug, info, trace, warn};
 
-use crate::battery::{poll_bix, poll_bst};
+use crate::battery::{poll_bix, poll_bst, poll_psr, psr_contradicts_bst};
 use crate::source::DynSource;
 use crate::state::{
     BatteryCommand, BatteryState, FanRpmBounds, FanStateLevels, RtcState, SystemState, ThermalCommand, ThermalState,
@@ -14,12 +14,13 @@ use crate::state::{
 
 // ── Battery ───────────────────────────────────────────────────────────────────
 
-/// Polls BST/BIX and records a graph sample on every tick.
+/// Polls BST/BIX/PSR and records a graph sample on every tick.
 pub struct BatteryUpdater {
     source: Arc<dyn DynSource>,
     state: Arc<RwLock<BatteryState>>,
     battery_rx: mpsc::Receiver<BatteryCommand>,
     bix_cached: bool,
+    psr_contradicts_bst: bool,
 }
 
 impl BatteryUpdater {
@@ -33,6 +34,7 @@ impl BatteryUpdater {
             state,
             battery_rx,
             bix_cached: false,
+            psr_contradicts_bst: false,
         }
     }
 
@@ -79,6 +81,14 @@ impl BatteryUpdater {
             s.samples.insert(cap);
             s.t_min += 1;
         }
+
+        poll_psr(&mut s, self.source.as_ref());
+
+        let contradicts = psr_contradicts_bst(&s);
+        if contradicts && !self.psr_contradicts_bst {
+            warn!("PSR reports Offline while BST reports charging; the PSR path may be falling back to Offline");
+        }
+        self.psr_contradicts_bst = contradicts;
     }
 
     /// Run forever, updating once immediately then sleeping `interval` between
@@ -453,5 +463,33 @@ mod ucsi_tests {
         ] {
             assert!(text.contains(expect), "missing {expect:?} in rendered output:\n{text}");
         }
+    }
+}
+
+#[cfg(test)]
+mod battery_tests {
+    use super::*;
+    use crate::battery::Battery;
+    use ec_test_lib::mock::Mock;
+    use ratatui::{buffer::Buffer, layout::Rect};
+
+    /// End-to-end: Mock source → updater PSR read → rendered AC indicator.
+    #[test]
+    fn mock_psr_renders_ac_indicator() {
+        let source: Arc<dyn DynSource> = Arc::new(Mock::default());
+        let state = Arc::new(RwLock::new(BatteryState::default()));
+        let (cmd_tx, cmd_rx) = mpsc::channel();
+        BatteryUpdater::new(source, Arc::clone(&state), cmd_rx).update();
+
+        let area = Rect::new(0, 0, 80, 24);
+        let mut buf = Buffer::empty(area);
+        Battery::new(cmd_tx).render(&state.read().unwrap(), area, &mut buf);
+        let text: String = buf.content.iter().map(|c| c.symbol()).collect();
+
+        // A fresh Mock is charging, so its simulated adapter is online.
+        assert!(
+            text.contains("AC: Online"),
+            "missing AC indicator in rendered output:\n{text}"
+        );
     }
 }

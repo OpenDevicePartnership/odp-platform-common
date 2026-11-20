@@ -562,6 +562,7 @@ impl SelectedTab {
 mod tests {
     use super::*;
     use crate::state::{RtcState, TimerData};
+    use battery_service_interface::{BatteryState as BatteryStateFlag, PowerSource, PsrReturn};
     use ratatui::{buffer::Buffer, layout::Rect};
     use time_alarm_service_interface::AlarmTimerSeconds;
 
@@ -585,6 +586,73 @@ mod tests {
         (0..buf.area.height)
             .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect::<String>())
             .collect()
+    }
+
+    #[test]
+    fn dashboard_shows_battery_ac_status_at_narrow_widths() {
+        for (charging, psr, expected) in [
+            (
+                true,
+                Some(Ok(PsrReturn {
+                    power_source: PowerSource::Online,
+                })),
+                "AC: Online",
+            ),
+            (
+                false,
+                Some(Ok(PsrReturn {
+                    power_source: PowerSource::Offline,
+                })),
+                "AC: Offline",
+            ),
+            (
+                true,
+                Some(Ok(PsrReturn {
+                    power_source: PowerSource::Offline,
+                })),
+                "AC: Offline?",
+            ),
+            (true, Some(Err(color_eyre::eyre::eyre!("PSR read failed"))), "AC: ?"),
+            (false, None, "AC: ..."),
+        ] {
+            let app = test_app(RtcState::default());
+            {
+                let mut battery = app.battery_state.write().unwrap();
+                battery.bst_success = true;
+                battery.bix_success = true;
+                battery.bix.design_capacity = 10000;
+                battery.bix.last_full_charge_capacity = 9000;
+                battery.bst.battery_remaining_capacity = 10000;
+                battery.bst.battery_state = if charging {
+                    BatteryStateFlag::CHARGING
+                } else {
+                    BatteryStateFlag::DISCHARGING
+                };
+                battery.psr = psr;
+            }
+
+            for width in [80, 100, 120] {
+                let area = Rect::new(0, 0, width, 24);
+                let mut buf = Buffer::empty(area);
+                (&app).render(area, &mut buf);
+                let rows = rows(&buf);
+                let text = rows.join("\n");
+                assert!(
+                    text.contains(expected),
+                    "{expected} clipped at {width} columns:\n{text}"
+                );
+                let charge_state = if charging { "Charging" } else { "Discharging" };
+                assert!(
+                    rows.iter()
+                        .any(|row| row.contains(charge_state) && row.contains("100%")),
+                    "charging status clipped at {width} columns:\n{text}"
+                );
+                assert!(
+                    rows.iter().any(|row| row.contains("Health") && row.contains("90%")),
+                    "battery details clipped at {width} columns:\n{text}"
+                );
+            }
+        }
     }
 
     /// At the minimum 80x24 terminal the dashboard must still show the RTC

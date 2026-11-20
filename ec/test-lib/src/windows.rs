@@ -2,7 +2,7 @@
 use crate::mock::Mock;
 use crate::ucsi::UcsiSnapshot;
 use crate::{BatterySource, ErrorType, RtcSource, ThermalSource, Threshold, UcsiSource};
-use battery_service_interface::{BixFixedStrings, BstReturn};
+use battery_service_interface::{BixFixedStrings, BstReturn, PsrReturn};
 use scopeguard::defer;
 use time_alarm_service_interface::{
     AcpiTimerId, AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
@@ -331,6 +331,10 @@ impl BatterySource for Windows {
 
     fn get_bix(&self) -> Result<BixFixedStrings, Error> {
         BatterySource::get_bix(&self.mock).map_err(Into::into)
+    }
+
+    fn get_psr(&self) -> Result<PsrReturn, Error> {
+        BatterySource::get_psr(&self.mock).map_err(Into::into)
     }
 
     fn set_btp(&self, trippoint: u32) -> Result<(), Error> {

@@ -60,3 +60,13 @@ impl std::fmt::Debug for DebugBixFixedStrings<'_> {
             .finish()
     }
 }
+
+pub struct DebugPsrReturn<'a>(pub &'a battery_service_interface::PsrReturn);
+
+impl std::fmt::Debug for DebugPsrReturn<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PsrReturn")
+            .field("power_source", &(self.0.power_source as u32))
+            .finish()
+    }
+}

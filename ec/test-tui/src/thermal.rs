@@ -560,6 +560,9 @@ mod tests {
         fn get_bix(&self) -> color_eyre::Result<battery_service_interface::BixFixedStrings> {
             Err(eyre!("unused"))
         }
+        fn get_psr(&self) -> color_eyre::Result<battery_service_interface::PsrReturn> {
+            Err(eyre!("unused"))
+        }
         fn set_btp(&self, _: u32) -> color_eyre::Result<()> {
             Err(eyre!("unused"))
         }
@@ -613,6 +616,9 @@ mod tests {
             Err(eyre!("unused"))
         }
         fn get_bix(&self) -> color_eyre::Result<battery_service_interface::BixFixedStrings> {
+            Err(eyre!("unused"))
+        }
+        fn get_psr(&self) -> color_eyre::Result<battery_service_interface::PsrReturn> {
             Err(eyre!("unused"))
         }
         fn set_btp(&self, _: u32) -> color_eyre::Result<()> {
