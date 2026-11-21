@@ -6,3 +6,4 @@
 # Ignore any component build artifacts
 **/build/
 **/target/
+**/__pycache__/
