@@ -2,3 +2,7 @@
 # not text. Mark as binary so diff viewers stop rendering raw bytes as
 # garbled glyphs.
 *.depex binary
+
+# Shell scripts are executed by Linux CI and by WSL on developer machines, both
+# of which reject a CRLF shebang. Keep them LF even where autocrlf is on.
+*.sh text eol=lf
