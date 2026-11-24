@@ -6,6 +6,12 @@ who = "Felipe Balbi <febalbi@microsoft.com>"
 criteria = "safe-to-run"
 version = "0.1.0"
 
+[[audits.heapless]]
+who = "Felipe Balbi <felipe.balbi@microsoft.com>"
+criteria = "safe-to-deploy"
+delta = "0.9.3 -> 0.9.4"
+notes = "Safe-to-deploy approved by Felipe Balbi based on his manual review of the 0.9.3 to 0.9.4 changes."
+
 [[audits.supports-unicode]]
 who = "Felipe Balbi <febalbi@microsoft.com>"
 criteria = "safe-to-deploy"
